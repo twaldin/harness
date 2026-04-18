@@ -30,10 +30,25 @@ print(result.ok, result.exit_code, result.cost_usd, result.tokens_in)
 
 `instructions` is written to the per-harness file inside `workdir`:
 
-| harness     | instructions filename |
-| ----------- | --------------------- |
-| claude-code | `CLAUDE.md`           |
-| opencode    | `AGENTS.md`           |
+| harness     | instructions filename     | notes                                                    |
+| ----------- | ------------------------- | -------------------------------------------------------- |
+| claude-code | `CLAUDE.md`               |                                                          |
+| opencode    | `AGENTS.md`               |                                                          |
+| codex       | `AGENTS.md`               |                                                          |
+| gemini      | `GEMINI.md`               |                                                          |
+| aider       | `.aider.conf.yml`         | aider treats this as YAML config, not free prompt        |
+| swe-agent   | (folded into prompt)      | mini-swe-agent has no instructions file convention       |
+
+## Workdir / worktrees
+
+`harness` does **not** create or manage git worktrees. `workdir` is opaque — the agent runs there and that's all the library cares about. Set it up however your consumer wants:
+
+- a fresh `git clone` into a tmpdir (agentelo-style)
+- a `git worktree add` (flt-style)
+- the user's existing checkout (interactive use)
+- a Docker volume mount (CI)
+
+The opt-in `--worktree` features in some CLIs (e.g. `claude --worktree` creating `.claude/worktrees/`) are intentionally **not** wrapped — they pollute the project tree and limit consumer flexibility. Consumers that want worktrees should call `git worktree add` themselves and pass the resulting path.
 
 ## CLI use
 
@@ -60,4 +75,11 @@ Add a new adapter by subclassing `harness.base.Adapter` and registering it in `h
 
 ## Status
 
-v0.1 — claude-code + opencode only. codex / gemini / aider / swe-agent ports pending.
+v0.2 — all six adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`.
+
+Pending:
+
+- Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).
+- Vertex AI / GCloud token plumbing (currently consumer-supplied via `env`).
+- Wire as a hone mutator type (replaces hone's `ClaudeCodeMutator`).
+- Wire as the spawn backend for flt and agentelo (TS → Python subprocess boundary; design TBD).

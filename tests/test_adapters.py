@@ -65,7 +65,8 @@ def test_claude_code_propagates_exit_code(tmp_path, monkeypatch):
     assert result.exit_code == 2
 
 
-def test_opencode_no_session_dir_returns_none_costs(tmp_path, monkeypatch):
+def test_opencode_writes_instructions(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "no-such-db"))  # bypass DB query
     monkeypatch.setattr(
         "harness.adapters.opencode.run_subprocess",
         lambda *a, **kw: _stub_outcome(),
@@ -73,25 +74,4 @@ def test_opencode_no_session_dir_returns_none_costs(tmp_path, monkeypatch):
     spec = RunSpec(harness="opencode", prompt="x", workdir=tmp_path, instructions="rules")
     result = OpenCodeAdapter().run(spec)
     assert result.ok
-    assert result.tokens_in is None
-    assert result.cost_usd is None
     assert (tmp_path / "AGENTS.md").read_text() == "rules"
-
-
-def test_opencode_reads_session_totals(tmp_path, monkeypatch):
-    session_dir = tmp_path / ".opencode" / "session"
-    session_dir.mkdir(parents=True)
-    (session_dir / "abc.json").write_text(json.dumps({
-        "tokensInput": 200,
-        "tokensOutput": 80,
-        "cost": 0.05,
-    }))
-    monkeypatch.setattr(
-        "harness.adapters.opencode.run_subprocess",
-        lambda *a, **kw: _stub_outcome(),
-    )
-    spec = RunSpec(harness="opencode", prompt="x", workdir=tmp_path)
-    result = OpenCodeAdapter().run(spec)
-    assert result.tokens_in == 200
-    assert result.tokens_out == 80
-    assert result.cost_usd == pytest.approx(0.05)

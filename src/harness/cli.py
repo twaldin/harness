@@ -17,6 +17,8 @@ console = Console(stderr=True)
 @app.command("list")
 def list_cmd() -> None:
     """List registered harness adapters."""
+    import harness.adapters  # noqa: F401 — side-effect import populates registry
+
     for name in list_adapters():
         typer.echo(name)
 

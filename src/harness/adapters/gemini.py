@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import json
 
-from harness._subproc import run_subprocess, write_instructions
-from harness.base import Adapter, RunResult, RunSpec
+from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec
 
 
 class GeminiAdapter(Adapter):
@@ -17,41 +17,42 @@ class GeminiAdapter(Adapter):
 
     DEFAULT_MODEL = "gemini-2.5-pro"
 
-    def run(self, spec: RunSpec) -> RunResult:
+    def build_command(self, spec: RunSpec) -> BuildCommand:
         model = spec.model or self.DEFAULT_MODEL
-        write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
+        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
+        args = ["-p", spec.prompt, "-y", "-m", model, "--output-format", "json"]
+        return BuildCommand(cmd="gemini", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-        cmd = [
-            "gemini",
-            "-p",
-            spec.prompt,
-            "-y",
-            "-m",
-            model,
-            "--output-format",
-            "json",
-        ]
-        outcome = run_subprocess(
-            cmd,
-            cwd=spec.workdir,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env=spec.env,
-        )
-
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
         tokens_in, tokens_out, raw = _parse_gemini_stats(outcome.stdout)
+        return {
+            "cost_usd": None,
+            "tokens_in": tokens_in or None,
+            "tokens_out": tokens_out or None,
+            "raw": raw,
+        }
 
+    def run(self, spec: RunSpec) -> RunResult:
+        bc = self.build_command(spec)
+        outcome = run_subprocess(
+            [bc.cmd] + bc.args,
+            cwd=bc.cwd,
+            timeout_seconds=spec.timeout_seconds,
+            extra_env={**bc.env, **spec.env},
+        )
+        parsed = self.parse_output(spec, outcome)
         return RunResult(
             harness=self.name,
-            model=model,
+            model=spec.model or self.DEFAULT_MODEL,
             exit_code=outcome.exit_code,
             duration_seconds=outcome.duration_seconds,
             stdout=outcome.stdout,
             stderr=outcome.stderr,
             timed_out=outcome.timed_out,
-            cost_usd=None,
-            tokens_in=tokens_in or None,
-            tokens_out=tokens_out or None,
-            raw=raw,
+            cost_usd=parsed.get("cost_usd"),
+            tokens_in=parsed.get("tokens_in"),
+            tokens_out=parsed.get("tokens_out"),
+            raw=parsed.get("raw"),
         )
 
 

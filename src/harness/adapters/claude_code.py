@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import json
 
-from harness._subproc import run_subprocess, write_instructions
-from harness.base import Adapter, RunResult, RunSpec
+from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec
 
 
 class ClaudeCodeAdapter(Adapter):
@@ -17,28 +17,18 @@ class ClaudeCodeAdapter(Adapter):
 
     DEFAULT_MODEL = "sonnet"
 
-    def run(self, spec: RunSpec) -> RunResult:
+    def build_command(self, spec: RunSpec) -> BuildCommand:
         model = spec.model or self.DEFAULT_MODEL
-        write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
-
-        cmd = [
-            "claude",
-            "-p",
-            spec.prompt,
-            "--model",
-            model,
-            "--output-format",
-            "json",
+        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
+        args = [
+            "-p", spec.prompt,
+            "--model", model,
+            "--output-format", "json",
             "--dangerously-skip-permissions",
         ]
-        outcome = run_subprocess(
-            cmd,
-            cwd=spec.workdir,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env=spec.env,
-        )
+        return BuildCommand(cmd="claude", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-        cost = tokens_in = tokens_out = None
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
         raw: dict | None = None
         if outcome.stdout.strip():
             try:
@@ -46,22 +36,34 @@ class ClaudeCodeAdapter(Adapter):
             except json.JSONDecodeError:
                 raw = None
 
+        cost = tokens_in = tokens_out = None
         if isinstance(raw, dict):
             usage = raw.get("usage") or {}
             tokens_in = usage.get("input_tokens")
             tokens_out = usage.get("output_tokens")
             cost = raw.get("total_cost_usd")
 
+        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": raw}
+
+    def run(self, spec: RunSpec) -> RunResult:
+        bc = self.build_command(spec)
+        outcome = run_subprocess(
+            [bc.cmd] + bc.args,
+            cwd=bc.cwd,
+            timeout_seconds=spec.timeout_seconds,
+            extra_env={**bc.env, **spec.env},
+        )
+        parsed = self.parse_output(spec, outcome)
         return RunResult(
             harness=self.name,
-            model=model,
+            model=spec.model or self.DEFAULT_MODEL,
             exit_code=outcome.exit_code,
             duration_seconds=outcome.duration_seconds,
             stdout=outcome.stdout,
             stderr=outcome.stderr,
             timed_out=outcome.timed_out,
-            cost_usd=cost,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            raw=raw,
+            cost_usd=parsed.get("cost_usd"),
+            tokens_in=parsed.get("tokens_in"),
+            tokens_out=parsed.get("tokens_out"),
+            raw=parsed.get("raw"),
         )

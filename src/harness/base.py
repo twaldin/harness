@@ -1,4 +1,4 @@
-"""Core types: RunSpec (input), RunResult (output), Adapter (ABC)."""
+"""Core types: RunSpec (input), BuildCommand (pre-exec), RunResult (output), Adapter (ABC)."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -37,6 +37,21 @@ class RunSpec:
 
 
 @dataclass
+class BuildCommand:
+    """What to invoke — without invoking it.
+
+    Returned by Adapter.build_command(). Writing the instructions file is a
+    side effect of build_command(), so the file exists before the CLI reads it.
+    """
+
+    cmd: str
+    args: list[str]
+    cwd: Path
+    env: dict[str, str]
+    instructions_file: Path | None
+
+
+@dataclass
 class RunResult:
     """Structured outcome of a single harness invocation."""
 
@@ -71,8 +86,48 @@ class Adapter(ABC):
     instructions_filename: str = ""
 
     @abstractmethod
+    def build_command(self, spec: RunSpec) -> BuildCommand:
+        """Build the subprocess command without executing it.
+
+        MAY write files (instructions, config) as a side effect.
+        MUST NOT fork a subprocess.
+        """
+
+    @abstractmethod
+    def parse_output(self, spec: RunSpec, outcome: object) -> dict:
+        """Parse adapter output after execution.
+
+        Returns dict with keys: cost_usd, tokens_in, tokens_out, raw.
+        MAY read files the CLI wrote (trajectory JSON, sqlite DB).
+        MUST NOT block on I/O > 5s.
+        """
+
     def run(self, spec: RunSpec) -> RunResult:
-        """Invoke the CLI for `spec` and return a parsed RunResult."""
+        """Full headless invocation: build_command + exec + parse_output."""
+        from harness._subproc import run_subprocess
+
+        bc = self.build_command(spec)
+        outcome = run_subprocess(
+            [bc.cmd] + bc.args,
+            cwd=bc.cwd,
+            timeout_seconds=spec.timeout_seconds,
+            extra_env={**bc.env, **spec.env},
+        )
+        parsed = self.parse_output(spec, outcome)
+        model: str | None = spec.model or getattr(self, "DEFAULT_MODEL", None)
+        return RunResult(
+            harness=self.name,
+            model=model,
+            exit_code=outcome.exit_code,
+            duration_seconds=outcome.duration_seconds,
+            stdout=outcome.stdout,
+            stderr=outcome.stderr,
+            timed_out=outcome.timed_out,
+            cost_usd=parsed.get("cost_usd"),
+            tokens_in=parsed.get("tokens_in"),
+            tokens_out=parsed.get("tokens_out"),
+            raw=parsed.get("raw"),
+        )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"{type(self).__name__}(name={self.name!r})"

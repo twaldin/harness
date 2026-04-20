@@ -36,7 +36,7 @@ jobs:
         run: bun test
 
       - name: Build
-        run: bun run build
+        run: bun build src/index.ts --outdir=dist --target=node
 
       - name: Verify version matches tag
         run: |

@@ -99,7 +99,8 @@ def _read_opencode_session_totals(
             SELECT
                 COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
                 COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
-                COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost
+                COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
+                COUNT(*)                                                 AS row_count
             FROM message
             WHERE session_id IN (
                 SELECT id FROM session
@@ -115,10 +116,11 @@ def _read_opencode_session_totals(
         return None, None, None
     conn.close()
 
-    if not row:
+    if not row or row[3] == 0:
+        # No matching session rows — null means "couldn't find data".
         return None, None, None
 
-    tokens_in = int(row[0]) if row[0] else None
-    tokens_out = int(row[1]) if row[1] else None
-    cost = float(row[2]) if row[2] else None
-    return tokens_in, tokens_out, cost
+    # At least one message row matched. Report sums as-is (0 means upstream
+    # didn't expose usage, e.g. OAuth-proxied subscription calls — distinct
+    # from null which means no session match).
+    return int(row[0]), int(row[1]), float(row[2])

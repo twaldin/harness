@@ -22,6 +22,7 @@ const codexAdapter: Adapter = {
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
     let tokensIn = 0
     let tokensOut = 0
+    let sawTurn = false
     for (const line of outcome.stdout.split('\n')) {
       const trimmed = line.trim()
       if (!trimmed.startsWith('{')) continue
@@ -34,6 +35,7 @@ const codexAdapter: Adapter = {
       if (event !== null && typeof event === 'object') {
         const obj = event as Record<string, unknown>
         if (obj['type'] === 'turn.completed') {
+          sawTurn = true
           const usage = (obj['usage'] as Record<string, unknown> | undefined) ?? {}
           tokensIn += Number(usage['input_tokens'] ?? 0)
           tokensOut += Number(usage['output_tokens'] ?? 0)
@@ -42,8 +44,8 @@ const codexAdapter: Adapter = {
     }
     return {
       costUsd: null,
-      tokensIn: tokensIn || null,
-      tokensOut: tokensOut || null,
+      tokensIn: sawTurn ? tokensIn : null,
+      tokensOut: sawTurn ? tokensOut : null,
       raw: null,
     }
   },

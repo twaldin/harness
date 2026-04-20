@@ -31,11 +31,11 @@ class CodexAdapter(Adapter):
         return BuildCommand(cmd="codex", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
-        tokens_in, tokens_out = _sum_turn_usage(outcome.stdout)
+        tokens_in, tokens_out, saw_turn = _sum_turn_usage(outcome.stdout)
         return {
             "cost_usd": None,
-            "tokens_in": tokens_in or None,
-            "tokens_out": tokens_out or None,
+            "tokens_in": tokens_in if saw_turn else None,
+            "tokens_out": tokens_out if saw_turn else None,
             "raw": None,
         }
 
@@ -63,8 +63,9 @@ class CodexAdapter(Adapter):
         )
 
 
-def _sum_turn_usage(stdout: str) -> tuple[int, int]:
+def _sum_turn_usage(stdout: str) -> tuple[int, int, bool]:
     tokens_in = tokens_out = 0
+    saw_turn = False
     for line in stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -74,7 +75,8 @@ def _sum_turn_usage(stdout: str) -> tuple[int, int]:
         except json.JSONDecodeError:
             continue
         if event.get("type") == "turn.completed":
+            saw_turn = True
             usage = event.get("usage") or {}
             tokens_in += int(usage.get("input_tokens") or 0)
             tokens_out += int(usage.get("output_tokens") or 0)
-    return tokens_in, tokens_out
+    return tokens_in, tokens_out, saw_turn

@@ -91,8 +91,14 @@ parseOutput(spec: RunSpec, outcome: SubprocOutcome): {
 
 // Where SubprocOutcome = { exitCode, durationSeconds, stdout, stderr, timedOut }
 
-// Full headless invocation — buildCommand + exec + parseOutput.
-run(spec: RunSpec): Promise<RunResult>  // async in ts, sync in py (returns RunResult directly)
+// Full headless invocation — buildCommand + exec + parseOutput. Blocks until complete.
+// py: synchronous (returns RunResult directly); ts: returns Promise<RunResult> (still blocks the awaiter)
+run(spec: RunSpec): Promise<RunResult>
+
+// Non-blocking headless invocation — same as run() but uses async subprocess execution.
+// Multiple runAsync() calls can run concurrently without blocking each other.
+// py: coroutine (asyncio.create_subprocess_exec); ts: Promise wrapping Node spawn()
+runAsync(spec: RunSpec): Promise<RunResult>  // py: async def run_async(spec) -> RunResult
 ```
 
 ### Errors
@@ -196,7 +202,7 @@ Explicit non-goals, to keep the library narrow:
 - Vertex/OAuth proxy shims, regional routing — **agentelo's job** (context-specific, varies by billing arrangement)
 - Streaming callbacks (`onOutput`) — **future**; v1 is blocking subprocess
 
-Harness ships ONLY: CLI command construction, output parsing, and a convenience `run()` for headless consumers.
+Harness ships ONLY: CLI command construction, output parsing, and convenience `run()` / `runAsync()` for headless consumers.
 
 ---
 

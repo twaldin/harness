@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { mkdirSync, writeFileSync } from 'fs'
 import { dirname } from 'path'
 import type { SubprocOutcome } from './base.js'
@@ -47,4 +47,52 @@ export function runSubprocess(
     stderr: (result.stderr as string) ?? '',
     timedOut,
   }
+}
+
+export function runSubprocessAsync(
+  cmd: string[],
+  opts: {
+    cwd: string
+    timeoutSeconds?: number
+    extraEnv?: Record<string, string>
+  },
+): Promise<SubprocOutcome> {
+  return new Promise((resolve) => {
+    const timeoutMs = (opts.timeoutSeconds ?? 1800) * 1000
+    const env = { ...process.env, ...(opts.extraEnv ?? {}) } as Record<string, string>
+
+    const start = Date.now()
+    const child = spawn(cmd[0]!, cmd.slice(1), {
+      cwd: opts.cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let stdoutBuf = ''
+    let stderrBuf = ''
+    let timedOut = false
+
+    child.stdout!.on('data', (chunk: Buffer) => {
+      stdoutBuf += chunk.toString('utf-8')
+    })
+    child.stderr!.on('data', (chunk: Buffer) => {
+      stderrBuf += chunk.toString('utf-8')
+    })
+
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, timeoutMs)
+
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolve({
+        exitCode: timedOut ? -1 : (code ?? -1),
+        durationSeconds: (Date.now() - start) / 1000,
+        stdout: stdoutBuf,
+        stderr: stderrBuf,
+        timedOut,
+      })
+    })
+  })
 }

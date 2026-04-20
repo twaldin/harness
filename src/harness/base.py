@@ -129,5 +129,32 @@ class Adapter(ABC):
             raw=parsed.get("raw"),
         )
 
+    async def run_async(self, spec: RunSpec) -> RunResult:
+        """Async headless invocation: build_command + async exec + parse_output."""
+        from harness._subproc import run_subprocess_async
+
+        bc = self.build_command(spec)
+        outcome = await run_subprocess_async(
+            [bc.cmd] + bc.args,
+            cwd=bc.cwd,
+            timeout_seconds=spec.timeout_seconds,
+            extra_env={**bc.env, **spec.env},
+        )
+        parsed = self.parse_output(spec, outcome)
+        model: str | None = spec.model or getattr(self, "DEFAULT_MODEL", None)
+        return RunResult(
+            harness=self.name,
+            model=model,
+            exit_code=outcome.exit_code,
+            duration_seconds=outcome.duration_seconds,
+            stdout=outcome.stdout,
+            stderr=outcome.stderr,
+            timed_out=outcome.timed_out,
+            cost_usd=parsed.get("cost_usd"),
+            tokens_in=parsed.get("tokens_in"),
+            tokens_out=parsed.get("tokens_out"),
+            raw=parsed.get("raw"),
+        )
+
     def __repr__(self) -> str:  # pragma: no cover
         return f"{type(self).__name__}(name={self.name!r})"

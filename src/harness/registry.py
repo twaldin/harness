@@ -45,3 +45,11 @@ def run(spec: RunSpec) -> RunResult:
 
     adapter = get_adapter(spec.harness)
     return adapter.run(spec)
+
+
+async def run_async(spec: RunSpec) -> RunResult:
+    """Non-blocking headless invocation: build_command + async exec + parse_output."""
+    import harness.adapters  # noqa: F401 — side-effect import populates registry
+
+    adapter = get_adapter(spec.harness)
+    return await adapter.run_async(spec)

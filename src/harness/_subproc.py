@@ -5,6 +5,7 @@ behavior (timeout enforcement, env merging, output capture) is consistent.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import time
@@ -63,6 +64,55 @@ def run_subprocess(
         duration_seconds=time.monotonic() - started,
         stdout=proc.stdout,
         stderr=proc.stderr,
+        timed_out=False,
+    )
+
+
+async def run_subprocess_async(
+    cmd: list[str],
+    *,
+    cwd: Path | str,
+    timeout_seconds: int,
+    extra_env: dict[str, str] | None = None,
+) -> SubprocOutcome:
+    """Async variant of run_subprocess using asyncio.create_subprocess_exec.
+
+    Never raises on non-zero exit. On timeout, kills the process and returns timed_out=True.
+    """
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+
+    started = time.monotonic()
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(cwd),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+    )
+
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=float(timeout_seconds)
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        return SubprocOutcome(
+            exit_code=-1,
+            duration_seconds=time.monotonic() - started,
+            stdout=stdout_bytes.decode("utf-8", "replace"),
+            stderr=stderr_bytes.decode("utf-8", "replace"),
+            timed_out=True,
+        )
+
+    return SubprocOutcome(
+        exit_code=proc.returncode if proc.returncode is not None else -1,
+        duration_seconds=time.monotonic() - started,
+        stdout=stdout_bytes.decode("utf-8", "replace"),
+        stderr=stderr_bytes.decode("utf-8", "replace"),
         timed_out=False,
     )
 

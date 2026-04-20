@@ -16,7 +16,9 @@
       "sonnet",
       "--output-format",
       "json",
-      "--dangerously-skip-permissions"
+      "--dangerously-skip-permissions",
+      "--append-system-prompt",
+      "You are a careful engineer.\n"
     ],
     "instructionsFile": "/tmp/harness-fixture-cc/CLAUDE.md"
   },

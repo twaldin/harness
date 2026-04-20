@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "harness": "opencode",
+    "prompt": "split the big function",
+    "workdir": "/tmp/harness-fixture-opencode",
+    "model": "openai/gpt-5.4",
+    "instructions": "Prefer small pure functions.\n",
+    "timeoutSeconds": 1200
+  },
+  "expectedCommand": {
+    "cmd": "opencode",
+    "args": [
+      "run",
+      "--dir",
+      "/tmp/harness-fixture-opencode",
+      "--model",
+      "openai/gpt-5.4",
+      "split the big function"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-opencode/AGENTS.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 30.0,
+    "timedOut": false,
+    "stdout": "done",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "note": "opencode's cost/tokens come from an out-of-band sqlite DB at ~/.local/share/opencode/opencode.db. parseOutput can't infer them from stdout alone. If the fixture DB (tests/fixtures/opencode-db.sqlite) exists at test time, expect costUsd=0.0123, tokensIn=823, tokensOut=210 — but when the DB is absent (CI without fixture), all three are null. This fixture tests buildCommand only; opencode-db-parse.json covers the DB-read path."
+  }
+}

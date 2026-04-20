@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "harness": "claude-code",
+    "prompt": "fix the failing test in test_main.py",
+    "workdir": "/tmp/harness-fixture-cc",
+    "model": "sonnet",
+    "instructions": "You are a careful engineer.\n",
+    "timeoutSeconds": 300
+  },
+  "expectedCommand": {
+    "cmd": "claude",
+    "args": [
+      "-p",
+      "fix the failing test in test_main.py",
+      "--model",
+      "sonnet",
+      "--output-format",
+      "json",
+      "--dangerously-skip-permissions"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-cc/CLAUDE.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 12.34,
+    "timedOut": false,
+    "stdout": "{\"type\":\"result\",\"result\":\"fixed\",\"usage\":{\"input_tokens\":1823,\"output_tokens\":412},\"total_cost_usd\":0.0342}",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.0342,
+    "tokensIn": 1823,
+    "tokensOut": 412
+  }
+}

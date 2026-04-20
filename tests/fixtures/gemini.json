@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "harness": "gemini",
+    "prompt": "refactor the queue class",
+    "workdir": "/tmp/harness-fixture-gemini",
+    "model": "gemini-2.5-flash",
+    "instructions": "Be concise.\n",
+    "timeoutSeconds": 600
+  },
+  "expectedCommand": {
+    "cmd": "gemini",
+    "args": [
+      "-p",
+      "refactor the queue class",
+      "-y",
+      "-m",
+      "gemini-2.5-flash",
+      "--output-format",
+      "json"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-gemini/GEMINI.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 8.2,
+    "timedOut": false,
+    "stdout": "{\"response\":\"done\",\"stats\":{\"models\":{\"gemini-2.5-flash\":{\"tokens\":{\"input\":950,\"candidates\":310}}}}}",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": 950,
+    "tokensOut": 310
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "harness": "aider",
+    "prompt": "add type hints to utils.py",
+    "workdir": "/tmp/harness-fixture-aider",
+    "model": "openrouter/anthropic/claude-sonnet-4.6",
+    "instructions": "# yaml config\n",
+    "timeoutSeconds": 900
+  },
+  "expectedCommand": {
+    "cmd": "aider",
+    "args": [
+      "--config",
+      "/tmp/harness-fixture-aider/.agentelo-aider.yml",
+      "--no-restore-chat-history",
+      "--chat-history-file",
+      "/tmp/harness-fixture-aider/.agentelo-aider-chat.history.md",
+      "--input-history-file",
+      "/tmp/harness-fixture-aider/.agentelo-aider-input.history",
+      "--model",
+      "openrouter/anthropic/claude-sonnet-4.6",
+      "--message",
+      "add type hints to utils.py",
+      "--yes-always",
+      "--no-auto-commits",
+      "--no-analytics",
+      "--no-show-model-warnings"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-aider/.aider.conf.yml"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 20.5,
+    "timedOut": false,
+    "stdout": "Applied edit to utils.py\nTokens: 12.3k sent, 2,145 received\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": 12300,
+    "tokensOut": 2145
+  }
+}

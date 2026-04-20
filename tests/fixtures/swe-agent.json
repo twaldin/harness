@@ -1,0 +1,54 @@
+{
+  "spec": {
+    "harness": "swe-agent",
+    "prompt": "fix the off-by-one in pagination",
+    "workdir": "/tmp/harness-fixture-swe",
+    "model": "openai/gpt-5.4",
+    "instructions": "Be surgical.\n",
+    "timeoutSeconds": 1800,
+    "env": {
+      "SWE_WRAPPER": "/tmp/harness-fixture-swe/fake-wrapper.py"
+    }
+  },
+  "expectedCommand": {
+    "cmd": "python3",
+    "args": [
+      "/tmp/harness-fixture-swe/fake-wrapper.py",
+      "--model",
+      "openai/gpt-5.4",
+      "--task",
+      "Be surgical.\n\n---\n\nfix the off-by-one in pagination",
+      "--cwd",
+      "/tmp/harness-fixture-swe",
+      "--cost-limit",
+      "10.0",
+      "--output",
+      "/tmp/harness-fixture-swe/.harness/swe-traj.json"
+    ],
+    "instructionsFile": null,
+    "note": "swe-agent does NOT write an instructions file — it folds instructions into the --task arg. Fixture requires SWE_WRAPPER in env to exist on disk (create with `touch /tmp/harness-fixture-swe/fake-wrapper.py` before running)."
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 120.0,
+    "timedOut": false,
+    "stdout": "done",
+    "stderr": ""
+  },
+  "trajectoryFile": {
+    "path": "/tmp/harness-fixture-swe/.harness/swe-traj.json",
+    "content": {
+      "info": { "model_stats": { "instance_cost": 0.234 } },
+      "messages": [
+        { "extra": { "response": { "usage": { "prompt_tokens": 1500, "completion_tokens": 400 } } } },
+        { "extra": { "response": { "usage": { "input_tokens": 800, "output_tokens": 200 } } } }
+      ]
+    },
+    "note": "Test must write this file before calling parseOutput, since swe-agent reads the trajectory post-exit."
+  },
+  "expectedParsed": {
+    "costUsd": 0.234,
+    "tokensIn": 2300,
+    "tokensOut": 600
+  }
+}

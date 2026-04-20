@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "harness": "codex",
+    "prompt": "add input validation to handler",
+    "workdir": "/tmp/harness-fixture-codex",
+    "model": "gpt-5.3-codex",
+    "instructions": "Follow TDD. Never weaken tests.\n",
+    "timeoutSeconds": 1800
+  },
+  "expectedCommand": {
+    "cmd": "codex",
+    "args": [
+      "exec",
+      "-m",
+      "gpt-5.3-codex",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--json",
+      "-C",
+      "/tmp/harness-fixture-codex",
+      "add input validation to handler"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-codex/AGENTS.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 45.1,
+    "timedOut": false,
+    "stdout": "{\"type\":\"turn.started\",\"turn_id\":1}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":500,\"output_tokens\":123}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":700,\"output_tokens\":200}}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": 1200,
+    "tokensOut": 323
+  }
+}

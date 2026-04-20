@@ -1,0 +1,217 @@
+# harness — specification
+
+This is the contract both `harness` (Python) and `@twaldin/harness-ts` (TypeScript) implement. Consumers (hone, agentelo, flt) call this API and expect identical behavior regardless of language.
+
+**Repo layout (monorepo):**
+```
+harness/
+├── SPEC.md                 (this file — the contract)
+├── ADAPTER-MATRIX.md       (per-CLI flag + output parsing reference)
+├── tests/fixtures/*.json   (shared golden tests both impls must pass)
+├── src/harness/            (python)
+│   ├── base.py             (types)
+│   ├── registry.py         (run/list_adapters/get_adapter)
+│   ├── adapters/*.py       (6 adapters)
+│   └── _subproc.py         (shared helpers)
+└── ts/                     (typescript, new)
+    ├── package.json        (@twaldin/harness-ts)
+    ├── src/base.ts
+    ├── src/registry.ts
+    ├── src/adapters/*.ts
+    └── src/subproc.ts
+```
+
+Version lockstep: `harness` (py) and `@twaldin/harness-ts` release together. CI fails if one changes the public API surface without the other catching up.
+
+---
+
+## Public API
+
+Both implementations export exactly these symbols.
+
+### Types
+
+```ts
+// RunSpec — everything an adapter needs to invoke its CLI
+interface RunSpec {
+  harness: string                  // "claude-code" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent"
+  prompt: string                   // the task (becomes positional arg or stdin)
+  workdir: string                  // absolute path; cwd for the subprocess
+  model?: string                   // adapter-specific identifier (see ADAPTER-MATRIX.md)
+  instructions?: string            // content written to per-harness instructions file
+  timeoutSeconds?: number          // default 1800
+  env?: Record<string, string>     // extra env vars merged onto process.env
+}
+
+// BuildCommand — what to invoke, without invoking it (for interactive consumers like flt)
+interface BuildCommand {
+  cmd: string                      // executable name, e.g. "claude", "codex"
+  args: string[]                   // full argv tail
+  cwd: string                      // resolved workdir
+  env: Record<string, string>      // adapter-specified env additions (merge w/ process.env at exec time)
+  instructionsFile: string | null  // adapter wrote content here, null if no instructions
+}
+
+// RunResult — after execution + output parsing
+interface RunResult {
+  harness: string
+  model: string | null
+  exitCode: number                 // -1 on timeout
+  durationSeconds: number
+  stdout: string
+  stderr: string
+  timedOut: boolean
+  costUsd: number | null           // null if adapter can't report cost
+  tokensIn: number | null
+  tokensOut: number | null
+  raw: unknown | null              // adapter-specific structured payload (parsed JSON)
+}
+```
+
+(Python equivalents use dataclass names; field names match the JSON below.)
+
+### Functions
+
+```ts
+// List all registered adapter names.
+listAdapters(): string[]
+
+// Build the command WITHOUT executing. Writes the instructions file to workdir
+// as a side effect (consumers expect this — it's part of the "prepare workdir" step).
+buildCommand(spec: RunSpec): BuildCommand
+
+// Parse adapter output after execution. Called by run() internally, also callable
+// standalone by interactive consumers (flt) that exec'd the command themselves via tmux.
+parseOutput(spec: RunSpec, outcome: SubprocOutcome): {
+  costUsd: number | null
+  tokensIn: number | null
+  tokensOut: number | null
+  raw: unknown | null
+}
+
+// Where SubprocOutcome = { exitCode, durationSeconds, stdout, stderr, timedOut }
+
+// Full headless invocation — buildCommand + exec + parseOutput.
+run(spec: RunSpec): Promise<RunResult>  // async in ts, sync in py (returns RunResult directly)
+```
+
+### Errors
+
+Both raise `HarnessError` (py) / throw `HarnessError` (ts) on:
+- unknown harness name
+- adapter prerequisites missing (e.g. swe-agent wrapper not on disk)
+- duplicate adapter registration
+
+Subprocess failures (non-zero exit, timeout) do NOT throw — they're reflected in RunResult.
+
+---
+
+## Adapter contract
+
+Each adapter provides:
+
+| field | meaning |
+| --- | --- |
+| `name` | short id used in RunSpec.harness — matches the CLI name |
+| `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
+| `defaultModel` | used when RunSpec.model is unset |
+| `buildCommand(spec)` | returns `{cmd, args, cwd, env, instructionsFile}` |
+| `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
+
+`buildCommand` MAY write files (instructions, config) but MUST NOT fork a subprocess.
+`parseOutput` MAY read files the CLI wrote (opencode's sqlite DB, swe-agent's traj JSON) but MUST NOT block on I/O > 5s.
+
+### JSON-fixture-driven verification
+
+Every adapter has a matching fixture at `tests/fixtures/<name>.json`:
+
+```json
+{
+  "spec": {
+    "harness": "claude-code",
+    "prompt": "fix the bug in main.py",
+    "workdir": "/tmp/harness-fixture",
+    "model": "sonnet",
+    "instructions": "You are a careful engineer.\n",
+    "timeoutSeconds": 300
+  },
+  "expectedCommand": {
+    "cmd": "claude",
+    "args": ["-p", "fix the bug in main.py", "--model", "sonnet", "--output-format", "json", "--dangerously-skip-permissions"],
+    "instructionsFile": "/tmp/harness-fixture/CLAUDE.md"
+  },
+  "sampleOutput": {
+    "stdout": "...",
+    "stderr": "",
+    "exitCode": 0,
+    "durationSeconds": 12.3,
+    "timedOut": false
+  },
+  "expectedParsed": {
+    "costUsd": 0.0342,
+    "tokensIn": 1823,
+    "tokensOut": 412
+  }
+}
+```
+
+Both implementations load the fixture, run `buildCommand(spec)` → assert-equal on `expectedCommand`, then run `parseOutput(spec, sampleOutput)` → assert-equal on `expectedParsed`.
+
+This is the primary drift-prevention mechanism: adding a new adapter flag in py that the fixture doesn't enforce = ts doesn't need to catch up = diverged state. Fixtures force both impls to agree at the byte level.
+
+---
+
+## Environment handling
+
+Adapters MAY set env vars (opencode reads `OPENCODE_DB`, swe-agent reads `SWE_WRAPPER`). These go in `BuildCommand.env`. The caller merges `env` onto `process.env` at exec time.
+
+Adapters MUST NOT read env vars for USER secrets (API keys). Those are user-env responsibility. If an adapter needs an API key, it expects the caller to have set it (e.g. `ANTHROPIC_API_KEY`, `GOOGLE_CLOUD_PROJECT`).
+
+Exception: `extraEnv` from RunSpec.env is always passed through unchanged.
+
+---
+
+## Registry behavior
+
+At import of the harness package, all 6 adapters self-register. `listAdapters()` returns:
+
+```
+["aider", "claude-code", "codex", "gemini", "opencode", "swe-agent"]
+```
+
+(sorted, locale-independent)
+
+Adapter lookup is case-sensitive. `"Claude-Code"` → `HarnessError`.
+
+---
+
+## What harness does NOT ship
+
+Explicit non-goals, to keep the library narrow:
+
+- tmux lifecycle, pane scraping, idle detection — **flt's job**
+- permission-dialog auto-approval — **flt's job**
+- challenge seeding, grading, ELO — **agentelo's job**
+- prompt mutation, GEPA, training loops — **hone's job**
+- Vertex/OAuth proxy shims, regional routing — **agentelo's job** (context-specific, varies by billing arrangement)
+- Streaming callbacks (`onOutput`) — **future**; v1 is blocking subprocess
+
+Harness ships ONLY: CLI command construction, output parsing, and a convenience `run()` for headless consumers.
+
+---
+
+## Compatibility guarantees
+
+- Field names in RunSpec/RunResult are STABLE. Adding fields is non-breaking; renaming/removing is a major version bump.
+- Adapter registration is STABLE — the 6 adapters always exist with the listed names.
+- Default models MAY change across minor versions. Consumers that pin should specify `spec.model` explicitly.
+- Command flag construction MAY change within a major version if the upstream CLI changes flags. Fixture updates go in the same PR.
+
+---
+
+## Versioning
+
+- `harness` (py) — semver, tracked in `pyproject.toml`
+- `@twaldin/harness-ts` — semver, tracked in `ts/package.json`
+- `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
+- Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.

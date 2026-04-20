@@ -62,10 +62,14 @@ export function runSubprocessAsync(
     const env = { ...process.env, ...(opts.extraEnv ?? {}) } as Record<string, string>
 
     const start = Date.now()
+    // detached:true puts child in its own process group, so we can kill the
+    // entire group on timeout — otherwise SIGTERM to a shell doesn't propagate
+    // to grandchildren (e.g. `sh -c 'sleep 5'` leaves sleep running).
     const child = spawn(cmd[0]!, cmd.slice(1), {
       cwd: opts.cwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     })
 
     let stdoutBuf = ''
@@ -81,7 +85,18 @@ export function runSubprocessAsync(
 
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill()
+      if (child.pid) {
+        // Kill process group (negative pid targets the whole group).
+        // SIGKILL not SIGTERM — belt-and-suspenders on slow CI where TERM
+        // might not get handled in time.
+        try {
+          process.kill(-child.pid, 'SIGKILL')
+        } catch {
+          child.kill('SIGKILL')
+        }
+      } else {
+        child.kill('SIGKILL')
+      }
     }, timeoutMs)
 
     child.on('close', (code) => {

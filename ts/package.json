@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Harness: CLI command construction and output parsing for AI coding agents",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./dist/index.js"
   },
   "scripts": {
+    "build": "bun build src/index.ts --outdir=dist --target=node",
+    "prepare": "bun build src/index.ts --outdir=dist --target=node",
     "test": "bun test"
   },
   "dependencies": {

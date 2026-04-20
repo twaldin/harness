@@ -178,6 +178,12 @@ Each adapter:
 
 Add a new adapter by subclassing `harness.base.Adapter` and registering it in `harness/adapters/__init__.py`.
 
+## Used by
+
+- [`hone`](https://github.com/twaldin/hone) — the `harness:` mutator prefix routes prompt mutations through `harness.run()`.
+- [`agentelo`](https://github.com/twaldin/agentelo) — migrating from ~800 lines of per-harness TS blocks to `harness run --json`.
+- [`flt`](https://github.com/twaldin/flt) — uses `@twaldin/harness-ts` for CLI command construction; flt adds tmux lifecycle on top.
+
 ## Status
 
 v0.2 — all six adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`.

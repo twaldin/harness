@@ -46,9 +46,9 @@ const geminiAdapter: Adapter = {
         tokensIn += Number(t?.['input'] ?? 0)
         tokensOut += Number(t?.['candidates'] ?? 0)
       }
-      if (tokensIn || tokensOut) {
-        return { costUsd: null, tokensIn: tokensIn || null, tokensOut: tokensOut || null, raw: parsed }
-      }
+      // A stats block was present and we iterated model entries — report the sum
+      // even if 0 (truthful "upstream reported 0", not "we couldn't parse").
+      return { costUsd: null, tokensIn, tokensOut, raw: parsed }
     }
 
     return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }

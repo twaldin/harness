@@ -39,6 +39,7 @@ function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensO
 
   let tokensIn = 0
   let tokensOut = 0
+  let sawUsage = false
   const messages = obj['messages']
   if (Array.isArray(messages)) {
     for (const msg of messages) {
@@ -47,14 +48,15 @@ function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensO
       const response = extra?.['response'] as Record<string, unknown> | undefined
       const usage = response?.['usage'] as Record<string, unknown> | undefined
       if (!usage) continue
+      sawUsage = true
       tokensIn += Number(usage['prompt_tokens'] ?? usage['input_tokens'] ?? 0)
       tokensOut += Number(usage['completion_tokens'] ?? usage['output_tokens'] ?? 0)
     }
   }
 
   return {
-    tokensIn: tokensIn || null,
-    tokensOut: tokensOut || null,
+    tokensIn: sawUsage ? tokensIn : null,
+    tokensOut: sawUsage ? tokensOut : null,
     costUsd,
     raw: traj,
   }

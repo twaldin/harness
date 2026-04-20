@@ -112,9 +112,13 @@ def _read_swe_trajectory(traj_file: Path) -> tuple[int | None, int | None, float
     cost = float(cost) if isinstance(cost, (int, float)) else None
 
     tokens_in = tokens_out = 0
+    saw_usage = False
     for msg in traj.get("messages") or []:
-        usage = ((msg.get("extra") or {}).get("response") or {}).get("usage") or {}
+        usage = ((msg.get("extra") or {}).get("response") or {}).get("usage")
+        if not isinstance(usage, dict):
+            continue
+        saw_usage = True
         tokens_in += int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
         tokens_out += int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
 
-    return tokens_in or None, tokens_out or None, cost, traj
+    return (tokens_in if saw_usage else None), (tokens_out if saw_usage else None), cost, traj

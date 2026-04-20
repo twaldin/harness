@@ -27,8 +27,8 @@ class GeminiAdapter(Adapter):
         tokens_in, tokens_out, raw = _parse_gemini_stats(outcome.stdout)
         return {
             "cost_usd": None,
-            "tokens_in": tokens_in or None,
-            "tokens_out": tokens_out or None,
+            "tokens_in": tokens_in if raw is not None else None,
+            "tokens_out": tokens_out if raw is not None else None,
             "raw": raw,
         }
 
@@ -76,7 +76,8 @@ def _parse_gemini_stats(stdout: str) -> tuple[int, int, dict | None]:
             t = (stats or {}).get("tokens") or {}
             tokens_in += int(t.get("input") or 0)
             tokens_out += int(t.get("candidates") or 0)
-        if tokens_in or tokens_out:
-            return tokens_in, tokens_out, parsed
+        # Stats block was present — report as-is (including 0/0 for "ran
+        # but upstream didn't expose usage" vs None for "couldn't parse").
+        return tokens_in, tokens_out, parsed
 
     return 0, 0, None

@@ -1,7 +1,7 @@
 """Adapter registry — dispatches RunSpec.harness to the right Adapter."""
 from __future__ import annotations
 
-from harness.base import Adapter, HarnessError, RunResult, RunSpec
+from harness.base import Adapter, BuildCommand, HarnessError, RunResult, RunSpec
 
 # Filled by adapters/__init__.py at import time.
 _REGISTRY: dict[str, type[Adapter]] = {}
@@ -25,11 +25,22 @@ def get_adapter(name: str) -> Adapter:
     return _REGISTRY[name]()
 
 
-def run(spec: RunSpec) -> RunResult:
-    """Top-level entry point — pick the adapter and invoke it.
+def build_command(spec: RunSpec) -> BuildCommand:
+    """Build the subprocess command without executing it."""
+    import harness.adapters  # noqa: F401 — side-effect import populates registry
 
-    Triggers registration by importing harness.adapters first.
-    """
+    return get_adapter(spec.harness).build_command(spec)
+
+
+def parse_output(spec: RunSpec, outcome: object) -> dict:
+    """Parse adapter output after execution."""
+    import harness.adapters  # noqa: F401 — side-effect import populates registry
+
+    return get_adapter(spec.harness).parse_output(spec, outcome)
+
+
+def run(spec: RunSpec) -> RunResult:
+    """Full headless invocation: build_command + exec + parse_output."""
     import harness.adapters  # noqa: F401 — side-effect import populates registry
 
     adapter = get_adapter(spec.harness)

@@ -13,8 +13,8 @@ import os
 import sqlite3
 from pathlib import Path
 
-from harness._subproc import run_subprocess, write_instructions
-from harness.base import Adapter, RunResult, RunSpec
+from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec
 
 
 class OpenCodeAdapter(Adapter):
@@ -23,58 +23,58 @@ class OpenCodeAdapter(Adapter):
 
     DEFAULT_MODEL = "openai/gpt-5.4"
 
-    def run(self, spec: RunSpec) -> RunResult:
+    def build_command(self, spec: RunSpec) -> BuildCommand:
         model = spec.model or self.DEFAULT_MODEL
-        write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
+        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
+        args = ["run", "--dir", str(spec.workdir), "--model", model, spec.prompt]
+        return BuildCommand(cmd="opencode", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-        cmd = [
-            "opencode",
-            "run",
-            "--dir",
-            str(spec.workdir),
-            "--model",
-            model,
-            spec.prompt,
-        ]
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+        tokens_in, tokens_out, cost = _read_opencode_session_totals(Path(spec.workdir), spec.env)
+        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
+
+    def run(self, spec: RunSpec) -> RunResult:
+        bc = self.build_command(spec)
         outcome = run_subprocess(
-            cmd,
-            cwd=spec.workdir,
+            [bc.cmd] + bc.args,
+            cwd=bc.cwd,
             timeout_seconds=spec.timeout_seconds,
-            extra_env=spec.env,
+            extra_env={**bc.env, **spec.env},
         )
-
-        tokens_in, tokens_out, cost = _read_opencode_session_totals(Path(spec.workdir))
-
+        parsed = self.parse_output(spec, outcome)
         return RunResult(
             harness=self.name,
-            model=model,
+            model=spec.model or self.DEFAULT_MODEL,
             exit_code=outcome.exit_code,
             duration_seconds=outcome.duration_seconds,
             stdout=outcome.stdout,
             stderr=outcome.stderr,
             timed_out=outcome.timed_out,
-            cost_usd=cost,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            raw=None,
+            cost_usd=parsed.get("cost_usd"),
+            tokens_in=parsed.get("tokens_in"),
+            tokens_out=parsed.get("tokens_out"),
+            raw=parsed.get("raw"),
         )
 
 
-def _opencode_db_path() -> Path:
+def _opencode_db_path(extra_env: dict[str, str] | None = None) -> Path:
     """Default opencode DB location; override via OPENCODE_DB env var."""
-    env_path = os.environ.get("OPENCODE_DB")
+    env_path = (extra_env or {}).get("OPENCODE_DB") or os.environ.get("OPENCODE_DB")
     if env_path:
         return Path(env_path).expanduser()
     return Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 
 
-def _read_opencode_session_totals(workdir: Path) -> tuple[int | None, int | None, float | None]:
+def _read_opencode_session_totals(
+    workdir: Path,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[int | None, int | None, float | None]:
     """Query opencode's sqlite for the session that ran in `workdir`.
 
     Returns (tokens_in, tokens_out, cost_usd). All None if DB unavailable
     or no matching session.
     """
-    db_path = _opencode_db_path()
+    db_path = _opencode_db_path(extra_env)
     if not db_path.exists():
         return None, None, None
 

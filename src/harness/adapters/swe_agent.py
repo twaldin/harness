@@ -18,8 +18,8 @@ import json
 import os
 from pathlib import Path
 
-from harness._subproc import run_subprocess
-from harness.base import Adapter, HarnessError, RunResult, RunSpec
+from harness._subproc import SubprocOutcome, run_subprocess
+from harness.base import Adapter, BuildCommand, HarnessError, RunResult, RunSpec
 
 
 class SweAgentAdapter(Adapter):
@@ -29,11 +29,12 @@ class SweAgentAdapter(Adapter):
     DEFAULT_MODEL = "openai/gpt-5.4"
     DEFAULT_COST_LIMIT_USD = 10.0
 
-    def run(self, spec: RunSpec) -> RunResult:
+    def build_command(self, spec: RunSpec) -> BuildCommand:
         model = spec.model or self.DEFAULT_MODEL
         wrapper = _resolve_wrapper(spec.env)
 
-        traj_dir = spec.workdir / ".harness"
+        workdir = Path(spec.workdir)
+        traj_dir = workdir / ".harness"
         traj_dir.mkdir(parents=True, exist_ok=True)
         traj_file = traj_dir / "swe-traj.json"
 
@@ -41,41 +42,42 @@ class SweAgentAdapter(Adapter):
         if spec.instructions:
             prompt = f"{spec.instructions.rstrip()}\n\n---\n\n{prompt}"
 
-        cmd = [
-            "python3",
+        args = [
             str(wrapper),
-            "--model",
-            model,
-            "--task",
-            prompt,
-            "--cwd",
-            str(spec.workdir),
-            "--cost-limit",
-            str(self.DEFAULT_COST_LIMIT_USD),
-            "--output",
-            str(traj_file),
+            "--model", model,
+            "--task", prompt,
+            "--cwd", str(workdir),
+            "--cost-limit", str(self.DEFAULT_COST_LIMIT_USD),
+            "--output", str(traj_file),
         ]
-        outcome = run_subprocess(
-            cmd,
-            cwd=spec.workdir,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env=spec.env,
-        )
+        return BuildCommand(cmd="python3", args=args, cwd=workdir, env={}, instructions_file=None)
 
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+        traj_file = Path(spec.workdir) / ".harness" / "swe-traj.json"
         tokens_in, tokens_out, cost, raw = _read_swe_trajectory(traj_file)
+        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": raw}
 
+    def run(self, spec: RunSpec) -> RunResult:
+        bc = self.build_command(spec)
+        outcome = run_subprocess(
+            [bc.cmd] + bc.args,
+            cwd=bc.cwd,
+            timeout_seconds=spec.timeout_seconds,
+            extra_env={**bc.env, **spec.env},
+        )
+        parsed = self.parse_output(spec, outcome)
         return RunResult(
             harness=self.name,
-            model=model,
+            model=spec.model or self.DEFAULT_MODEL,
             exit_code=outcome.exit_code,
             duration_seconds=outcome.duration_seconds,
             stdout=outcome.stdout,
             stderr=outcome.stderr,
             timed_out=outcome.timed_out,
-            cost_usd=cost,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            raw=raw,
+            cost_usd=parsed.get("cost_usd"),
+            tokens_in=parsed.get("tokens_in"),
+            tokens_out=parsed.get("tokens_out"),
+            raw=parsed.get("raw"),
         )
 
 

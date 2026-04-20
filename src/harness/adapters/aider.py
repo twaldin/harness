@@ -12,9 +12,10 @@ want to inject system-style instructions to aider should put them inline
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
-from harness._subproc import run_subprocess, write_instructions
-from harness.base import Adapter, RunResult, RunSpec
+from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec
 
 
 class AiderAdapter(Adapter):
@@ -25,53 +26,53 @@ class AiderAdapter(Adapter):
 
     TOKEN_RE = re.compile(r"Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received", re.IGNORECASE)
 
-    def run(self, spec: RunSpec) -> RunResult:
+    def build_command(self, spec: RunSpec) -> BuildCommand:
         model = spec.model or self.DEFAULT_MODEL
-        write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
+        workdir = Path(spec.workdir)
+        instructions_file = write_instructions(workdir, self.instructions_filename, spec.instructions)
 
-        config_path = spec.workdir / ".agentelo-aider.yml"
-        # Empty config → aider uses pure CLI flags. Keeps state isolated.
+        config_path = workdir / ".agentelo-aider.yml"
         config_path.write_text("{}\n", encoding="utf-8")
 
-        cmd = [
-            "aider",
-            "--config",
-            str(config_path),
+        args = [
+            "--config", str(config_path),
             "--no-restore-chat-history",
-            "--chat-history-file",
-            str(spec.workdir / ".agentelo-aider-chat.history.md"),
-            "--input-history-file",
-            str(spec.workdir / ".agentelo-aider-input.history"),
-            "--model",
-            model,
-            "--message",
-            spec.prompt,
+            "--chat-history-file", str(workdir / ".agentelo-aider-chat.history.md"),
+            "--input-history-file", str(workdir / ".agentelo-aider-input.history"),
+            "--model", model,
+            "--message", spec.prompt,
             "--yes-always",
             "--no-auto-commits",
             "--no-analytics",
             "--no-show-model-warnings",
         ]
-        outcome = run_subprocess(
-            cmd,
-            cwd=spec.workdir,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env=spec.env,
-        )
+        return BuildCommand(cmd="aider", args=args, cwd=workdir, env={}, instructions_file=instructions_file)
 
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
         tokens_in, tokens_out = _scrape_aider_tokens(outcome.stdout + "\n" + outcome.stderr, self.TOKEN_RE)
+        return {"cost_usd": None, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
 
+    def run(self, spec: RunSpec) -> RunResult:
+        bc = self.build_command(spec)
+        outcome = run_subprocess(
+            [bc.cmd] + bc.args,
+            cwd=bc.cwd,
+            timeout_seconds=spec.timeout_seconds,
+            extra_env={**bc.env, **spec.env},
+        )
+        parsed = self.parse_output(spec, outcome)
         return RunResult(
             harness=self.name,
-            model=model,
+            model=spec.model or self.DEFAULT_MODEL,
             exit_code=outcome.exit_code,
             duration_seconds=outcome.duration_seconds,
             stdout=outcome.stdout,
             stderr=outcome.stderr,
             timed_out=outcome.timed_out,
-            cost_usd=None,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            raw=None,
+            cost_usd=parsed.get("cost_usd"),
+            tokens_in=parsed.get("tokens_in"),
+            tokens_out=parsed.get("tokens_out"),
+            raw=parsed.get("raw"),
         )
 
 

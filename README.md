@@ -1,6 +1,54 @@
 # harness
 
-Unified Python interface for invoking AI coding-agent CLIs as subprocesses. One API for `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+
+## Quick start
+
+**Python** — `pip install harness-cli` (imports as `harness`; `harness` was squatted on PyPI)
+
+```python
+from harness import RunSpec, run
+
+r = run(RunSpec(
+    harness="claude-code",
+    model="sonnet",
+    prompt="Write a one-line Python hello-world.",
+    workdir="/tmp/scratch",
+))
+print(f"exit={r.exit_code}  cost=${r.cost_usd:.4f}  tokens={r.tokens_in}/{r.tokens_out}")
+```
+
+**TypeScript** — `npm install @twaldin/harness-ts`
+
+```typescript
+import { run } from '@twaldin/harness-ts'
+
+const r = await run({
+  harness: 'claude-code',
+  model: 'sonnet',
+  prompt: 'Write a one-line TypeScript hello-world.',
+  workdir: '/tmp/scratch',
+})
+console.log(`exit=${r.exitCode}  cost=$${r.costUsd?.toFixed(4)}  tokens=${r.tokensIn}/${r.tokensOut}`)
+```
+
+See [`examples/hello-world.py`](examples/hello-world.py) and [`ts/examples/hello-world.ts`](ts/examples/hello-world.ts) for runnable versions.
+
+---
+
+## Who should use this
+
+You're building any of these:
+
+- An **eval framework** or **benchmark harness** that needs to invoke multiple CLI agents headlessly and capture cost + tokens uniformly. (See [agentelo](https://github.com/twaldin/agentelo).)
+- A **prompt optimizer** that needs to run the same task against claude-code, gemini, and opencode and compare results without writing six subprocess wrappers. (See [hone](https://github.com/twaldin/hone).)
+- A **coding orchestrator** that spawns agents as subprocesses, injects system prompts, and needs to swap the underlying model without touching call sites.
+- An **interactive CLI wrapper** (like [flt](https://github.com/twaldin/flt)) that needs command construction (`buildCommand()`) without the subprocess execution.
+- Anything that would otherwise make you write "if harness == 'claude': ... elif harness == 'gemini': ..." in multiple places.
+
+If you're writing per-CLI subprocess plumbing from scratch, this library has already done it.
+
+---
 
 ## Why
 
@@ -14,11 +62,11 @@ Three implementations, three sets of bugs, knowledge gained in one project never
 
 `harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all six adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
-This README has a [Why](#why) section because I want to remember the cost of doing this three times before doing it a fourth.
+---
 
 ## Examples by problem
 
-### "I want to run an agent on a repo and capture cost + tokens"
+### "Run an agent, capture cost + tokens"
 
 ```python
 from pathlib import Path
@@ -37,23 +85,19 @@ print(f"exit={result.exit_code} cost=${result.cost_usd:.4f} "
       f"wall={result.duration_seconds:.1f}s")
 ```
 
-Token + cost extraction is per-adapter. Adding cost-tracking to `gemini` later didn't require any consumer change.
-
-### "I want to swap models without rewriting the call site"
+### "Swap models without rewriting call sites"
 
 ```python
 for spec in [
-    RunSpec(harness="claude-code", model="sonnet", prompt=task, workdir=wd),
-    RunSpec(harness="opencode",    model="openai/gpt-5.4", prompt=task, workdir=wd),
-    RunSpec(harness="gemini",      model="gemini-2.5-pro", prompt=task, workdir=wd),
+    RunSpec(harness="claude-code", model="sonnet",          prompt=task, workdir=wd),
+    RunSpec(harness="opencode",    model="openai/gpt-5.4",  prompt=task, workdir=wd),
+    RunSpec(harness="gemini",      model="gemini-2.5-pro",  prompt=task, workdir=wd),
 ]:
     r = run(spec)
     print(f"{spec.harness:12} {spec.model:25} ${r.cost_usd or 0:.4f}")
 ```
 
-Same `prompt`, same `workdir`, three CLIs. Useful for benchmarking, A/B testing prompts across models, or building a router that picks the cheapest harness for a given job.
-
-### "I want to inject a system prompt / agent guide"
+### "Inject a system prompt / agent guide"
 
 ```python
 result = run(RunSpec(
@@ -68,9 +112,24 @@ verify, then stop. Make the smallest possible change.""",
 ))
 ```
 
-`instructions` is written into `workdir` under the per-harness file (`AGENTS.md` for opencode, `CLAUDE.md` for claude-code, `GEMINI.md` for gemini, `.aider.conf.yml` for aider). Filenames are baked into each adapter — consumers don't think about it.
+`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code, `AGENTS.md` for opencode/codex, `GEMINI.md` for gemini, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
 
-### "I want to use it as a hone mutator"
+### "Use from TypeScript — command construction only (no subprocess)"
+
+```typescript
+import { buildCommand } from '@twaldin/harness-ts'
+
+const { cmd, args, cwd, env, instructionsFile } = buildCommand({
+  harness: 'claude-code',
+  model: 'sonnet',
+  prompt: 'Fix the failing tests.',
+  workdir: '/tmp/repo',
+  instructions: 'You are a careful engineer.',
+})
+// hand off to tmux, a process manager, or spawnSync
+```
+
+### "Use it as a hone mutator"
 
 ```bash
 hone run prompt.md \
@@ -79,81 +138,36 @@ hone run prompt.md \
     --budget 20
 ```
 
-The `harness:` prefix in hone's `--mutator` spec dispatches every prompt mutation through `harness.run()`. Swapping to `harness:gemini:gemini-2.5-pro` is a one-token change.
-
-### "I want to call it from a TS project (agentelo, flt)"
-
-```typescript
-import { spawnSync } from 'child_process'
-
-function runHarness({ harness, model, workdir, prompt, instructionsFile, timeoutSeconds }) {
-  const args = [
-    'run',
-    '--harness', harness,
-    '--model', model,
-    '--workdir', workdir,
-    '--timeout', String(timeoutSeconds),
-    '--json',
-  ]
-  if (instructionsFile) args.push('--instructions', instructionsFile)
-  args.push(prompt)
-
-  const proc = spawnSync('harness', args, { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 })
-  return JSON.parse(proc.stdout)
-  // -> { harness, model, exit_code, duration_seconds, timed_out, cost_usd,
-  //      tokens_in, tokens_out, stdout, stderr }
-}
-```
-
-Python startup adds ~150ms per invocation — irrelevant against agent runs that take 5-30 minutes. agentelo's planned migration deletes ~800 lines of TS by replacing per-harness blocks with this pattern.
-
-See [`examples/`](examples/) for the full per-consumer integration sketches.
+---
 
 ## Install
 
+### Python
+
 ```bash
+pip install harness-cli
+```
+
+The PyPI name is `harness-cli` (`harness` was squatted). The Python import is `from harness import ...`.
+
+For dev work:
+
+```bash
+git clone https://github.com/twaldin/harness
 cd harness
 pip install -e ".[dev]"
 ```
 
-## Library use
+### TypeScript
 
-```python
-from harness import RunSpec, run
-
-result = run(RunSpec(
-    harness="opencode",
-    model="openai/gpt-5.4",
-    prompt="Fix the failing tests in this repo.",
-    workdir="/path/to/repo",
-    instructions="You are an autonomous bug-fixing agent. ...",
-    timeout_seconds=1800,
-))
-
-print(result.ok, result.exit_code, result.cost_usd, result.tokens_in)
+```bash
+npm install @twaldin/harness-ts
+# or: bun add @twaldin/harness-ts
 ```
 
-`instructions` is written to the per-harness file inside `workdir`:
+See [`ts/README.md`](ts/README.md) for full TypeScript docs.
 
-| harness     | instructions filename     | notes                                                    |
-| ----------- | ------------------------- | -------------------------------------------------------- |
-| claude-code | `CLAUDE.md`               |                                                          |
-| opencode    | `AGENTS.md`               |                                                          |
-| codex       | `AGENTS.md`               |                                                          |
-| gemini      | `GEMINI.md`               |                                                          |
-| aider       | `.aider.conf.yml`         | aider treats this as YAML config, not free prompt        |
-| swe-agent   | (folded into prompt)      | mini-swe-agent has no instructions file convention       |
-
-## Workdir / worktrees
-
-`harness` does **not** create or manage git worktrees. `workdir` is opaque — the agent runs there and that's all the library cares about. Set it up however your consumer wants:
-
-- a fresh `git clone` into a tmpdir (agentelo-style)
-- a `git worktree add` (flt-style)
-- the user's existing checkout (interactive use)
-- a Docker volume mount (CI)
-
-The opt-in `--worktree` features in some CLIs (e.g. `claude --worktree` creating `.claude/worktrees/`) are intentionally **not** wrapped — they pollute the project tree and limit consumer flexibility. Consumers that want worktrees should call `git worktree add` themselves and pass the resulting path.
+---
 
 ## CLI use
 
@@ -165,7 +179,24 @@ harness run --harness opencode --model openai/gpt-5.4 \
     "Fix the failing tests."
 ```
 
-Add `--json` to emit a structured RunResult on stdout.
+Add `--json` to emit a structured RunResult on stdout:
+
+```json
+{
+  "harness": "opencode",
+  "model": "openai/gpt-5.4",
+  "exit_code": 0,
+  "duration_seconds": 47.2,
+  "cost_usd": 0.0821,
+  "tokens_in": 4201,
+  "tokens_out": 887,
+  "timed_out": false,
+  "stdout": "...",
+  "stderr": ""
+}
+```
+
+---
 
 ## Adapter contract
 
@@ -173,24 +204,41 @@ Each adapter:
 
 1. Writes `spec.instructions` to its known filename in `spec.workdir` (if provided).
 2. Builds the CLI invocation for `spec.prompt` + `spec.model`.
-3. Calls `harness._subproc.run_subprocess` (handles env merge, cwd, timeout, capture).
-4. Parses any structured output the CLI emits (JSON envelope, session metadata) and fills `RunResult.cost_usd` / `tokens_in` / `tokens_out` / `raw`.
+3. Calls the shared subprocess runner (env merge, cwd, timeout, capture).
+4. Parses any structured output the CLI emits and fills `RunResult.cost_usd` / `tokens_in` / `tokens_out` / `raw`.
 
-Add a new adapter by subclassing `harness.base.Adapter` and registering it in `harness/adapters/__init__.py`.
+See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) for per-CLI flag details, cost-reporting quirks, and output shapes.
+
+See [SPEC.md](SPEC.md) for the full `RunSpec` / `RunResult` schema and compatibility guarantees.
+
+---
+
+## Workdir / worktrees
+
+`harness` does **not** create or manage git worktrees. `workdir` is opaque — pass any directory you've set up:
+
+- a fresh `git clone` into a tmpdir
+- a `git worktree add` path
+- the user's existing checkout
+- a Docker volume mount
+
+The opt-in `--worktree` features in some CLIs (e.g. `claude --worktree`) are intentionally not wrapped — they pollute the project tree and reduce consumer flexibility.
+
+---
 
 ## Used by
 
-- [`hone`](https://github.com/twaldin/hone) — the `harness:` mutator prefix routes prompt mutations through `harness.run()`.
+- [`hone`](https://github.com/twaldin/hone) — `harness:` mutator prefix routes prompt mutations through `harness.run()`.
 - [`agentelo`](https://github.com/twaldin/agentelo) — migrating from ~800 lines of per-harness TS blocks to `harness run --json`.
 - [`flt`](https://github.com/twaldin/flt) — uses `@twaldin/harness-ts` for CLI command construction; flt adds tmux lifecycle on top.
+
+---
 
 ## Status
 
 v0.2 — all six adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`.
 
 Pending:
-
 - Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).
 - Vertex AI / GCloud token plumbing (currently consumer-supplied via `env`).
-- Wire as a hone mutator type (replaces hone's `ClaudeCodeMutator`).
 - Wire as the spawn backend for flt and agentelo (TS → Python subprocess boundary; design TBD).

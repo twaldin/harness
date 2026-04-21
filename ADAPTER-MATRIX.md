@@ -2,7 +2,22 @@
 
 Per-CLI reference: what flags get built, what instructions filename gets written, how tokens/cost are parsed. **This is the source of truth both `harness` (py) and `@twaldin/harness-ts` implement.** Fixture tests in `tests/fixtures/` enforce byte-level agreement.
 
-Last updated: 2026-04-20. Python source: `src/harness/adapters/*.py`.
+Last updated: 2026-04-21. Python source: `src/harness/adapters/*.py`.
+
+---
+
+## Cost + token reporting at a glance
+
+| adapter    | `cost_usd`        | `tokens_in` / `tokens_out`    | source                            |
+| ---------- | ----------------- | ----------------------------- | --------------------------------- |
+| claude-code | populated        | populated                     | `--output-format json` envelope   |
+| opencode   | populated         | populated                     | sqlite session DB post-exit       |
+| codex      | **null**          | populated (summed from JSONL) | JSONL turn events on stdout       |
+| gemini     | **null**          | populated (summed)            | JSON envelope `stats.models`      |
+| aider      | **null**          | populated (regex parse)       | "Tokens: N sent, M received" log  |
+| swe-agent  | populated         | populated                     | trajectory JSON post-exit         |
+
+Cost is null for codex, gemini, and aider because those CLIs don't emit pricing data. Use your own per-token pricing if you need cost attribution for these adapters.
 
 ---
 

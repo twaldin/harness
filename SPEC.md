@@ -112,6 +112,131 @@ Subprocess failures (non-zero exit, timeout) do NOT throw — they're reflected 
 
 ---
 
+## Example RunResults
+
+What `run()` returns for each adapter on a successful invocation. `raw` holds the adapter-specific parsed payload; `stdout` / `stderr` are abbreviated.
+
+### claude-code
+
+```json
+{
+  "harness": "claude-code",
+  "model": "sonnet",
+  "exitCode": 0,
+  "durationSeconds": 12.3,
+  "stdout": "{\"type\":\"result\",\"result\":\"Hello from harness\",\"usage\":{...},\"total_cost_usd\":0.0342}",
+  "stderr": "",
+  "timedOut": false,
+  "costUsd": 0.0342,
+  "tokensIn": 1823,
+  "tokensOut": 412,
+  "raw": {
+    "type": "result",
+    "result": "Hello from harness",
+    "usage": { "input_tokens": 1823, "output_tokens": 412 },
+    "total_cost_usd": 0.0342
+  }
+}
+```
+
+### codex
+
+`costUsd` is always null — codex does not emit pricing data.
+
+```json
+{
+  "harness": "codex",
+  "model": "gpt-5.3-codex",
+  "exitCode": 0,
+  "durationSeconds": 8.1,
+  "timedOut": false,
+  "costUsd": null,
+  "tokensIn": 323,
+  "tokensOut": 133,
+  "raw": null
+}
+```
+
+### gemini
+
+`costUsd` is always null — gemini CLI does not emit pricing data.
+
+```json
+{
+  "harness": "gemini",
+  "model": "gemini-2.5-pro",
+  "exitCode": 0,
+  "durationSeconds": 15.7,
+  "timedOut": false,
+  "costUsd": null,
+  "tokensIn": 2104,
+  "tokensOut": 310,
+  "raw": {
+    "response": "Hello from harness",
+    "stats": { "models": { "gemini-2.5-pro": { "tokens": { "input": 2104, "candidates": 310 } } } }
+  }
+}
+```
+
+### opencode
+
+Cost and tokens come from the sqlite session DB read after the process exits.
+
+```json
+{
+  "harness": "opencode",
+  "model": "openai/gpt-5.4",
+  "exitCode": 0,
+  "durationSeconds": 21.4,
+  "timedOut": false,
+  "costUsd": 0.0821,
+  "tokensIn": 4201,
+  "tokensOut": 887,
+  "raw": null
+}
+```
+
+### aider
+
+`costUsd` is always null — aider does not emit pricing data. Tokens are parsed from a log line regex.
+
+```json
+{
+  "harness": "aider",
+  "model": "openrouter/anthropic/claude-sonnet-4.6",
+  "exitCode": 0,
+  "durationSeconds": 18.2,
+  "timedOut": false,
+  "costUsd": null,
+  "tokensIn": 12300,
+  "tokensOut": 2145,
+  "raw": null
+}
+```
+
+### swe-agent
+
+Cost and tokens come from the trajectory JSON file written by the wrapper.
+
+```json
+{
+  "harness": "swe-agent",
+  "model": "openai/gpt-5.4",
+  "exitCode": 0,
+  "durationSeconds": 94.3,
+  "timedOut": false,
+  "costUsd": 0.23,
+  "tokensIn": 18420,
+  "tokensOut": 3102,
+  "raw": {
+    "info": { "model_stats": { "instance_cost": 0.23 } },
+    "messages": ["..."]
+  }
+}
+```
+
+---
+
 ## Adapter contract
 
 Each adapter provides:

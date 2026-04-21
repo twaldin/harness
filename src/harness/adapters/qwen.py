@@ -28,8 +28,8 @@ class QwenAdapter(Adapter):
         tokens_in, tokens_out, raw = _parse_qwen_stats(outcome.stdout)
         return {
             "cost_usd": None,
-            "tokens_in": tokens_in if raw is not None else None,
-            "tokens_out": tokens_out if raw is not None else None,
+            "tokens_in": tokens_in if isinstance(raw, dict) else None,
+            "tokens_out": tokens_out if isinstance(raw, dict) else None,
             "raw": raw,
         }
 
@@ -57,7 +57,7 @@ class QwenAdapter(Adapter):
         )
 
 
-def _parse_qwen_stats(stdout: str) -> tuple[int, int, dict | None]:
+def _parse_qwen_stats(stdout: str) -> tuple[int, int, list | dict | None]:
     """Try whole-stdout JSON first, then fall back to scanning lines."""
     candidates: list[str] = [stdout.strip()]
     candidates += [ln.strip() for ln in stdout.splitlines() if ln.strip().startswith("{")]
@@ -69,6 +69,9 @@ def _parse_qwen_stats(stdout: str) -> tuple[int, int, dict | None]:
             parsed = json.loads(blob)
         except json.JSONDecodeError:
             continue
+        if not isinstance(parsed, dict):
+            # Array payload (stream-json format): preserve raw but no token stats.
+            return 0, 0, parsed
         models = (parsed.get("stats") or {}).get("models")
         if not isinstance(models, dict):
             continue

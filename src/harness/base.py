@@ -65,7 +65,7 @@ class RunResult:
     cost_usd: float | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
-    raw: dict | None = None  # adapter-specific structured payload (parsed JSON, session info)
+    raw: dict | list | None = None  # adapter-specific structured payload (parsed JSON, session info)
 
     @property
     def ok(self) -> bool:

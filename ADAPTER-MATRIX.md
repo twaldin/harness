@@ -16,7 +16,7 @@ Last updated: 2026-04-21. Python source: `src/harness/adapters/*.py`.
 | gemini       | **null**          | populated (summed)            | JSON envelope `stats.models`      |
 | aider        | **null**          | populated (regex parse)       | "Tokens: N sent, M received" log  |
 | swe-agent    | populated         | populated                     | trajectory JSON post-exit         |
-| qwen         | **null**          | populated (summed)            | JSON envelope `stats.models`      |
+| qwen         | **null**          | populated                     | JSON array, last `type:'result'` item `usage` |
 | continue-cli | populated         | populated                     | `--json` envelope `usage`         |
 
 Cost is null for codex, gemini, and aider because those CLIs don't emit pricing data. Use your own per-token pricing if you need cost attribution for these adapters.
@@ -161,23 +161,19 @@ Tokens: 12.3k sent, 2,145 received
 - **Instructions file**: `QWEN.md`
 - **Default model**: `qwen3-coder`
 - **Command**: `qwen -p <prompt> -y -m <model> --output-format json`
-- **Token source**: JSON envelope on stdout → `stats.models[*].tokens.{input, candidates}` (same shape as gemini)
+- **Token source**: JSON array on stdout → find last item with `type:'result'`, read `usage.{input_tokens, output_tokens}`
 - **Cost source**: not reported — always `null` (Alibaba Cloud pricing tracked externally via API key account)
 - **Env**: `QWEN_API_KEY` (consumer sets; harness does not require or inject it)
 
 ### Output shape
 ```json
-{
-  "response": "...",
-  "stats": {
-    "models": {
-      "qwen3-coder": { "tokens": { "input": N, "candidates": M } }
-    }
-  }
-}
+[
+  { "type": "assistant", "content": "..." },
+  { "type": "result", "usage": { "input_tokens": N, "output_tokens": M } }
+]
 ```
 
-Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`-prefixed line. First match with non-zero model stats wins.
+Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `[`-prefixed line. First match containing a `type:'result'` item wins.
 
 ---
 

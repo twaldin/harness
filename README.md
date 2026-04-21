@@ -1,6 +1,6 @@
 # harness
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -112,7 +112,7 @@ verify, then stop. Make the smallest possible change.""",
 ))
 ```
 
-`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code, `AGENTS.md` for opencode/codex, `GEMINI.md` for gemini, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
+`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code, `AGENTS.md` for opencode/codex, `GEMINI.md` for gemini, `QWEN.md` for qwen, `CONTINUE.md` for continue-cli, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
 
 ### "Use from TypeScript — command construction only (no subprocess)"
 
@@ -236,7 +236,7 @@ The opt-in `--worktree` features in some CLIs (e.g. `claude --worktree`) are int
 
 ## Status
 
-v0.2 — all six adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`.
+v0.3 — all eight adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`.
 
 Pending:
 - Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).

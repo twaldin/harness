@@ -8,14 +8,16 @@ Last updated: 2026-04-21. Python source: `src/harness/adapters/*.py`.
 
 ## Cost + token reporting at a glance
 
-| adapter    | `cost_usd`        | `tokens_in` / `tokens_out`    | source                            |
-| ---------- | ----------------- | ----------------------------- | --------------------------------- |
-| claude-code | populated        | populated                     | `--output-format json` envelope   |
-| opencode   | populated         | populated                     | sqlite session DB post-exit       |
-| codex      | **null**          | populated (summed from JSONL) | JSONL turn events on stdout       |
-| gemini     | **null**          | populated (summed)            | JSON envelope `stats.models`      |
-| aider      | **null**          | populated (regex parse)       | "Tokens: N sent, M received" log  |
-| swe-agent  | populated         | populated                     | trajectory JSON post-exit         |
+| adapter      | `cost_usd`        | `tokens_in` / `tokens_out`    | source                            |
+| ------------ | ----------------- | ----------------------------- | --------------------------------- |
+| claude-code  | populated         | populated                     | `--output-format json` envelope   |
+| opencode     | populated         | populated                     | sqlite session DB post-exit       |
+| codex        | **null**          | populated (summed from JSONL) | JSONL turn events on stdout       |
+| gemini       | **null**          | populated (summed)            | JSON envelope `stats.models`      |
+| aider        | **null**          | populated (regex parse)       | "Tokens: N sent, M received" log  |
+| swe-agent    | populated         | populated                     | trajectory JSON post-exit         |
+| qwen         | **null**          | populated (summed)            | JSON envelope `stats.models`      |
+| continue-cli | populated         | populated                     | `--json` envelope `usage`         |
 
 Cost is null for codex, gemini, and aider because those CLIs don't emit pricing data. Use your own per-token pricing if you need cost attribution for these adapters.
 
@@ -149,6 +151,49 @@ Tokens: 12.3k sent, 2,145 received
     { "extra": { "response": { "usage": { "prompt_tokens": 1234, "completion_tokens": 567 } } } }
   ]
 }
+```
+
+---
+
+## qwen
+
+- **CLI**: `qwen`
+- **Instructions file**: `QWEN.md`
+- **Default model**: `qwen3-coder`
+- **Command**: `qwen -p <prompt> -y -m <model> --output-format json`
+- **Token source**: JSON envelope on stdout → `stats.models[*].tokens.{input, candidates}` (same shape as gemini)
+- **Cost source**: not reported — always `null` (Alibaba Cloud pricing tracked externally via API key account)
+- **Env**: `QWEN_API_KEY` (consumer sets; harness does not require or inject it)
+
+### Output shape
+```json
+{
+  "response": "...",
+  "stats": {
+    "models": {
+      "qwen3-coder": { "tokens": { "input": N, "candidates": M } }
+    }
+  }
+}
+```
+
+Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`-prefixed line. First match with non-zero model stats wins.
+
+---
+
+## continue-cli
+
+- **CLI**: `cn`
+- **Instructions file**: `CONTINUE.md`
+- **Default model**: `claude-sonnet-4-6`
+- **Command**: `cn -p <prompt> --model <model> --json`
+- **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
+- **Cost source**: JSON envelope → `total_cost_usd`
+- **Env**: `CONTINUE_API_KEY` (consumer sets; harness does not require or inject it)
+
+### Output shape
+```json
+{ "type": "result", "result": "...", "usage": { "input_tokens": N, "output_tokens": M }, "total_cost_usd": 0.019 }
 ```
 
 ---

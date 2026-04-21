@@ -235,6 +235,50 @@ Cost and tokens come from the trajectory JSON file written by the wrapper.
 }
 ```
 
+### qwen
+
+`costUsd` is always null — Qwen CLI does not embed pricing data in its output.
+
+```json
+{
+  "harness": "qwen",
+  "model": "qwen3-coder",
+  "exitCode": 0,
+  "durationSeconds": 11.2,
+  "timedOut": false,
+  "costUsd": null,
+  "tokensIn": 1100,
+  "tokensOut": 280,
+  "raw": {
+    "response": "Hello from harness",
+    "stats": { "models": { "qwen3-coder": { "tokens": { "input": 1100, "candidates": 280 } } } }
+  }
+}
+```
+
+### continue-cli
+
+Cost and tokens come from the `--json` envelope emitted on stdout.
+
+```json
+{
+  "harness": "continue-cli",
+  "model": "claude-sonnet-4-6",
+  "exitCode": 0,
+  "durationSeconds": 7.1,
+  "timedOut": false,
+  "costUsd": 0.0187,
+  "tokensIn": 950,
+  "tokensOut": 380,
+  "raw": {
+    "type": "result",
+    "result": "Hello from harness",
+    "usage": { "input_tokens": 950, "output_tokens": 380 },
+    "total_cost_usd": 0.0187
+  }
+}
+```
+
 ---
 
 ## Adapter contract
@@ -304,10 +348,10 @@ Exception: `extraEnv` from RunSpec.env is always passed through unchanged.
 
 ## Registry behavior
 
-At import of the harness package, all 6 adapters self-register. `listAdapters()` returns:
+At import of the harness package, all 8 adapters self-register. `listAdapters()` returns:
 
 ```
-["aider", "claude-code", "codex", "gemini", "opencode", "swe-agent"]
+["aider", "claude-code", "codex", "continue-cli", "gemini", "opencode", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

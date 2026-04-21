@@ -36,6 +36,95 @@ All tests must pass in both. If you add a fixture, both impls must parse it.
 - Body: what changed, why, how you tested.
 - Reference the issue if there is one.
 
+## Adding a new adapter
+
+Adding an adapter takes about 20 minutes if the CLI is straightforward. Here's how.
+
+### 1. Python implementation
+
+Create `src/harness/adapters/<name>.py`. Copy the shape of an existing simple adapter (e.g. `gemini.py`):
+
+```python
+from harness.base import Adapter, BuildCommand, ParsedOutput, RunResult, RunSpec, SubprocOutcome
+from harness._subproc import run_subprocess, write_instructions
+
+class MyCLIAdapter(Adapter):
+    name = "mycli"
+    instructions_filename = "AGENTS.md"   # or "" to fold into prompt
+    default_model = "mycli/default"
+
+    def build_command(self, spec: RunSpec) -> BuildCommand:
+        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
+        args = ["run", "--model", spec.model or self.default_model, spec.prompt]
+        return BuildCommand(cmd="mycli", args=args, cwd=str(spec.workdir),
+                            env={}, instructions_file=instructions_file)
+
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
+        # parse stdout/stderr for cost + tokens; return None for unknown fields
+        return ParsedOutput(cost_usd=None, tokens_in=None, tokens_out=None, raw=None)
+```
+
+Register it in `src/harness/adapters/__init__.py`:
+
+```python
+from harness.adapters.mycli import MyCLIAdapter
+register("mycli", MyCLIAdapter)
+```
+
+### 2. TypeScript implementation
+
+Create `ts/src/adapters/<name>.ts`. Copy the shape of `ts/src/adapters/gemini.ts`:
+
+```typescript
+import { register } from '../registry.js'
+import { writeInstructions } from '../subproc.js'
+import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+
+const myCLIAdapter: Adapter = {
+  name: 'mycli',
+  instructionsFilename: 'AGENTS.md',
+  defaultModel: 'mycli/default',
+
+  buildCommand(spec: RunSpec): BuildCommand {
+    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
+    const model = spec.model ?? this.defaultModel
+    return { cmd: 'mycli', args: ['run', '--model', model, spec.prompt],
+             cwd: spec.workdir, env: {}, instructionsFile }
+  },
+
+  parseOutput(_spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
+    return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
+  },
+}
+
+register('mycli', myCLIAdapter)
+```
+
+Add the import to `ts/src/adapters/index.ts`:
+
+```typescript
+import './mycli.js'
+```
+
+### 3. Add a fixture
+
+Create `tests/fixtures/<name>.json` following the shape in [SPEC.md](SPEC.md#json-fixture-driven-verification). Both Python (`pytest`) and TypeScript (`bun test`) load fixtures and verify `buildCommand` output matches `expectedCommand` byte-for-byte.
+
+### 4. Document it
+
+Add a row to [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) covering: CLI binary name, instructions file, default model, command flags, token/cost source, and output shape.
+
+### Quick checklist
+
+- [ ] `src/harness/adapters/<name>.py` + registered in `__init__.py`
+- [ ] `ts/src/adapters/<name>.ts` + imported in `adapters/index.ts`
+- [ ] `tests/fixtures/<name>.json`
+- [ ] Row in `ADAPTER-MATRIX.md`
+- [ ] `PYTHONPATH=src uv run pytest tests/` passes
+- [ ] `cd ts && bun test` passes
+
+---
+
 ## What I'm likely to merge
 
 - New adapters for AI coding CLIs (mirror an existing adapter's shape in both languages; add a fixture).

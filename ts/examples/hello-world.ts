@@ -1,7 +1,7 @@
 // Minimal harness usage: invoke claude-code, print cost + result.
 // Run: bun ts/examples/hello-world.ts  (from repo root)
 // Or:  bun hello-world.ts              (from ts/examples/)
-import { run } from '@twaldin/harness-ts'
+import { run } from '../src/index.js'
 import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'

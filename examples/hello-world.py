@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
-"""Minimal harness usage: invoke claude-code, print cost + result."""
+"""Minimal harness usage: invoke claude-code, print cost + result.
+
+Run from repo root without installing:
+    python examples/hello-world.py
+"""
+import os
+import sys
 import tempfile
+
+# Make `harness` importable from a clean checkout (no pip install -e . required).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
 from harness import RunSpec, run
 
 with tempfile.TemporaryDirectory() as wd:

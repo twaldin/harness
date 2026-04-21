@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "harness": "qwen",
+    "prompt": "refactor the session cache",
+    "workdir": "/tmp/harness-fixture-qwen",
+    "model": "qwen3-coder",
+    "instructions": "Be concise.\n",
+    "timeoutSeconds": 600
+  },
+  "expectedCommand": {
+    "cmd": "qwen",
+    "args": [
+      "-p",
+      "refactor the session cache",
+      "-y",
+      "-m",
+      "qwen3-coder",
+      "--output-format",
+      "json"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-qwen/QWEN.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 9.5,
+    "timedOut": false,
+    "stdout": "{\"response\":\"done\",\"stats\":{\"models\":{\"qwen3-coder\":{\"tokens\":{\"input\":1100,\"candidates\":280}}}}}",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": 1100,
+    "tokensOut": 280
+  }
+}

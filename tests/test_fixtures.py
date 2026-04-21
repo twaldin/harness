@@ -317,3 +317,41 @@ def test_swe_agent_parse_output(tmp_path):
     assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
     assert parsed["tokens_in"] == expected["tokens_in"]
     assert parsed["tokens_out"] == expected["tokens_out"]
+
+
+# ── Fixture: qwen ───────────────────────────────────────────────────────────
+
+
+def test_qwen_build_command(tmp_path):
+    fx = _load_fixture("qwen")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    adapter = get_adapter("qwen")
+    bc = adapter.build_command(spec)
+
+    assert bc.cmd == fx["expectedCommand"]["cmd"]
+    assert bc.args == fx["expectedCommand"]["args"]
+    assert bc.instructions_file == tmp_path / "QWEN.md"
+    assert (tmp_path / "QWEN.md").read_text() == spec.instructions
+
+
+def test_qwen_parse_output():
+    fx = _load_fixture("qwen")
+    spec = _make_spec(fx["spec"])
+    outcome = _make_outcome(fx["sampleOutput"])
+    adapter = get_adapter("qwen")
+    parsed = adapter.parse_output(spec, outcome)
+
+    expected = _normalize_parsed(fx["expectedParsed"])
+    assert parsed["cost_usd"] == expected["cost_usd"]
+    assert parsed["tokens_in"] == expected["tokens_in"]
+    assert parsed["tokens_out"] == expected["tokens_out"]
+

@@ -234,6 +234,14 @@ The opt-in `--worktree` features in some CLIs (e.g. `claude --worktree`) are int
 
 ---
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for code conventions and the "add an adapter" guide (~20 minutes).
+
+Looking for a pre-scoped first PR? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md). Each entry lists the CLI, adapter-to-copy-from, effort estimate, and the research already done.
+
+---
+
 ## Status
 
 v0.3 — all eight adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`.

@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "harness": "continue-cli",
+    "prompt": "add docstrings to all public functions",
+    "workdir": "/tmp/harness-fixture-continue",
+    "model": "claude-sonnet-4-6",
+    "instructions": "Keep it brief.\n",
+    "timeoutSeconds": 600
+  },
+  "expectedCommand": {
+    "cmd": "cn",
+    "args": [
+      "-p",
+      "add docstrings to all public functions",
+      "--model",
+      "claude-sonnet-4-6",
+      "--json"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-continue/CONTINUE.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 7.1,
+    "timedOut": false,
+    "stdout": "{\"type\":\"result\",\"result\":\"added docstrings\",\"usage\":{\"input_tokens\":950,\"output_tokens\":380},\"total_cost_usd\":0.0187}",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.0187,
+    "tokensIn": 950,
+    "tokensOut": 380
+  }
+}

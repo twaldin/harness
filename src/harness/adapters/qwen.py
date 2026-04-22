@@ -28,8 +28,8 @@ class QwenAdapter(Adapter):
         tokens_in, tokens_out, raw = _parse_qwen_stats(outcome.stdout)
         return {
             "cost_usd": None,
-            "tokens_in": tokens_in if isinstance(raw, dict) else None,
-            "tokens_out": tokens_out if isinstance(raw, dict) else None,
+            "tokens_in": tokens_in if raw is not None else None,
+            "tokens_out": tokens_out if raw is not None else None,
             "raw": raw,
         }
 

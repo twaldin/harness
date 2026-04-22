@@ -44,8 +44,11 @@ def test_qwen_writes_instructions_file(tmp_path, monkeypatch):
     assert (tmp_path / "QWEN.md").read_text() == "be terse"
 
 
-def test_qwen_parses_stats_models(tmp_path, monkeypatch):
-    payload = {"response": "ok", "stats": {"models": {"qwen3-coder": {"tokens": {"input": 500, "candidates": 120}}}}}
+def test_qwen_parses_result_array(tmp_path, monkeypatch):
+    payload = [
+        {"type": "assistant", "content": "ok"},
+        {"type": "result", "usage": {"input_tokens": 500, "output_tokens": 120}},
+    ]
     monkeypatch.setattr("harness.adapters.qwen.run_subprocess", lambda *a, **kw: _stub(stdout=json.dumps(payload)))
     result = QwenAdapter().run(RunSpec(harness="qwen", prompt="x", workdir=tmp_path))
     assert result.tokens_in == 500
@@ -55,7 +58,7 @@ def test_qwen_parses_stats_models(tmp_path, monkeypatch):
 
 
 def test_qwen_falls_back_to_per_line_json(tmp_path, monkeypatch):
-    embedded = json.dumps({"stats": {"models": {"qwen3-coder": {"tokens": {"input": 30, "candidates": 10}}}}})
+    embedded = json.dumps([{"type": "result", "usage": {"input_tokens": 30, "output_tokens": 10}}])
     stdout = f"preamble\n{embedded}\ntrailing"
     monkeypatch.setattr("harness.adapters.qwen.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
     result = QwenAdapter().run(RunSpec(harness="qwen", prompt="x", workdir=tmp_path))

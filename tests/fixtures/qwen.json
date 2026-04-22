@@ -24,7 +24,7 @@
     "exitCode": 0,
     "durationSeconds": 9.5,
     "timedOut": false,
-    "stdout": "{\"response\":\"done\",\"stats\":{\"models\":{\"qwen3-coder\":{\"tokens\":{\"input\":1100,\"candidates\":280}}}}}",
+    "stdout": "[{\"type\":\"assistant\",\"content\":\"refactored\"},{\"type\":\"result\",\"usage\":{\"input_tokens\":1100,\"output_tokens\":280}}]",
     "stderr": ""
   },
   "expectedParsed": {

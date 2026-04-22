@@ -22,7 +22,7 @@ const qwenAdapter: Adapter = {
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
     const candidates: string[] = [outcome.stdout.trim()]
     for (const ln of outcome.stdout.split('\n')) {
-      if (ln.trim().startsWith('{')) candidates.push(ln.trim())
+      if (ln.trim().startsWith('[')) candidates.push(ln.trim())
     }
 
     for (const blob of candidates) {
@@ -33,20 +33,17 @@ const qwenAdapter: Adapter = {
       } catch {
         continue
       }
-      if (parsed === null || typeof parsed !== 'object') continue
-      const obj = parsed as Record<string, unknown>
-      const stats = obj['stats'] as Record<string, unknown> | undefined
-      const models = stats?.['models']
-      if (!models || typeof models !== 'object') continue
-      let tokensIn = 0
-      let tokensOut = 0
-      for (const stats of Object.values(models as Record<string, unknown>)) {
-        if (!stats || typeof stats !== 'object') continue
-        const t = (stats as Record<string, unknown>)['tokens'] as Record<string, unknown> | undefined
-        tokensIn += Number(t?.['input'] ?? 0)
-        tokensOut += Number(t?.['candidates'] ?? 0)
+      if (!Array.isArray(parsed)) continue
+      for (let i = parsed.length - 1; i >= 0; i--) {
+        const item = parsed[i]
+        if (!item || typeof item !== 'object') continue
+        const obj = item as Record<string, unknown>
+        if (obj['type'] !== 'result') continue
+        const usage = obj['usage'] as Record<string, unknown> | undefined
+        const tokensIn = Number(usage?.['input_tokens'] ?? 0)
+        const tokensOut = Number(usage?.['output_tokens'] ?? 0)
+        return { costUsd: null, tokensIn, tokensOut, raw: parsed }
       }
-      return { costUsd: null, tokensIn, tokensOut, raw: parsed }
     }
 
     return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }

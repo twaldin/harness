@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, opencode, codex, gemini, aider, or swe-agent as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, opencode, codex, gemini, aider, swe-agent, qwen, or continue-cli as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -92,7 +92,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'gemini', 'opencode', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'gemini', 'opencode', 'qwen', 'swe-agent']`.
 
 ---
 
@@ -100,7 +100,7 @@ Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'ge
 
 ```typescript
 interface RunSpec {
-  harness: string            // "claude-code" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent"
+  harness: string            // "claude-code" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli"
   prompt: string
   workdir: string            // absolute path; cwd for the subprocess
   model?: string             // adapter-specific (see ADAPTER-MATRIX.md)
@@ -124,7 +124,7 @@ interface RunResult {
 }
 ```
 
-`costUsd` is null for codex, gemini, and aider — those CLIs don't report cost. It's populated for claude-code (from the `--output-format json` envelope), opencode (from its sqlite session DB), and swe-agent (from the trajectory JSON). See [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) for details.
+`costUsd` is null for codex, gemini, aider, and qwen — those CLIs don't report cost. It's populated for claude-code (from the `--output-format json` envelope), opencode (from its sqlite session DB), swe-agent (from the trajectory JSON), and continue-cli (from the `--json` envelope). See [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) for details.
 
 ---
 

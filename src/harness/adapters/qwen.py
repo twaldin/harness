@@ -1,8 +1,8 @@
 """qwen adapter — invokes the `qwen` CLI in print mode.
 
-`qwen -p PROMPT --output-format json` emits a JSON envelope where token
-usage lives at `stats.models[*].tokens.{input,candidates}` (same shape as
-the gemini adapter; Alibaba Cloud does not embed pricing in the response).
+`qwen -p PROMPT --output-format json` emits a JSON array on stdout where the
+last item with `type='result'` carries usage: `{"input_tokens": N, "output_tokens": M}`.
+Alibaba Cloud does not embed pricing in the response.
 """
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ class QwenAdapter(Adapter):
         tokens_in, tokens_out, raw = _parse_qwen_stats(outcome.stdout)
         return {
             "cost_usd": None,
-            "tokens_in": tokens_in if isinstance(raw, dict) else None,
-            "tokens_out": tokens_out if isinstance(raw, dict) else None,
+            "tokens_in": tokens_in if raw is not None else None,
+            "tokens_out": tokens_out if raw is not None else None,
             "raw": raw,
         }
 
@@ -58,9 +58,18 @@ class QwenAdapter(Adapter):
 
 
 def _parse_qwen_stats(stdout: str) -> tuple[int, int, list | dict | None]:
-    """Try whole-stdout JSON first, then fall back to scanning lines."""
+    """Parse qwen's --output-format json output.
+
+    Current qwen emits a JSON array where the last item with `type="result"`
+    carries `usage.{input_tokens, output_tokens}`. Older qwen versions emit a
+    JSON envelope object with `stats.models[*].tokens.{input, candidates}`;
+    we keep a fallback for that for backwards compatibility.
+    """
     candidates: list[str] = [stdout.strip()]
-    candidates += [ln.strip() for ln in stdout.splitlines() if ln.strip().startswith("{")]
+    for ln in stdout.splitlines():
+        s = ln.strip()
+        if s.startswith("[") or s.startswith("{"):
+            candidates.append(s)
 
     for blob in candidates:
         if not blob:
@@ -69,17 +78,26 @@ def _parse_qwen_stats(stdout: str) -> tuple[int, int, list | dict | None]:
             parsed = json.loads(blob)
         except json.JSONDecodeError:
             continue
-        if not isinstance(parsed, dict):
-            # Array payload (stream-json format): preserve raw but no token stats.
-            return 0, 0, parsed
-        models = (parsed.get("stats") or {}).get("models")
-        if not isinstance(models, dict):
+
+        if isinstance(parsed, list):
+            for item in reversed(parsed):
+                if not isinstance(item, dict) or item.get("type") != "result":
+                    continue
+                usage = item.get("usage") or {}
+                tokens_in = int(usage.get("input_tokens") or 0)
+                tokens_out = int(usage.get("output_tokens") or 0)
+                return tokens_in, tokens_out, parsed
             continue
-        tokens_in = tokens_out = 0
-        for stats in models.values():
-            t = (stats or {}).get("tokens") or {}
-            tokens_in += int(t.get("input") or 0)
-            tokens_out += int(t.get("candidates") or 0)
-        return tokens_in, tokens_out, parsed
+
+        if isinstance(parsed, dict):
+            models = (parsed.get("stats") or {}).get("models")
+            if not isinstance(models, dict):
+                continue
+            tokens_in = tokens_out = 0
+            for stats in models.values():
+                t = (stats or {}).get("tokens") or {}
+                tokens_in += int(t.get("input") or 0)
+                tokens_out += int(t.get("candidates") or 0)
+            return tokens_in, tokens_out, parsed
 
     return 0, 0, None

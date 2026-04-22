@@ -249,10 +249,10 @@ Cost and tokens come from the trajectory JSON file written by the wrapper.
   "costUsd": null,
   "tokensIn": 1100,
   "tokensOut": 280,
-  "raw": {
-    "response": "Hello from harness",
-    "stats": { "models": { "qwen3-coder": { "tokens": { "input": 1100, "candidates": 280 } } } }
-  }
+  "raw": [
+    { "type": "assistant", "content": "Hello from harness" },
+    { "type": "result", "usage": { "input_tokens": 1100, "output_tokens": 280 } }
+  ]
 }
 ```
 

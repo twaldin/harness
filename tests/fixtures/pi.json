@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "harness": "pi",
+    "prompt": "list every .ts file in src and report the count",
+    "workdir": "/tmp/harness-fixture-pi",
+    "model": "sonnet",
+    "instructions": "Be terse.\n",
+    "timeoutSeconds": 600
+  },
+  "expectedCommand": {
+    "cmd": "pi",
+    "args": [
+      "--mode",
+      "json",
+      "--no-session",
+      "--model",
+      "sonnet",
+      "list every .ts file in src and report the count"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-pi/AGENTS.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 4.8,
+    "timedOut": false,
+    "stdout": "{\"type\":\"session\",\"version\":3,\"id\":\"abc\",\"timestamp\":\"2026-04-22T00:00:00Z\",\"cwd\":\"/tmp/harness-fixture-pi\"}\n{\"type\":\"agent_start\"}\n{\"type\":\"turn_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}},\"toolResults\":[]}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"user\",\"content\":\"list every .ts file in src and report the count\"},{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}}]}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.0087,
+    "tokensIn": 1200,
+    "tokensOut": 340
+  }
+}

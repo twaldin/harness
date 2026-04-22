@@ -1,6 +1,6 @@
 # harness
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -60,7 +60,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all six adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all nine adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 
@@ -112,7 +112,7 @@ verify, then stop. Make the smallest possible change.""",
 ))
 ```
 
-`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code, `AGENTS.md` for opencode/codex, `GEMINI.md` for gemini, `QWEN.md` for qwen, `CONTINUE.md` for continue-cli, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
+`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code, `AGENTS.md` for opencode/codex/pi, `GEMINI.md` for gemini, `QWEN.md` for qwen, `CONTINUE.md` for continue-cli, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
 
 ### "Use from TypeScript — command construction only (no subprocess)"
 
@@ -244,7 +244,7 @@ Looking for a pre-scoped first PR? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md).
 
 ## Status
 
-v0.3 — all eight adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`.
+v0.4 — nine adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`.
 
 Pending:
 - Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).

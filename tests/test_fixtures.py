@@ -392,3 +392,37 @@ def test_continue_cli_parse_output():
     assert parsed["tokens_in"] == expected["tokens_in"]
     assert parsed["tokens_out"] == expected["tokens_out"]
 
+
+
+def test_pi_build_command(tmp_path):
+    fx = _load_fixture("pi")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    adapter = get_adapter("pi")
+    bc = adapter.build_command(spec)
+
+    assert bc.cmd == fx["expectedCommand"]["cmd"]
+    assert bc.args == fx["expectedCommand"]["args"]
+    assert bc.instructions_file == tmp_path / "AGENTS.md"
+    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+
+
+def test_pi_parse_output():
+    fx = _load_fixture("pi")
+    spec = _make_spec(fx["spec"])
+    outcome = _make_outcome(fx["sampleOutput"])
+    adapter = get_adapter("pi")
+    parsed = adapter.parse_output(spec, outcome)
+
+    expected = _normalize_parsed(fx["expectedParsed"])
+    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
+    assert parsed["tokens_in"] == expected["tokens_in"]
+    assert parsed["tokens_out"] == expected["tokens_out"]

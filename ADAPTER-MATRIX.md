@@ -2,7 +2,7 @@
 
 Per-CLI reference: what flags get built, what instructions filename gets written, how tokens/cost are parsed. **This is the source of truth both `harness` (py) and `@twaldin/harness-ts` implement.** Fixture tests in `tests/fixtures/` enforce byte-level agreement.
 
-Last updated: 2026-04-21. Python source: `src/harness/adapters/*.py`.
+Last updated: 2026-04-22. Python source: `src/harness/adapters/*.py`.
 
 ---
 
@@ -18,6 +18,7 @@ Last updated: 2026-04-21. Python source: `src/harness/adapters/*.py`.
 | swe-agent    | populated         | populated                     | trajectory JSON post-exit         |
 | qwen         | **null**          | populated                     | JSON array, last `type:'result'` item `usage` |
 | continue-cli | populated         | populated                     | `--json` envelope `usage`         |
+| pi           | populated         | populated                     | `--mode json` event stream, summed from `agent_end.messages[].usage` |
 
 Cost is null for codex, gemini, and aider because those CLIs don't emit pricing data. Use your own per-token pricing if you need cost attribution for these adapters.
 
@@ -191,6 +192,33 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `[`
 ```json
 { "type": "result", "result": "...", "usage": { "input_tokens": N, "output_tokens": M }, "total_cost_usd": 0.019 }
 ```
+
+---
+
+## pi
+
+- **CLI**: `pi` (from `@mariozechner/pi-coding-agent`, see [pi.dev](https://pi.dev))
+- **Instructions file**: `AGENTS.md` (pi also auto-reads `CLAUDE.md` via context-file discovery)
+- **Default model**: `sonnet`
+- **Command**: `pi --mode json --no-session --model <model> <prompt>`
+- **Token source**: JSON event stream on stdout → find the last `agent_end` event, sum `messages[*].usage.input` / `.output` across assistant messages. Falls back to summing `turn_end.message.usage` events if the stream is truncated.
+- **Cost source**: same path, summed from `usage.cost.total`
+- **Env**: provider-specific API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) set by the consumer; harness does not inject them
+
+### Output shape
+pi emits one JSON object per stdout line:
+```json
+{"type":"session","version":3,"id":"...","cwd":"..."}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_end","message":{"role":"assistant","usage":{"input":1200,"output":340,"cost":{"total":0.0087}}}}
+{"type":"turn_end","message":{"role":"assistant","usage":{...}},"toolResults":[]}
+{"type":"agent_end","messages":[{"role":"user","content":"..."},{"role":"assistant","usage":{...}}]}
+```
+
+The adapter prefers `agent_end.messages` (authoritative final state) over per-turn events.
+
+Full event reference: [pi-mono/packages/coding-agent/docs/json.md](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/json.md).
 
 ---
 

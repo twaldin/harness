@@ -26,6 +26,11 @@ class ClaudeCodeAdapter(Adapter):
             "--output-format", "json",
             "--dangerously-skip-permissions",
         ]
+        # `claude -p --dangerously-skip-permissions` does NOT auto-walk the
+        # workdir for CLAUDE.md during print-mode execution. Inject the
+        # instructions explicitly so the model actually sees them.
+        if spec.instructions:
+            args += ["--append-system-prompt", spec.instructions]
         return BuildCommand(cmd="claude", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:

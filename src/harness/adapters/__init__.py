@@ -5,6 +5,7 @@ from harness.adapters.codex import CodexAdapter
 from harness.adapters.continue_cli import ContinueCliAdapter
 from harness.adapters.gemini import GeminiAdapter
 from harness.adapters.opencode import OpenCodeAdapter
+from harness.adapters.pi import PiAdapter
 from harness.adapters.qwen import QwenAdapter
 from harness.adapters.swe_agent import SweAgentAdapter
 from harness.registry import register
@@ -17,6 +18,7 @@ register("aider", AiderAdapter)
 register("swe-agent", SweAgentAdapter)
 register("qwen", QwenAdapter)
 register("continue-cli", ContinueCliAdapter)
+register("pi", PiAdapter)
 
 __all__ = [
     "AiderAdapter",
@@ -25,6 +27,7 @@ __all__ = [
     "ContinueCliAdapter",
     "GeminiAdapter",
     "OpenCodeAdapter",
+    "PiAdapter",
     "QwenAdapter",
     "SweAgentAdapter",
 ]

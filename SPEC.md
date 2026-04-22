@@ -279,6 +279,29 @@ Cost and tokens come from the `--json` envelope emitted on stdout.
 }
 ```
 
+### pi
+
+Cost and tokens are summed from assistant messages in the `--mode json` event stream.
+
+```json
+{
+  "harness": "pi",
+  "model": "sonnet",
+  "exitCode": 0,
+  "durationSeconds": 4.8,
+  "timedOut": false,
+  "costUsd": 0.0087,
+  "tokensIn": 1200,
+  "tokensOut": 340,
+  "raw": [
+    { "type": "session", "version": 3, "id": "..." },
+    { "type": "agent_start" },
+    { "type": "turn_end", "message": { "role": "assistant", "usage": { "input": 1200, "output": 340, "cost": { "total": 0.0087 } } } },
+    { "type": "agent_end", "messages": [ { "role": "assistant", "usage": { "input": 1200, "output": 340, "cost": { "total": 0.0087 } } } ] }
+  ]
+}
+```
+
 ---
 
 ## Adapter contract

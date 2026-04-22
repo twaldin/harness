@@ -22,6 +22,15 @@ class SubprocOutcome:
     timed_out: bool
 
 
+@dataclass
+class InstructionProjection:
+    workdir: Path
+    filename: str
+    file_path: Path
+    existed_before: bool
+    backup_path: Path
+
+
 def run_subprocess(
     cmd: list[str],
     *,
@@ -127,5 +136,78 @@ def write_instructions(workdir: Path, filename: str, content: str | None) -> Pat
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     path = workdir / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def project_instructions(
+    workdir: Path,
+    filename: str,
+    content: str,
+    *,
+    mode: str = "replace",
+    backup: bool = True,
+) -> InstructionProjection:
+    """Project instructions into a file, preserving enough metadata to restore.
+
+    mode:
+      - "replace": overwrite existing file content
+      - "prepend": prepend with a blank line separator
+    """
+    workdir = Path(workdir)
+    file_path = workdir / filename
+    backup_path = workdir / f".harness-backup-{filename}"
+    existed_before = file_path.exists()
+
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if existed_before:
+        existing = file_path.read_text(encoding="utf-8")
+        if backup:
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            backup_path.write_text(existing, encoding="utf-8")
+        if mode == "prepend":
+            file_path.write_text(f"{content}\n\n{existing}", encoding="utf-8")
+        else:
+            file_path.write_text(f"{content}\n", encoding="utf-8")
+    else:
+        file_path.write_text(f"{content}\n", encoding="utf-8")
+
+    return InstructionProjection(
+        workdir=workdir,
+        filename=filename,
+        file_path=file_path,
+        existed_before=existed_before,
+        backup_path=backup_path,
+    )
+
+
+def restore_projected_instructions(projection: InstructionProjection) -> None:
+    """Undo project_instructions using returned projection metadata."""
+    if projection.backup_path.exists():
+        projection.file_path.parent.mkdir(parents=True, exist_ok=True)
+        projection.file_path.write_text(projection.backup_path.read_text(encoding="utf-8"), encoding="utf-8")
+        try:
+            projection.backup_path.unlink()
+        except OSError:
+            pass
+        return
+
+    if not projection.existed_before and projection.file_path.exists():
+        try:
+            projection.file_path.unlink()
+        except OSError:
+            return
+        _prune_empty_parents(projection.file_path.parent, projection.workdir)
+
+
+def _prune_empty_parents(current: Path, root: Path) -> None:
+    while current != root:
+        try:
+            if any(current.iterdir()):
+                return
+            current.rmdir()
+            current = current.parent
+        except OSError:
+            return

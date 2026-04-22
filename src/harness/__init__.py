@@ -5,6 +5,12 @@ Public API:
 """
 from harness.base import BuildCommand, HarnessError, RunResult, RunSpec
 from harness.registry import build_command, list_adapters, parse_output, run, run_async
+from harness._subproc import (
+    InstructionProjection,
+    project_instructions,
+    restore_projected_instructions,
+    write_instructions,
+)
 
 __all__ = [
     "BuildCommand",
@@ -12,6 +18,10 @@ __all__ = [
     "RunResult",
     "RunSpec",
     "build_command",
+    "project_instructions",
+    "restore_projected_instructions",
+    "InstructionProjection",
+    "write_instructions",
     "list_adapters",
     "parse_output",
     "run",

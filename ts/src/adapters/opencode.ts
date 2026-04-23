@@ -5,6 +5,7 @@ import { homedir } from 'os'
 import { existsSync } from 'fs'
 import { resolve, basename } from 'path'
 import { createRequire } from 'module'
+import { normalizeModelForHarness } from '../model-normalization.js'
 
 function openCodeDbPath(): string {
   const envPath = process.env['OPENCODE_DB']
@@ -107,10 +108,10 @@ function readOpenCodeSessionTotals(
 const openCodeAdapter: Adapter = {
   name: 'opencode',
   instructionsFilename: 'AGENTS.md',
-  defaultModel: 'openai/gpt-5.4',
+  defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = spec.model ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     return {
       cmd: 'opencode',

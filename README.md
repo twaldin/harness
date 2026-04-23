@@ -1,6 +1,6 @@
 # harness
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -60,7 +60,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all nine adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all thirteen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 
@@ -90,19 +90,21 @@ print(f"exit={result.exit_code} cost=${result.cost_usd:.4f} "
 ```python
 for spec in [
     RunSpec(harness="claude-code", model="sonnet",          prompt=task, workdir=wd),
-    RunSpec(harness="opencode",    model="openai/gpt-5.4",  prompt=task, workdir=wd),
+    RunSpec(harness="opencode",    model="gpt-5.4",         prompt=task, workdir=wd),
     RunSpec(harness="gemini",      model="gemini-2.5-pro",  prompt=task, workdir=wd),
 ]:
     r = run(spec)
     print(f"{spec.harness:12} {spec.model:25} ${r.cost_usd or 0:.4f}")
 ```
 
+Canonical model names like `gpt-5.4` are normalized per harness at command-build time. Provider-prefixed forms are added where required (for example `opencode -> openai/gpt-5.4`) and stripped for CLIs that expect bare model IDs.
+
 ### "Inject a system prompt / agent guide"
 
 ```python
 result = run(RunSpec(
     harness="opencode",
-    model="openai/gpt-5.4",
+    model="gpt-5.4",
     prompt="Fix the failing test described in the issue.",
     workdir=Path("/tmp/repo"),
     instructions="""You are an autonomous bug-fixing agent. No human will respond.
@@ -112,7 +114,7 @@ verify, then stop. Make the smallest possible change.""",
 ))
 ```
 
-`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code, `AGENTS.md` for opencode/codex/pi, `GEMINI.md` for gemini, `QWEN.md` for qwen, `CONTINUE.md` for continue-cli, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
+`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code/openclaude, `AGENTS.md` for opencode/codex/pi/factory-droid/crush/kilo, `GEMINI.md` for gemini, `QWEN.md` for qwen, `CONTINUE.md` for continue-cli, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
 
 ### "Use from TypeScript — command construction only (no subprocess)"
 
@@ -173,7 +175,7 @@ See [`ts/README.md`](ts/README.md) for full TypeScript docs.
 
 ```bash
 harness list
-harness run --harness opencode --model openai/gpt-5.4 \
+harness run --harness opencode --model gpt-5.4 \
     --workdir /tmp/repo --instructions /tmp/agents.md \
     --timeout 1800 \
     "Fix the failing tests."
@@ -184,7 +186,7 @@ Add `--json` to emit a structured RunResult on stdout:
 ```json
 {
   "harness": "opencode",
-  "model": "openai/gpt-5.4",
+  "model": "gpt-5.4",
   "exit_code": 0,
   "duration_seconds": 47.2,
   "cost_usd": 0.0821,
@@ -244,7 +246,15 @@ Looking for a pre-scoped first PR? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md).
 
 ## Status
 
-v0.4 — nine adapters shipped: `claude-code`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`.
+v0.5 — thirteen adapters shipped: `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush`.
+
+### Linux/container caveats (harness-bench)
+
+- `openclaude`, `factory-droid`, and `kilo` are Node CLIs; use Node `>=20` in task containers.
+- `kilo` and `crush` adapters force deterministic per-workdir sqlite locations (`<workdir>/.harness/...`) for container-safe metrics parsing.
+- `kilo` and `crush` enforce strict same-model defaults (`model == small_model`) to avoid helper-model drift.
+- `openclaude` adapter does not set `--fallback-model`; single-model runs are default.
+- `factory-droid` adapter pins `--model` and `--spec-model` to the same value for fairness.
 
 Pending:
 - Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).

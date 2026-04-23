@@ -10,6 +10,7 @@ import json
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
 from harness.base import Adapter, BuildCommand, RunResult, RunSpec
+from harness.model_normalization import normalize_model_for_harness
 
 
 class QwenAdapter(Adapter):
@@ -19,7 +20,7 @@ class QwenAdapter(Adapter):
     DEFAULT_MODEL = "qwen3-coder"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = spec.model or self.DEFAULT_MODEL
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = ["-p", spec.prompt, "-y", "-m", model, "--output-format", "json"]
         return BuildCommand(cmd="qwen", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)

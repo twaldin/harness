@@ -20,17 +20,18 @@ from pathlib import Path
 
 from harness._subproc import SubprocOutcome, run_subprocess
 from harness.base import Adapter, BuildCommand, HarnessError, RunResult, RunSpec
+from harness.model_normalization import normalize_model_for_harness
 
 
 class SweAgentAdapter(Adapter):
     name = "swe-agent"
     instructions_filename = ""  # not file-based; folded into prompt
 
-    DEFAULT_MODEL = "openai/gpt-5.4"
+    DEFAULT_MODEL = "gpt-5.4"
     DEFAULT_COST_LIMIT_USD = 10.0
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = spec.model or self.DEFAULT_MODEL
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
         wrapper = _resolve_wrapper(spec.env)
 
         workdir = Path(spec.workdir)

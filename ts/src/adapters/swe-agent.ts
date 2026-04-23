@@ -4,6 +4,7 @@ import { HarnessError } from '../base.js'
 import { homedir } from 'os'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { resolve } from 'path'
+import { normalizeModelForHarness } from '../model-normalization.js'
 
 const DEFAULT_COST_LIMIT_USD = 10.0
 
@@ -65,10 +66,10 @@ function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensO
 const sweAgentAdapter: Adapter = {
   name: 'swe-agent',
   instructionsFilename: '',
-  defaultModel: 'openai/gpt-5.4',
+  defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = spec.model ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
     const wrapper = resolveWrapper(spec.env)
 
     const trajDir = `${spec.workdir}/.harness`

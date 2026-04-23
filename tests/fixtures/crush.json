@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "harness": "crush",
+    "prompt": "fix lint warnings",
+    "workdir": "/tmp/harness-fixture-crush",
+    "model": "gpt-5.4",
+    "instructions": "No refactors.\n",
+    "timeoutSeconds": 900
+  },
+  "expectedCommand": {
+    "cmd": "crush",
+    "args": [
+      "--yolo",
+      "--data-dir",
+      "/tmp/harness-fixture-crush/.harness/crush-data",
+      "run",
+      "--model",
+      "gpt-5.4",
+      "--small-model",
+      "gpt-5.4",
+      "fix lint warnings"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-crush/AGENTS.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 18.0,
+    "timedOut": false,
+    "stdout": "done",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "note": "crush token/cost values are read from crush.db after exit. With no DB fixture in this test, parseOutput returns null metrics."
+  }
+}

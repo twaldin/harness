@@ -15,16 +15,17 @@ from pathlib import Path
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
 from harness.base import Adapter, BuildCommand, RunResult, RunSpec
+from harness.model_normalization import normalize_model_for_harness
 
 
 class OpenCodeAdapter(Adapter):
     name = "opencode"
     instructions_filename = "AGENTS.md"
 
-    DEFAULT_MODEL = "openai/gpt-5.4"
+    DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = spec.model or self.DEFAULT_MODEL
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = ["run", "--dir", str(spec.workdir), "--model", model, spec.prompt]
         return BuildCommand(cmd="opencode", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)

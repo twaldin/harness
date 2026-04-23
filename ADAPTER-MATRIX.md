@@ -2,7 +2,7 @@
 
 Per-CLI reference: what flags get built, what instructions filename gets written, how tokens/cost are parsed. **This is the source of truth both `harness` (py) and `@twaldin/harness-ts` implement.** Fixture tests in `tests/fixtures/` enforce byte-level agreement.
 
-Last updated: 2026-04-22. Python source: `src/harness/adapters/*.py`.
+Last updated: 2026-04-23. Python source: `src/harness/adapters/*.py`.
 
 ---
 
@@ -11,6 +11,8 @@ Last updated: 2026-04-22. Python source: `src/harness/adapters/*.py`.
 | adapter      | `cost_usd`        | `tokens_in` / `tokens_out`    | source                            |
 | ------------ | ----------------- | ----------------------------- | --------------------------------- |
 | claude-code  | populated         | populated                     | `--output-format json` envelope   |
+| openclaude   | populated         | populated                     | `--output-format json` envelope   |
+| factory-droid| populated         | populated                     | `--output-format json` envelope   |
 | opencode     | populated         | populated                     | sqlite session DB post-exit       |
 | codex        | **null**          | populated (summed from JSONL) | JSONL turn events on stdout       |
 | gemini       | **null**          | populated (summed)            | JSON envelope `stats.models`      |
@@ -19,8 +21,24 @@ Last updated: 2026-04-22. Python source: `src/harness/adapters/*.py`.
 | qwen         | **null**          | populated                     | JSON array, last `type:'result'` item `usage` |
 | continue-cli | populated         | populated                     | `--json` envelope `usage`         |
 | pi           | populated         | populated                     | `--mode json` event stream, summed from `agent_end.messages[].usage` |
+| crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
+| kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
 
-Cost is null for codex, gemini, and aider because those CLIs don't emit pricing data. Use your own per-token pricing if you need cost attribution for these adapters.
+Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pricing data. Use your own per-token pricing if you need cost attribution for these adapters.
+
+---
+
+## Cross-cutting: model normalization
+
+- Canonical model names (for example `gpt-5.4`) are accepted across adapters.
+- Harness normalizes model IDs at `buildCommand` time:
+  - **Provider-required CLIs** (`opencode`, `swe-agent`, `aider`, `kilo`) get `provider/model` forms.
+  - **Bare-model CLIs** (`codex`, `claude-code`, `openclaude`, `factory-droid`, `continue-cli`, `qwen`, `pi`, `gemini`, `crush`) get provider prefixes stripped.
+- Fairness default for frontier adapters is strict single-model:
+  - `crush`: `--model == --small-model`
+  - `kilo`: `model == small_model` via `KILO_CONFIG_CONTENT`
+  - `openclaude`: no `--fallback-model`
+  - `factory-droid`: `--model == --spec-model`
 
 ---
 
@@ -38,6 +56,36 @@ Cost is null for codex, gemini, and aider because those CLIs don't emit pricing 
 ```json
 { "type": "result", "result": "...", "usage": { "input_tokens": N, "output_tokens": M }, "total_cost_usd": 0.034 }
 ```
+
+---
+
+## openclaude
+
+- **CLI**: `openclaude`
+- **Instructions file**: `CLAUDE.md`
+- **Default model**: `gpt-5.4`
+- **Command**: `openclaude -p <prompt> --model <model> --output-format json --dangerously-skip-permissions`
+- **OpenAI-compatible mode**: when caller provides `OPENAI_API_KEY` or `OPENAI_BASE_URL`, harness sets `CLAUDE_CODE_USE_OPENAI=1`, passes `--provider openai`, and sets `OPENAI_MODEL=<model>` unless already set.
+- **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
+- **Cost source**: JSON envelope → `total_cost_usd`
+- **Fairness**: harness does not pass `--fallback-model` (single-model default)
+
+### Output shape
+```json
+{ "type": "result", "subtype": "success", "usage": { "input_tokens": N, "output_tokens": M }, "total_cost_usd": 0.012 }
+```
+
+---
+
+## factory-droid
+
+- **CLI**: `droid`
+- **Instructions file**: `AGENTS.md`
+- **Default model**: `gpt-5.4`
+- **Command**: `droid exec --output-format json --auto --skip-permissions-unsafe --model <model> --spec-model <model> <prompt>`
+- **Token source**: JSON envelope on stdout → `usage.{input_tokens,output_tokens}` (fallbacks: `usage.{input,output}`)
+- **Cost source**: JSON envelope → `total_cost_usd` (fallbacks to `usage.cost[.total]`)
+- **Fairness**: harness pins `--model` and `--spec-model` to the same normalized model
 
 ---
 
@@ -91,7 +139,7 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`
 
 - **CLI**: `opencode`
 - **Instructions file**: `AGENTS.md`
-- **Default model**: `openai/gpt-5.4`
+- **Default model**: `gpt-5.4` (normalized to `openai/gpt-5.4` for CLI invocation)
 - **Command**: `opencode run --dir <workdir> --model <model> <prompt>`
 - **Token source**: sqlite read from `~/.local/share/opencode/opencode.db` (override via `OPENCODE_DB` env var) — find session where `directory LIKE %<workdir-basename>%`, sum `message.data.tokens.{input,output}`
 - **Cost source**: same sqlite — sum `message.data.cost`
@@ -136,7 +184,7 @@ Tokens: 12.3k sent, 2,145 received
 
 - **CLI**: `python3 <wrapper>` (NOT a native CLI — wraps mini-swe-agent Python API)
 - **Instructions file**: none; folded into prompt via `<instructions>\n\n---\n\n<prompt>`
-- **Default model**: `openai/gpt-5.4`
+- **Default model**: `gpt-5.4` (normalized to `openai/gpt-5.4` for wrapper invocation)
 - **Wrapper resolution**: `env.SWE_WRAPPER` → `~/agentelo/bin/run-mini-swe.py` → error
 - **Command**: `python3 <wrapper> --model <model> --task <combined-prompt> --cwd <workdir> --cost-limit 10.0 --output <workdir>/.harness/swe-traj.json`
 - **Side effect**: creates `<workdir>/.harness/` before exec
@@ -219,6 +267,61 @@ pi emits one JSON object per stdout line:
 The adapter prefers `agent_end.messages` (authoritative final state) over per-turn events.
 
 Full event reference: [pi-mono/packages/coding-agent/docs/json.md](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/json.md).
+
+---
+
+## crush
+
+- **CLI**: `crush`
+- **Instructions file**: `AGENTS.md`
+- **Default model**: `gpt-5.4`
+- **Command**: `crush --yolo --data-dir <workdir>/.harness/crush-data run --model <model> --small-model <model> <prompt>`
+- **Token source**: sqlite `<data-dir>/crush.db` (`sessions.prompt_tokens`, `sessions.completion_tokens`)
+- **Cost source**: sqlite `<data-dir>/crush.db` (`sessions.cost`)
+- **Fairness**: harness always passes both `--model` and `--small-model` with the same normalized model
+- **Container note**: adapter uses per-workdir `--data-dir` by default for deterministic DB lookup in task containers
+
+### Post-exit DB query
+
+```sql
+SELECT prompt_tokens, completion_tokens, cost
+FROM sessions
+WHERE parent_session_id IS NULL
+ORDER BY updated_at DESC
+LIMIT 1
+```
+
+---
+
+## kilo
+
+- **CLI**: `kilo`
+- **Instructions file**: `AGENTS.md`
+- **Default model**: `gpt-5.4`
+- **Command**: `kilo run --auto --format json --dir <workdir> --model <provider/model> <prompt>`
+- **Env defaults set by adapter**:
+  - `KILO_DB=<workdir>/.harness/kilo/kilo.db`
+  - `KILO_CONFIG_CONTENT={"model":"<provider/model>","small_model":"<provider/model>","default_agent":"build"}`
+- **Token source**: sqlite `message.data.tokens.{input,output}` summed over assistant rows for latest matching session
+- **Cost source**: sqlite `message.data.cost` summed over assistant rows for latest matching session
+- **Fairness**: `model == small_model`, with `default_agent=build` to avoid planner-mode model drift
+
+### Post-exit DB query
+
+```sql
+SELECT
+  COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
+  COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
+  COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost
+FROM message
+WHERE session_id IN (
+  SELECT id FROM session
+  WHERE directory LIKE ?
+  ORDER BY time_updated DESC
+  LIMIT 1
+)
+AND json_extract(data, '$.role') = 'assistant'
+```
 
 ---
 

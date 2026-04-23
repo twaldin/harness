@@ -284,7 +284,7 @@ def test_swe_agent_build_command(tmp_path):
     assert bc.cmd == "python3"
     assert bc.args[0] == str(wrapper)
     assert "--model" in bc.args
-    assert bc.args[bc.args.index("--model") + 1] == fx["spec"]["model"]
+    assert bc.args[bc.args.index("--model") + 1] == fx["expectedCommand"]["args"][2]
     assert "--task" in bc.args
     task = bc.args[bc.args.index("--task") + 1]
     assert fx["spec"]["instructions"].rstrip() in task
@@ -426,3 +426,183 @@ def test_pi_parse_output():
     assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
     assert parsed["tokens_in"] == expected["tokens_in"]
     assert parsed["tokens_out"] == expected["tokens_out"]
+
+
+# ── Fixture: factory-droid ──────────────────────────────────────────────────
+
+
+def test_factory_droid_build_command(tmp_path):
+    fx = _load_fixture("factory-droid")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    adapter = get_adapter("factory-droid")
+    bc = adapter.build_command(spec)
+
+    assert bc.cmd == fx["expectedCommand"]["cmd"]
+    assert bc.args == fx["expectedCommand"]["args"]
+    assert bc.instructions_file == tmp_path / "AGENTS.md"
+    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+
+
+def test_factory_droid_parse_output():
+    fx = _load_fixture("factory-droid")
+    spec = _make_spec(fx["spec"])
+    outcome = _make_outcome(fx["sampleOutput"])
+    adapter = get_adapter("factory-droid")
+    parsed = adapter.parse_output(spec, outcome)
+
+    expected = _normalize_parsed(fx["expectedParsed"])
+    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
+    assert parsed["tokens_in"] == expected["tokens_in"]
+    assert parsed["tokens_out"] == expected["tokens_out"]
+
+
+# ── Fixture: openclaude ─────────────────────────────────────────────────────
+
+
+def test_openclaude_build_command(tmp_path):
+    fx = _load_fixture("openclaude")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    adapter = get_adapter("openclaude")
+    bc = adapter.build_command(spec)
+
+    assert bc.cmd == fx["expectedCommand"]["cmd"]
+    assert bc.args == fx["expectedCommand"]["args"]
+    assert bc.instructions_file == tmp_path / "CLAUDE.md"
+    assert (tmp_path / "CLAUDE.md").read_text() == spec.instructions
+    assert bc.env["CLAUDE_CODE_USE_OPENAI"] == "1"
+    assert bc.env["OPENAI_MODEL"] == "gpt-5.4"
+
+
+def test_openclaude_parse_output():
+    fx = _load_fixture("openclaude")
+    spec = _make_spec(fx["spec"])
+    outcome = _make_outcome(fx["sampleOutput"])
+    adapter = get_adapter("openclaude")
+    parsed = adapter.parse_output(spec, outcome)
+
+    expected = _normalize_parsed(fx["expectedParsed"])
+    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
+    assert parsed["tokens_in"] == expected["tokens_in"]
+    assert parsed["tokens_out"] == expected["tokens_out"]
+
+
+# ── Fixture: crush ──────────────────────────────────────────────────────────
+
+
+def test_crush_build_command(tmp_path):
+    fx = _load_fixture("crush")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    adapter = get_adapter("crush")
+    bc = adapter.build_command(spec)
+
+    fixture_workdir = fx["spec"]["workdir"]
+    expected_args = [
+        str(tmp_path / ".harness" / "crush-data") if a == f"{fixture_workdir}/.harness/crush-data" else a
+        for a in fx["expectedCommand"]["args"]
+    ]
+    assert bc.cmd == fx["expectedCommand"]["cmd"]
+    assert bc.args == expected_args
+    assert bc.instructions_file == tmp_path / "AGENTS.md"
+    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+    assert bc.args[bc.args.index("--model") + 1] == bc.args[bc.args.index("--small-model") + 1]
+
+
+def test_crush_parse_output_no_db(tmp_path):
+    fx = _load_fixture("crush")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    outcome = _make_outcome(fx["sampleOutput"])
+    adapter = get_adapter("crush")
+    parsed = adapter.parse_output(spec, outcome)
+
+    assert parsed["cost_usd"] is None
+    assert parsed["tokens_in"] is None
+    assert parsed["tokens_out"] is None
+
+
+# ── Fixture: kilo ───────────────────────────────────────────────────────────
+
+
+def test_kilo_build_command(tmp_path):
+    fx = _load_fixture("kilo")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    adapter = get_adapter("kilo")
+    bc = adapter.build_command(spec)
+
+    fixture_workdir = fx["spec"]["workdir"]
+    expected_args = [str(tmp_path) if a == fixture_workdir else a for a in fx["expectedCommand"]["args"]]
+
+    assert bc.cmd == fx["expectedCommand"]["cmd"]
+    assert bc.args == expected_args
+    assert bc.instructions_file == tmp_path / "AGENTS.md"
+    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+    assert bc.env["KILO_DB"] == str(tmp_path / ".harness" / "kilo" / "kilo.db")
+    cfg = json.loads(bc.env["KILO_CONFIG_CONTENT"])
+    assert cfg["model"] == "openai/gpt-5.4"
+    assert cfg["small_model"] == "openai/gpt-5.4"
+    assert cfg["default_agent"] == "build"
+
+
+def test_kilo_parse_output_no_db(tmp_path):
+    fx = _load_fixture("kilo")
+    spec = _make_spec(fx["spec"])
+    spec = RunSpec(
+        harness=spec.harness,
+        prompt=spec.prompt,
+        workdir=tmp_path,
+        model=spec.model,
+        instructions=spec.instructions,
+        timeout_seconds=spec.timeout_seconds,
+        env=spec.env,
+    )
+    outcome = _make_outcome(fx["sampleOutput"])
+    adapter = get_adapter("kilo")
+    parsed = adapter.parse_output(spec, outcome)
+
+    assert parsed["cost_usd"] is None
+    assert parsed["tokens_in"] is None
+    assert parsed["tokens_out"] is None

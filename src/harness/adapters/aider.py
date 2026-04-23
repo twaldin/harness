@@ -16,6 +16,7 @@ from pathlib import Path
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
 from harness.base import Adapter, BuildCommand, RunResult, RunSpec
+from harness.model_normalization import normalize_model_for_harness
 
 
 class AiderAdapter(Adapter):
@@ -27,7 +28,7 @@ class AiderAdapter(Adapter):
     TOKEN_RE = re.compile(r"Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received", re.IGNORECASE)
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = spec.model or self.DEFAULT_MODEL
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
         workdir = Path(spec.workdir)
         instructions_file = write_instructions(workdir, self.instructions_filename, spec.instructions)
 

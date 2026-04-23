@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (6 adapters)
+│   ├── adapters/*.py       (13 adapters)
 │   └── _subproc.py         (shared helpers)
 └── ts/                     (typescript, new)
     ├── package.json        (@twaldin/harness-ts)
@@ -34,10 +34,10 @@ Both implementations export exactly these symbols.
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent"
+  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "crush" | "kilo"
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // absolute path; cwd for the subprocess
-  model?: string                   // adapter-specific identifier (see ADAPTER-MATRIX.md)
+  model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
   instructions?: string            // content written to per-harness instructions file
   timeoutSeconds?: number          // default 1800
   env?: Record<string, string>     // extra env vars merged onto process.env
@@ -185,7 +185,7 @@ Cost and tokens come from the sqlite session DB read after the process exits.
 ```json
 {
   "harness": "opencode",
-  "model": "openai/gpt-5.4",
+  "model": "gpt-5.4",
   "exitCode": 0,
   "durationSeconds": 21.4,
   "timedOut": false,
@@ -221,7 +221,7 @@ Cost and tokens come from the trajectory JSON file written by the wrapper.
 ```json
 {
   "harness": "swe-agent",
-  "model": "openai/gpt-5.4",
+  "model": "gpt-5.4",
   "exitCode": 0,
   "durationSeconds": 94.3,
   "timedOut": false,
@@ -317,7 +317,7 @@ Each adapter provides:
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
 `buildCommand` MAY write files (instructions, config) but MUST NOT fork a subprocess.
-`parseOutput` MAY read files the CLI wrote (opencode's sqlite DB, swe-agent's traj JSON) but MUST NOT block on I/O > 5s.
+`parseOutput` MAY read files the CLI wrote (opencode/kilo/crush sqlite DBs, swe-agent trajectory JSON) but MUST NOT block on I/O > 5s.
 
 ### JSON-fixture-driven verification
 
@@ -361,7 +361,7 @@ This is the primary drift-prevention mechanism: adding a new adapter flag in py 
 
 ## Environment handling
 
-Adapters MAY set env vars (opencode reads `OPENCODE_DB`, swe-agent reads `SWE_WRAPPER`). These go in `BuildCommand.env`. The caller merges `env` onto `process.env` at exec time.
+Adapters MAY set env vars (for example `OPENCODE_DB`, `KILO_DB`, `KILO_CONFIG_CONTENT`, `CLAUDE_CODE_USE_OPENAI`; `swe-agent` also reads `SWE_WRAPPER`). These go in `BuildCommand.env`. The caller merges `env` onto `process.env` at exec time.
 
 Adapters MUST NOT read env vars for USER secrets (API keys). Those are user-env responsibility. If an adapter needs an API key, it expects the caller to have set it (e.g. `ANTHROPIC_API_KEY`, `GOOGLE_CLOUD_PROJECT`).
 
@@ -371,10 +371,10 @@ Exception: `extraEnv` from RunSpec.env is always passed through unchanged.
 
 ## Registry behavior
 
-At import of the harness package, all 8 adapters self-register. `listAdapters()` returns:
+At import of the harness package, all shipped adapters self-register. `listAdapters()` returns:
 
 ```
-["aider", "claude-code", "codex", "continue-cli", "gemini", "opencode", "qwen", "swe-agent"]
+["aider", "claude-code", "codex", "continue-cli", "crush", "factory-droid", "gemini", "kilo", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)
@@ -401,7 +401,7 @@ Harness ships ONLY: CLI command construction, output parsing, and convenience `r
 ## Compatibility guarantees
 
 - Field names in RunSpec/RunResult are STABLE. Adding fields is non-breaking; renaming/removing is a major version bump.
-- Adapter registration is STABLE — the 6 adapters always exist with the listed names.
+- Adapter registration is STABLE — the shipped adapters always exist with the listed names.
 - Default models MAY change across minor versions. Consumers that pin should specify `spec.model` explicitly.
 - Command flag construction MAY change within a major version if the upstream CLI changes flags. Fixture updates go in the same PR.
 

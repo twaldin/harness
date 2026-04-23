@@ -1,6 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import { normalizeModelForHarness } from '../model-normalization.js'
 
 function stripMarkdownFences(s: string): string {
   const m = /^```(?:[a-z]+)?\n([\s\S]*?)\n```\s*$/.exec(s)
@@ -13,7 +14,7 @@ const claudeCodeAdapter: Adapter = {
   defaultModel: 'sonnet',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = spec.model ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     const args = ['-p', spec.prompt, '--model', model, '--output-format', 'json', '--dangerously-skip-permissions']
     // -p mode does not auto-walk workdir for CLAUDE.md; inject explicitly so

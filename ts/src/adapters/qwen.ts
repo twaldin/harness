@@ -1,6 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import { normalizeModelForHarness } from '../model-normalization.js'
 
 const qwenAdapter: Adapter = {
   name: 'qwen',
@@ -8,7 +9,7 @@ const qwenAdapter: Adapter = {
   defaultModel: 'qwen3-coder',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = spec.model ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     return {
       cmd: 'qwen',

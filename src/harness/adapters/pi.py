@@ -21,6 +21,7 @@ import json
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
 from harness.base import Adapter, BuildCommand, RunResult, RunSpec
+from harness.model_normalization import normalize_model_for_harness
 
 
 class PiAdapter(Adapter):
@@ -30,7 +31,7 @@ class PiAdapter(Adapter):
     DEFAULT_MODEL = "sonnet"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = spec.model or self.DEFAULT_MODEL
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = ["--mode", "json", "--no-session", "--model", model, spec.prompt]
         return BuildCommand(cmd="pi", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)

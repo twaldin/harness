@@ -9,7 +9,7 @@ const qwenAdapter: Adapter = {
   defaultModel: 'qwen3-coder',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     return {
       cmd: 'qwen',

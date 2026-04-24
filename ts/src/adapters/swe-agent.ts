@@ -69,7 +69,7 @@ const sweAgentAdapter: Adapter = {
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const wrapper = resolveWrapper(spec.env)
 
     const trajDir = `${spec.workdir}/.harness`

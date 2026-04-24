@@ -14,7 +14,7 @@ const claudeCodeAdapter: Adapter = {
   defaultModel: 'sonnet',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     const args = ['-p', spec.prompt, '--model', model, '--output-format', 'json', '--dangerously-skip-permissions']
     // -p mode does not auto-walk workdir for CLAUDE.md; inject explicitly so

@@ -47,14 +47,12 @@ const openClaudeAdapter: Adapter = {
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     const args = [
       '-p',
       spec.prompt,
-      '--model',
-      model,
       '--output-format',
       'json',
       '--dangerously-skip-permissions',
@@ -64,12 +62,16 @@ const openClaudeAdapter: Adapter = {
     }
 
     const env: Record<string, string> = {}
+    // OpenAI-compatible provider path: prefer env-based setup. openclaude's
+    // README documents OPENAI_MODEL + CLAUDE_CODE_USE_OPENAI rather than an
+    // explicit --model flag for custom OpenAI-compatible endpoints.
     if ((spec.env ?? {})['OPENAI_API_KEY'] || (spec.env ?? {})['OPENAI_BASE_URL']) {
       env['CLAUDE_CODE_USE_OPENAI'] = '1'
-      args.push('--provider', 'openai')
       if (!(spec.env ?? {})['OPENAI_MODEL']) {
         env['OPENAI_MODEL'] = model
       }
+    } else {
+      args.push('--model', model)
     }
 
     return {

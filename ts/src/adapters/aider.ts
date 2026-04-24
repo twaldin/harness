@@ -23,7 +23,7 @@ const aiderAdapter: Adapter = {
   defaultModel: 'openrouter/anthropic/claude-sonnet-4.6',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     const configPath = `${spec.workdir}/.agentelo-aider.yml`

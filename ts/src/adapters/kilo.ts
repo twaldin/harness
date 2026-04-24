@@ -110,11 +110,18 @@ const kiloAdapter: Adapter = {
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     const dbPath = kiloDbPath(spec.workdir, spec.env)
-    mkdirSync(dirname(dbPath), { recursive: true })
+    // Only attempt mkdir if the parent path sits under a writable prefix on
+    // the host. When KILO_DB points at a container-only path (e.g. /app/...),
+    // leave dir creation to the runtime inside the container.
+    try {
+      mkdirSync(dirname(dbPath), { recursive: true })
+    } catch {
+      // intentionally ignore: container-only paths
+    }
 
     const configJson = JSON.stringify({
       model,

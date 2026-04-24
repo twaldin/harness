@@ -88,14 +88,14 @@ const crushAdapter: Adapter = {
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel) ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     const dataDir = crushDataDir(spec.workdir, spec.env)
     mkdirSync(dataDir, { recursive: true })
 
     return {
       cmd: 'crush',
-      args: ['--yolo', '--data-dir', dataDir, 'run', '--model', model, '--small-model', model, spec.prompt],
+      args: ['run', '--data-dir', dataDir, '--model', model, '--small-model', model, spec.prompt],
       cwd: spec.workdir,
       env: {},
       instructionsFile,

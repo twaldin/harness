@@ -6,6 +6,11 @@ export interface RunSpec {
   instructions?: string
   timeoutSeconds?: number
   env?: Record<string, string>
+  /**
+   * Pass `model` through exactly as provided, without harness-specific
+   * normalization. Escape hatch for odd provider/model combinations.
+   */
+  modelNoResolve?: boolean
 }
 
 export interface BuildCommand {

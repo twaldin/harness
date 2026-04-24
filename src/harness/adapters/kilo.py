@@ -18,12 +18,19 @@ class KiloAdapter(Adapter):
     DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         workdir = Path(spec.workdir)
         db_path = _kilo_db_path(workdir, spec.env)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Only attempt mkdir if the parent path already sits under a writable
+        # prefix on the host. When KILO_DB points at a container-only path
+        # (e.g. /app/...), leave dir creation to the runtime inside the
+        # container.
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
 
         config_json = json.dumps(
             {

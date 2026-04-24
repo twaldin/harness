@@ -15,14 +15,12 @@ class OpenClaudeAdapter(Adapter):
     DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         args = [
             "-p",
             spec.prompt,
-            "--model",
-            model,
             "--output-format",
             "json",
             "--dangerously-skip-permissions",
@@ -31,13 +29,15 @@ class OpenClaudeAdapter(Adapter):
             args += ["--append-system-prompt", spec.instructions]
 
         env: dict[str, str] = {}
-        # OpenAI-compatible provider path: when caller supplied OPENAI_* env,
-        # force provider selection and preserve single-model runs.
+        # OpenAI-compatible provider path: prefer env-based setup. openclaude's
+        # README documents OPENAI_MODEL + CLAUDE_CODE_USE_OPENAI rather than an
+        # explicit --model flag for custom OpenAI-compatible endpoints.
         if spec.env.get("OPENAI_API_KEY") or spec.env.get("OPENAI_BASE_URL"):
             env["CLAUDE_CODE_USE_OPENAI"] = "1"
-            args += ["--provider", "openai"]
             if "OPENAI_MODEL" not in spec.env:
                 env["OPENAI_MODEL"] = model
+        else:
+            args += ["--model", model]
 
         return BuildCommand(
             cmd="openclaude",

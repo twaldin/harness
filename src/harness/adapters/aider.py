@@ -28,7 +28,7 @@ class AiderAdapter(Adapter):
     TOKEN_RE = re.compile(r"Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received", re.IGNORECASE)
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
         workdir = Path(spec.workdir)
         instructions_file = write_instructions(workdir, self.instructions_filename, spec.instructions)
 

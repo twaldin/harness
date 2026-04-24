@@ -10,10 +10,9 @@
   "expectedCommand": {
     "cmd": "crush",
     "args": [
-      "--yolo",
+      "run",
       "--data-dir",
       "/tmp/harness-fixture-crush/.harness/crush-data",
-      "run",
       "--model",
       "gpt-5.4",
       "--small-model",

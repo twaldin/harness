@@ -16,15 +16,11 @@
     "args": [
       "-p",
       "write a one-line changelog entry",
-      "--model",
-      "gpt-5.4",
       "--output-format",
       "json",
       "--dangerously-skip-permissions",
       "--append-system-prompt",
-      "Output exactly one sentence.\n",
-      "--provider",
-      "openai"
+      "Output exactly one sentence.\n"
     ],
     "instructionsFile": "/tmp/harness-fixture-openclaude/CLAUDE.md"
   },

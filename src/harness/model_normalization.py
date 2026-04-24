@@ -8,6 +8,7 @@ from __future__ import annotations
 KNOWN_PROVIDERS = {
     "anthropic",
     "azure",
+    "azure-openai-responses",
     "bedrock",
     "deepseek",
     "gemini",
@@ -16,6 +17,7 @@ KNOWN_PROVIDERS = {
     "mistral",
     "ollama",
     "openai",
+    "openai-codex",
     "openrouter",
     "qwen",
     "vertex",
@@ -26,12 +28,9 @@ BARE_MODEL_HARNESSES = {
     "claude-code",
     "codex",
     "continue-cli",
-    "factory-droid",
     "gemini",
     "openclaude",
-    "pi",
     "qwen",
-    "crush",
 }
 
 PROVIDER_MODEL_HARNESSES = {
@@ -39,6 +38,10 @@ PROVIDER_MODEL_HARNESSES = {
     "kilo",
     "opencode",
     "swe-agent",
+}
+
+PRESERVE_EXPLICIT_PROVIDER_HARNESSES = {
+    "crush",
 }
 
 
@@ -96,17 +99,37 @@ def ensure_provider_prefix(model: str, default_provider: str = "openai") -> str:
     return f"{provider}/{normalized}"
 
 
-def normalize_model_for_harness(harness: str, model: str | None) -> str | None:
-    """Normalize model identifier for the target harness CLI."""
+def normalize_model_for_harness(harness: str, model: str | None, *, resolve: bool = True) -> str | None:
+    """Normalize model identifier for the target harness CLI.
+
+    This is intentionally best-effort, not an exhaustive provider registry.
+    Callers can bypass normalization entirely with ``resolve=False``.
+    """
     if model is None:
         return None
 
     normalized = model.strip()
-    if not normalized:
+    if not normalized or not resolve:
         return normalized
 
+    if harness == "pi":
+        if "/" in normalized:
+            return ensure_provider_prefix(normalized, default_provider="openai-codex")
+        if normalized.lower().startswith("gpt-5"):
+            return ensure_provider_prefix(normalized, default_provider="openai-codex")
+        return normalized
+    if harness == "factory-droid":
+        # droid only reaches a non-Factory endpoint via BYOK custom models,
+        # which require the "custom:" prefix on the model id. We expect the
+        # caller to have a matching entry in ~/.factory/settings.json.
+        bare = strip_known_provider_prefixes(normalized)
+        if bare.startswith("custom:"):
+            return bare
+        return f"custom:{bare}"
     if harness in PROVIDER_MODEL_HARNESSES:
         return ensure_provider_prefix(normalized, default_provider="openai")
+    if harness in PRESERVE_EXPLICIT_PROVIDER_HARNESSES and "/" in normalized:
+        return normalized
     if harness in BARE_MODEL_HARNESSES:
         return strip_known_provider_prefixes(normalized)
     return normalized

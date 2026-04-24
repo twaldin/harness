@@ -3,7 +3,7 @@
     "harness": "factory-droid",
     "prompt": "fix flaky test retries",
     "workdir": "/tmp/harness-fixture-droid",
-    "model": "gpt-5.4",
+    "model": "custom:gpt-5.4",
     "instructions": "Keep changes minimal.\n",
     "timeoutSeconds": 600
   },
@@ -13,12 +13,11 @@
       "exec",
       "--output-format",
       "json",
-      "--auto",
       "--skip-permissions-unsafe",
       "--model",
-      "gpt-5.4",
+      "custom:gpt-5.4",
       "--spec-model",
-      "gpt-5.4",
+      "custom:gpt-5.4",
       "fix flaky test retries"
     ],
     "instructionsFile": "/tmp/harness-fixture-droid/AGENTS.md"

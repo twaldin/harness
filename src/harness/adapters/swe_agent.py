@@ -31,7 +31,7 @@ class SweAgentAdapter(Adapter):
     DEFAULT_COST_LIMIT_USD = 10.0
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
         wrapper = _resolve_wrapper(spec.env)
 
         workdir = Path(spec.workdir)

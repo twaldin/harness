@@ -15,7 +15,7 @@ class FactoryDroidAdapter(Adapter):
     DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         # Keep strict same-model fairness by pinning spec generation to the
@@ -24,7 +24,6 @@ class FactoryDroidAdapter(Adapter):
             "exec",
             "--output-format",
             "json",
-            "--auto",
             "--skip-permissions-unsafe",
             "--model",
             model,

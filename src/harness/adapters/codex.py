@@ -19,7 +19,7 @@ class CodexAdapter(Adapter):
     DEFAULT_MODEL = "gpt-5.3-codex"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL)
+        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = [
             "exec",

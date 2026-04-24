@@ -25,6 +25,9 @@ class RunSpec:
                       Adapter writes it to the right filename inside `workdir`.
     `timeout_seconds` — wall-clock cap. Adapter SHOULD enforce this.
     `env`           — extra environment variables merged onto os.environ.
+    `model_no_resolve` — pass `model` through exactly as provided, without
+                      harness-specific normalization. Escape hatch for odd
+                      provider/model combinations.
     """
 
     harness: str
@@ -34,6 +37,7 @@ class RunSpec:
     instructions: str | None = None
     timeout_seconds: int = 1800
     env: dict[str, str] = field(default_factory=dict)
+    model_no_resolve: bool = False
 
 
 @dataclass

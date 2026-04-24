@@ -3,7 +3,7 @@
     "harness": "swe-agent",
     "prompt": "fix the off-by-one in pagination",
     "workdir": "/tmp/harness-fixture-swe",
-    "model": "openai/gpt-5.4",
+    "model": "gpt-5.4",
     "instructions": "Be surgical.\n",
     "timeoutSeconds": 1800,
     "env": {

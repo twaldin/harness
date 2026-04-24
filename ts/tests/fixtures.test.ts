@@ -69,7 +69,21 @@ function fixtureSpecToRunSpec(f: FixtureSpec): RunSpec {
   }
 }
 
-const ADAPTER_NAMES = ['claude-code', 'codex', 'gemini', 'opencode', 'aider', 'swe-agent', 'qwen', 'continue-cli', 'pi']
+const ADAPTER_NAMES = [
+  'claude-code',
+  'codex',
+  'gemini',
+  'opencode',
+  'aider',
+  'swe-agent',
+  'qwen',
+  'continue-cli',
+  'pi',
+  'factory-droid',
+  'openclaude',
+  'crush',
+  'kilo',
+]
 
 const WORKDIRS: string[] = []
 

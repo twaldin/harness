@@ -1,22 +1,11 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
-import { homedir } from 'os'
-import { existsSync } from 'fs'
-import { resolve, basename } from 'path'
-import { createRequire } from 'module'
 import { normalizeModelForHarness } from '../model-normalization.js'
-
-function openCodeDbPath(): string {
-  const envPath = process.env['OPENCODE_DB']
-  if (envPath) return envPath.replace(/^~/, homedir())
-  return `${homedir()}/.local/share/opencode/opencode.db`
-}
-
-// Opencode writes token/cost totals to a sqlite DB post-exit. Runtime detection:
-// bun doesn't support better-sqlite3's native bindings (oven-sh/bun#4290), so we
-// use bun:sqlite when running under bun and better-sqlite3 on node. Same query,
-// different driver. If neither is available we return null — correctness-safe.
+import { createRequire } from 'module'
+import { existsSync, mkdirSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 
 interface SqliteDriver {
   get(sql: string, ...params: unknown[]): unknown
@@ -28,7 +17,6 @@ function openDb(dbPath: string): SqliteDriver | null {
   const requireFn = createRequire(import.meta.url)
   if (isBun) {
     try {
-      // bun:sqlite is a built-in, accessible via require in bun
       const mod = requireFn('bun:sqlite') as { Database: new (p: string, o?: unknown) => {
         prepare(s: string): { get(...p: unknown[]): unknown }
         close(): void
@@ -57,19 +45,17 @@ function openDb(dbPath: string): SqliteDriver | null {
   }
 }
 
-function readOpenCodeSessionTotals(
-  workdir: string,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
-  const dbPath = openCodeDbPath()
-  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
+function crushDataDir(workdir: string, extraEnv: Record<string, string> | undefined): string {
+  const envPath = (extraEnv ?? {})['CRUSH_DATA_DIR'] ?? process.env['CRUSH_DATA_DIR']
+  return envPath ? envPath.replace(/^~/, homedir()) : join(workdir, '.harness', 'crush-data')
+}
 
-  let resolvedWorkdir = workdir
-  try {
-    resolvedWorkdir = resolve(workdir)
-  } catch {
-    // keep raw
-  }
-  const wdBasename = basename(resolvedWorkdir)
+function readCrushSessionTotals(
+  workdir: string,
+  extraEnv: Record<string, string> | undefined,
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
+  const dbPath = join(crushDataDir(workdir, extraEnv), 'crush.db')
+  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
 
   const db = openDb(dbPath)
   if (!db) return { tokensIn: null, tokensOut: null, costUsd: null }
@@ -77,27 +63,18 @@ function readOpenCodeSessionTotals(
   try {
     const row = db.get(
       `
-      SELECT
-        COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
-        COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
-        COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-        COUNT(*)                                                 AS row_count
-      FROM message
-      WHERE session_id IN (
-        SELECT id FROM session WHERE directory LIKE ? ORDER BY time_updated DESC LIMIT 1
-      )
-    `,
-      `%${wdBasename}%`,
-    ) as { tokens_in: number; tokens_out: number; cost: number; row_count: number } | undefined
+      SELECT prompt_tokens, completion_tokens, cost
+      FROM sessions
+      WHERE parent_session_id IS NULL
+      ORDER BY updated_at DESC
+      LIMIT 1
+      `,
+    ) as { prompt_tokens: unknown; completion_tokens: unknown; cost: unknown } | undefined
 
-    if (!row || row.row_count === 0) {
-      return { tokensIn: null, tokensOut: null, costUsd: null }
-    }
-    return {
-      tokensIn: Math.round(row.tokens_in),
-      tokensOut: Math.round(row.tokens_out),
-      costUsd: row.cost,
-    }
+    const tokensIn = typeof row?.prompt_tokens === 'number' ? Math.trunc(row.prompt_tokens) : null
+    const tokensOut = typeof row?.completion_tokens === 'number' ? Math.trunc(row.completion_tokens) : null
+    const costUsd = typeof row?.cost === 'number' ? row.cost : null
+    return { tokensIn, tokensOut, costUsd }
   } catch {
     return { tokensIn: null, tokensOut: null, costUsd: null }
   } finally {
@@ -105,17 +82,20 @@ function readOpenCodeSessionTotals(
   }
 }
 
-const openCodeAdapter: Adapter = {
-  name: 'opencode',
+const crushAdapter: Adapter = {
+  name: 'crush',
   instructionsFilename: 'AGENTS.md',
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
     const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
+    const dataDir = crushDataDir(spec.workdir, spec.env)
+    mkdirSync(dataDir, { recursive: true })
+
     return {
-      cmd: 'opencode',
-      args: ['run', '--dir', spec.workdir, '--model', model, spec.prompt],
+      cmd: 'crush',
+      args: ['run', '--data-dir', dataDir, '--model', model, '--small-model', model, spec.prompt],
       cwd: spec.workdir,
       env: {},
       instructionsFile,
@@ -123,9 +103,9 @@ const openCodeAdapter: Adapter = {
   },
 
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
-    const { tokensIn, tokensOut, costUsd } = readOpenCodeSessionTotals(spec.workdir)
+    const { tokensIn, tokensOut, costUsd } = readCrushSessionTotals(spec.workdir, spec.env)
     return { costUsd, tokensIn, tokensOut, raw: null }
   },
 }
 
-register('opencode', openCodeAdapter)
+register('crush', crushAdapter)

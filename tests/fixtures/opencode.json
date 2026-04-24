@@ -3,7 +3,7 @@
     "harness": "opencode",
     "prompt": "split the big function",
     "workdir": "/tmp/harness-fixture-opencode",
-    "model": "openai/gpt-5.4",
+    "model": "gpt-5.4",
     "instructions": "Prefer small pure functions.\n",
     "timeoutSeconds": 1200
   },

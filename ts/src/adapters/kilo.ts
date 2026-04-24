@@ -1,22 +1,11 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
-import { homedir } from 'os'
-import { existsSync } from 'fs'
-import { resolve, basename } from 'path'
-import { createRequire } from 'module'
 import { normalizeModelForHarness } from '../model-normalization.js'
-
-function openCodeDbPath(): string {
-  const envPath = process.env['OPENCODE_DB']
-  if (envPath) return envPath.replace(/^~/, homedir())
-  return `${homedir()}/.local/share/opencode/opencode.db`
-}
-
-// Opencode writes token/cost totals to a sqlite DB post-exit. Runtime detection:
-// bun doesn't support better-sqlite3's native bindings (oven-sh/bun#4290), so we
-// use bun:sqlite when running under bun and better-sqlite3 on node. Same query,
-// different driver. If neither is available we return null — correctness-safe.
+import { createRequire } from 'module'
+import { existsSync, mkdirSync } from 'fs'
+import { basename, dirname, join, resolve } from 'path'
+import { homedir } from 'os'
 
 interface SqliteDriver {
   get(sql: string, ...params: unknown[]): unknown
@@ -28,7 +17,6 @@ function openDb(dbPath: string): SqliteDriver | null {
   const requireFn = createRequire(import.meta.url)
   if (isBun) {
     try {
-      // bun:sqlite is a built-in, accessible via require in bun
       const mod = requireFn('bun:sqlite') as { Database: new (p: string, o?: unknown) => {
         prepare(s: string): { get(...p: unknown[]): unknown }
         close(): void
@@ -57,10 +45,17 @@ function openDb(dbPath: string): SqliteDriver | null {
   }
 }
 
-function readOpenCodeSessionTotals(
+function kiloDbPath(workdir: string, extraEnv: Record<string, string> | undefined): string {
+  const envPath = (extraEnv ?? {})['KILO_DB'] ?? process.env['KILO_DB']
+  if (envPath) return envPath.replace(/^~/, homedir())
+  return join(workdir, '.harness', 'kilo', 'kilo.db')
+}
+
+function readKiloSessionTotals(
   workdir: string,
+  extraEnv: Record<string, string> | undefined,
 ): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
-  const dbPath = openCodeDbPath()
+  const dbPath = kiloDbPath(workdir, extraEnv)
   if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
 
   let resolvedWorkdir = workdir
@@ -84,19 +79,23 @@ function readOpenCodeSessionTotals(
         COUNT(*)                                                 AS row_count
       FROM message
       WHERE session_id IN (
-        SELECT id FROM session WHERE directory LIKE ? ORDER BY time_updated DESC LIMIT 1
+        SELECT id FROM session
+        WHERE directory LIKE ?
+        ORDER BY time_updated DESC
+        LIMIT 1
       )
-    `,
+      AND json_extract(data, '$.role') = 'assistant'
+      `,
       `%${wdBasename}%`,
-    ) as { tokens_in: number; tokens_out: number; cost: number; row_count: number } | undefined
+    ) as { tokens_in: unknown; tokens_out: unknown; cost: unknown; row_count: unknown } | undefined
 
-    if (!row || row.row_count === 0) {
+    if (!row || typeof row.row_count !== 'number' || row.row_count === 0) {
       return { tokensIn: null, tokensOut: null, costUsd: null }
     }
     return {
-      tokensIn: Math.round(row.tokens_in),
-      tokensOut: Math.round(row.tokens_out),
-      costUsd: row.cost,
+      tokensIn: typeof row.tokens_in === 'number' ? Math.trunc(row.tokens_in) : null,
+      tokensOut: typeof row.tokens_out === 'number' ? Math.trunc(row.tokens_out) : null,
+      costUsd: typeof row.cost === 'number' ? row.cost : null,
     }
   } catch {
     return { tokensIn: null, tokensOut: null, costUsd: null }
@@ -105,27 +104,47 @@ function readOpenCodeSessionTotals(
   }
 }
 
-const openCodeAdapter: Adapter = {
-  name: 'opencode',
+const kiloAdapter: Adapter = {
+  name: 'kilo',
   instructionsFilename: 'AGENTS.md',
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
     const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
+
+    const dbPath = kiloDbPath(spec.workdir, spec.env)
+    // Only attempt mkdir if the parent path sits under a writable prefix on
+    // the host. When KILO_DB points at a container-only path (e.g. /app/...),
+    // leave dir creation to the runtime inside the container.
+    try {
+      mkdirSync(dirname(dbPath), { recursive: true })
+    } catch {
+      // intentionally ignore: container-only paths
+    }
+
+    const configJson = JSON.stringify({
+      model,
+      small_model: model,
+      default_agent: 'build',
+    })
+
     return {
-      cmd: 'opencode',
-      args: ['run', '--dir', spec.workdir, '--model', model, spec.prompt],
+      cmd: 'kilo',
+      args: ['run', '--auto', '--format', 'json', '--dir', spec.workdir, '--model', model, spec.prompt],
       cwd: spec.workdir,
-      env: {},
+      env: {
+        KILO_DB: dbPath,
+        KILO_CONFIG_CONTENT: configJson,
+      },
       instructionsFile,
     }
   },
 
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
-    const { tokensIn, tokensOut, costUsd } = readOpenCodeSessionTotals(spec.workdir)
+    const { tokensIn, tokensOut, costUsd } = readKiloSessionTotals(spec.workdir, spec.env)
     return { costUsd, tokensIn, tokensOut, raw: null }
   },
 }
 
-register('opencode', openCodeAdapter)
+register('kilo', kiloAdapter)

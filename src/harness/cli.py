@@ -36,6 +36,7 @@ def run_cmd(
         help="Path to a file whose content is injected as the per-harness instructions file.",
     ),
     timeout: int = typer.Option(1800, "--timeout", "-t", help="Wall-clock timeout in seconds."),
+    model_no_resolve: bool = typer.Option(False, "--model-no-resolve", help="Pass --model through exactly as given; skip harness-specific normalization."),
     json_out: bool = typer.Option(False, "--json", help="Emit RunResult as JSON to stdout instead of human text."),
 ) -> None:
     """Invoke a harness on PROMPT and report the result."""
@@ -53,9 +54,11 @@ def run_cmd(
         model=model,
         instructions=instructions,
         timeout_seconds=timeout,
+        model_no_resolve=model_no_resolve,
     )
 
-    console.print(f"[dim]running {harness} (model={model or 'default'}) in {workdir} ...[/dim]")
+    resolve_mode = "raw" if model_no_resolve else "resolved"
+    console.print(f"[dim]running {harness} (model={model or 'default'}, {resolve_mode}) in {workdir} ...[/dim]")
     result = run(spec)
 
     if json_out:

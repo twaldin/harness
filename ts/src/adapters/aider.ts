@@ -2,6 +2,7 @@ import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
 import { writeFileSync } from 'fs'
+import { normalizeModelForHarness } from '../model-normalization.js'
 
 const TOKEN_RE = /Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i
 
@@ -22,7 +23,7 @@ const aiderAdapter: Adapter = {
   defaultModel: 'openrouter/anthropic/claude-sonnet-4.6',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = spec.model ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     const configPath = `${spec.workdir}/.agentelo-aider.yml`

@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, or pi as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, factory-droid, crush, or kilo as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -10,6 +10,8 @@ npm install @twaldin/harness-ts
 ```
 
 Requires Node 18+ or Bun 1.0+. The package ships ESM only.
+
+For frontier adapters in containers, prefer Node `>=20` (`openclaude`, `factory-droid`, `kilo` upstream CLIs require modern Node runtimes).
 
 ## First example
 
@@ -45,7 +47,7 @@ import { run } from '@twaldin/harness-ts'
 
 const r = await run({
   harness: 'opencode',
-  model: 'openai/gpt-5.4',
+  model: 'gpt-5.4',
   prompt: 'Fix the failing tests.',
   workdir: '/tmp/repo',
   instructions: 'You are an autonomous bug-fixing agent.',
@@ -92,7 +94,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'gemini', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'kilo', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ---
 
@@ -100,10 +102,10 @@ Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'co
 
 ```typescript
 interface RunSpec {
-  harness: string            // "claude-code" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi"
+  harness: string            // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "crush" | "kilo"
   prompt: string
   workdir: string            // absolute path; cwd for the subprocess
-  model?: string             // adapter-specific (see ADAPTER-MATRIX.md)
+  model?: string             // canonical or adapter-specific (normalized per harness; see ADAPTER-MATRIX.md)
   instructions?: string      // written to per-harness file in workdir
   timeoutSeconds?: number    // default 1800
   env?: Record<string, string>

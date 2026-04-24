@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "harness": "kilo",
+    "prompt": "fix broken unit tests",
+    "workdir": "/tmp/harness-fixture-kilo",
+    "model": "gpt-5.4",
+    "instructions": "Minimize scope.\n",
+    "timeoutSeconds": 900
+  },
+  "expectedCommand": {
+    "cmd": "kilo",
+    "args": [
+      "run",
+      "--auto",
+      "--format",
+      "json",
+      "--dir",
+      "/tmp/harness-fixture-kilo",
+      "--model",
+      "openai/gpt-5.4",
+      "fix broken unit tests"
+    ],
+    "instructionsFile": "/tmp/harness-fixture-kilo/AGENTS.md"
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 21.0,
+    "timedOut": false,
+    "stdout": "done",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "note": "kilo token/cost values are read from kilo.db after exit. With no DB fixture in this test, parseOutput returns null metrics."
+  }
+}

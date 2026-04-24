@@ -1,6 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import { normalizeModelForHarness } from '../model-normalization.js'
 
 // pi's --mode json writes one JSON object per stdout line. AssistantMessage.usage
 // has { input, output, cacheRead, cacheWrite, totalTokens, cost: { total, ... } }.
@@ -96,7 +97,7 @@ const piAdapter: Adapter = {
   defaultModel: 'sonnet',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = spec.model ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     return {
       cmd: 'pi',

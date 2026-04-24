@@ -41,6 +41,7 @@ interface RunSpec {
   instructions?: string            // content written to per-harness instructions file
   timeoutSeconds?: number          // default 1800
   env?: Record<string, string>     // extra env vars merged onto process.env
+  modelNoResolve?: boolean         // optional escape hatch: pass model through exactly as provided
 }
 
 // BuildCommand — what to invoke, without invoking it (for interactive consumers like flt)

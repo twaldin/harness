@@ -97,7 +97,9 @@ for spec in [
     print(f"{spec.harness:12} {spec.model:25} ${r.cost_usd or 0:.4f}")
 ```
 
-Canonical model names like `gpt-5.4` are normalized per harness at command-build time. Provider-prefixed forms are added where required (for example `opencode -> openai/gpt-5.4`) and stripped for CLIs that expect bare model IDs.
+Canonical model names like `gpt-5.4` are normalized per harness at command-build time. Provider-prefixed forms are added where required (for example `opencode -> openai/gpt-5.4`, `pi -> openai-codex/gpt-5.4`) and stripped for CLIs that expect bare model IDs.
+
+Resolution is intentionally best-effort, not a full provider registry. If a model/provider/harness combo resolves incorrectly for your setup, please send a small PR. These fixes should stay easy to review and easy to merge.
 
 ### "Inject a system prompt / agent guide"
 
@@ -179,6 +181,11 @@ harness run --harness opencode --model gpt-5.4 \
     --workdir /tmp/repo --instructions /tmp/agents.md \
     --timeout 1800 \
     "Fix the failing tests."
+
+# bypass normalization and pass the model string through exactly as given
+harness run --harness pi --model openai-codex/gpt-5.4 --model-no-resolve \
+    --workdir /tmp/repo \
+    "Fix the failing tests."
 ```
 
 Add `--json` to emit a structured RunResult on stdout:
@@ -247,6 +254,39 @@ Looking for a pre-scoped first PR? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md).
 ## Status
 
 v0.5 — thirteen adapters shipped: `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush`.
+
+### host Node version
+
+This repo now includes `.nvmrc` pinned to Node `20.20.2` for interactive host usage:
+
+```bash
+cd ~/harness
+nvm use
+```
+
+That helps for local dev and agent worktrees. In Docker / benchmark containers, prefer an explicit Node 20 install instead of relying on shell hooks.
+
+### bringup helpers
+
+Quick checks for the current gpt-5.4 harness set:
+
+```bash
+cd ~/harness
+./scripts/check_binaries.sh
+PYTHONPATH=src ./scripts/smoke_gpt54.py --timeout 90
+```
+
+The smoke runner asks each harness to write `hi` to `hi.txt` in cwd. If the file exists with the expected content, that harness is considered minimally alive for gpt-5.4 bringup.
+
+### model resolution policy
+
+The current resolution layer is deliberately rough:
+
+- optimize for common cases like `gpt-5.4`
+- keep harness-specific fixes tiny
+- prefer explicit escape hatches over clever inference
+
+If you need an exact raw model string, use `--model-no-resolve` (or `RunSpec(model_no_resolve=True)` in Python) and pass the provider/model form you want.
 
 ### Linux/container caveats (harness-bench)
 

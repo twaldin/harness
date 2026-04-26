@@ -107,30 +107,18 @@ const geminiAdapter: Adapter = {
     return null
   },
 
-  // gemini-cli writes session/stats to <workdir>/.gemini/ (per-project) and global
-  // ~/.gemini/. The interactive run doesn't drop a single canonical file the way
-  // claude-code/codex/pi do — so we look for the most recent JSON in either path.
+  // gemini-cli (interactive --yolo) writes a chat log to:
+  //   ~/.gemini/tmp/<basename(workdir)>/logs.json
+  // It contains a JSON array of message objects but does NOT include token
+  // counts in interactive mode (those only appear in --output-format=json
+  // headless runs, parsed by parseOutput above). The conversation log is
+  // still useful for the mutator/GEPA, so we return its path. Tokens/cost
+  // are reported as null — interactive gemini does not expose them.
   sessionLogPath(workdir: string, _since?: number): string | null {
-    const candidates = [
-      join(workdir, '.gemini', 'logs.json'),
-      join(workdir, '.gemini', 'sessions'),
-    ]
-    for (const c of candidates) {
-      if (!existsSync(c)) continue
-      try {
-        if (statSync(c).isDirectory()) {
-          const items = readdirSync(c)
-            .map(n => ({ n, t: statSync(join(c, n)).mtimeMs }))
-            .sort((a, b) => b.t - a.t)
-          if (items.length) return join(c, items[0].n)
-        } else {
-          return c
-        }
-      } catch {
-        // fall through
-      }
-    }
-    return null
+    const home = process.env.HOME ?? ''
+    const base = workdir.split('/').filter(Boolean).pop() ?? ''
+    const path = join(home, '.gemini', 'tmp', base, 'logs.json')
+    return existsSync(path) ? path : null
   },
 
   parseSessionLog(path: string): SessionTelemetry {
@@ -138,24 +126,10 @@ const geminiAdapter: Adapter = {
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
     }
     try {
-      const text = readFileSync(path, 'utf-8')
-      let parsed: unknown
-      try { parsed = JSON.parse(text) } catch { parsed = null }
-      let tokensIn = 0, tokensOut = 0, modelName: string | null = null
-      if (parsed && typeof parsed === 'object') {
-        const stats = (parsed as Record<string, unknown>)['stats'] as Record<string, unknown> | undefined
-        const models = stats?.['models'] as Record<string, unknown> | undefined
-        if (models) {
-          for (const [name, m] of Object.entries(models)) {
-            if (!modelName) modelName = name
-            const t = (m as Record<string, unknown>)?.['tokens'] as Record<string, unknown> | undefined
-            tokensIn += Number(t?.['input'] ?? 0)
-            tokensOut += Number(t?.['candidates'] ?? 0)
-          }
-        }
-      }
-      const costUsd = deriveCost(modelName, tokensIn, tokensOut)
-      return { sessionLogPath: path, tokensIn, tokensOut, costUsd, model: modelName, raw: parsed }
+      const parsed = JSON.parse(readFileSync(path, 'utf-8'))
+      // gemini interactive logs.json has user messages only (no usage/cost).
+      // Return raw conversation for mutator consumption; null tokens/cost.
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
     } catch {
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
     }

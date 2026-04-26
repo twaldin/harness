@@ -99,9 +99,14 @@ claudeCodeAdapter.detectStatus = function (pane: string) {
 }
 
 // ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+// Encoding: realpath(workdir) → replace both '/' and '_' with '-'.
+//   /private/var/folders/cf/sgp0bvks6t7br_0q2kj_5jpm0000gn/T/flt-wt-probe-claude-code
+//   → -private-var-folders-cf-sgp0bvks6t7br-0q2kj-5jpm0000gn-T-flt-wt-probe-claude-code
 claudeCodeAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
   const home = process.env.HOME ?? ''
-  const encoded = workdir.replace(/\//g, '-')
+  let real = workdir
+  try { real = require('node:fs').realpathSync(workdir) } catch { /* fall back */ }
+  const encoded = real.replace(/[\/_]/g, '-')
   const dir = join(home, '.claude', 'projects', encoded)
   if (!existsSync(dir)) return null
   try {

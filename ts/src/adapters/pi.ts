@@ -150,26 +150,26 @@ piAdapter.detectStatus = function (pane: string) {
 }
 
 // ~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<sid>.jsonl
+// Encoding: '--' + realpath(workdir).replaceAll('/', '-') + '--'
+// (TWO leading dashes, TWO trailing dashes; underscores preserved).
+//   /private/var/folders/cf/sgp0bvks6t7br_0q2kj_5jpm0000gn/T/flt-wt-probe-pi
+//   → --private-var-folders-cf-sgp0bvks6t7br_0q2kj_5jpm0000gn-T-flt-wt-probe-pi--
 piAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
   const home = process.env.HOME ?? ''
-  // pi encodes / as -, leading - and trailing -- (observed empirically).
-  const encoded = workdir.replace(/\//g, '-') + '--'
-  // pi also seems to PREFIX with extra '-' on macos /private paths (`--Users-...--`)
-  const candidates = [
-    join(home, '.pi', 'agent', 'sessions', encoded),
-    join(home, '.pi', 'agent', 'sessions', '-' + encoded),
-  ]
-  for (const dir of candidates) {
-    if (!existsSync(dir)) continue
-    try {
-      const items = readdirSync(dir)
-        .filter(n => n.endsWith('.jsonl'))
-        .map(n => ({ n, t: statSync(join(dir, n)).mtimeMs }))
-        .sort((a, b) => b.t - a.t)
-      if (items.length) return join(dir, items[0].n)
-    } catch { /* ignore */ }
+  let real = workdir
+  try { real = require('node:fs').realpathSync(workdir) } catch { /* fall back */ }
+  const encoded = '-' + real.replace(/\//g, '-') + '--'
+  const dir = join(home, '.pi', 'agent', 'sessions', encoded)
+  if (!existsSync(dir)) return null
+  try {
+    const items = readdirSync(dir)
+      .filter(n => n.endsWith('.jsonl'))
+      .map(n => ({ n, t: statSync(join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)
+    return items.length ? join(dir, items[0].n) : null
+  } catch {
+    return null
   }
-  return null
 }
 
 piAdapter.parseSessionLog = function (path: string): SessionTelemetry {

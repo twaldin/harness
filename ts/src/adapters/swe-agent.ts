@@ -124,12 +124,21 @@ sweAgentAdapter.detectStatus = function (pane: string) {
   return 'unknown'
 }
 
-// mini interactive doesn't write a per-session file by default; tasks can
-// snapshot via /save. Use the workdir trajectory file when present.
+// mini-swe-agent interactive writes the most recent run's trajectory to
+//   ~/Library/Application Support/mini-swe-agent/last_mini_run.traj.json (macOS)
+//   ~/.local/share/mini-swe-agent/last_mini_run.traj.json (linux, XDG)
+// Headless flt runs (with --output) drop the per-task trajectory at
+// <workdir>/.harness/swe-traj.json — prefer that when present.
 sweAgentAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
+  const home = process.env.HOME ?? ''
+  const platform = process.platform
+  const appSupport = platform === 'darwin'
+    ? join(home, 'Library', 'Application Support', 'mini-swe-agent')
+    : join(home, '.local', 'share', 'mini-swe-agent')
   const candidates = [
     join(workdir, '.harness', 'swe-traj.json'),
     join(workdir, 'mini-traj.json'),
+    join(appSupport, 'last_mini_run.traj.json'),
   ]
   for (const c of candidates) if (existsSync(c)) return c
   return null

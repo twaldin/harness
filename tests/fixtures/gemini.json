@@ -28,7 +28,7 @@
     "stderr": ""
   },
   "expectedParsed": {
-    "costUsd": null,
+    "costUsd": 0.00106,
     "tokensIn": 950,
     "tokensOut": 310
   }

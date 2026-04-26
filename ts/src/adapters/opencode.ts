@@ -174,7 +174,12 @@ openCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
   const result = readOpenCodeSessionTotals(wdHint || '/')
-  const cost = result.costUsd ?? deriveCost(null, result.tokensIn, result.tokensOut)
+  // SQLite cost can be 0 when opencode used a custom provider (no upstream
+  // pricing): fall back to deriveCost from tokens if we have any.
+  let cost = result.costUsd
+  if ((cost == null || cost === 0) && result.tokensIn != null && (result.tokensIn > 0 || (result.tokensOut ?? 0) > 0)) {
+    cost = deriveCost('gpt-5.4', result.tokensIn, result.tokensOut) ?? cost
+  }
   return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd: cost, model: null, raw: null }
 }
 

@@ -120,7 +120,14 @@ codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {
   if (!existsSync(path)) {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
-  let tokensIn = 0, tokensOut = 0, modelName: string | null = null, sawUsage = false
+  // Codex JSONL format (codex-cli 0.125+):
+  //   { "type": "event_msg", "payload": { "type": "token_count", "info": {
+  //       "total_token_usage": { "input_tokens": N, "output_tokens": M, ... },
+  //       "last_token_usage": { ... }
+  //   }}}
+  // Tokens are CUMULATIVE in total_token_usage; take the last token_count event.
+  let lastIn = 0, lastOut = 0, sawUsage = false
+  let modelName: string | null = null
   try {
     for (const line of readFileSync(path, 'utf-8').split('\n')) {
       const t = line.trim()
@@ -129,13 +136,19 @@ codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {
       try { ev = JSON.parse(t) } catch { continue }
       if (!ev || typeof ev !== 'object') continue
       const obj = ev as Record<string, unknown>
-      if (obj['type'] === 'turn.completed' || obj['type'] === 'session.created') {
-        const usage = obj['usage'] as Record<string, unknown> | undefined
-        if (usage) {
-          sawUsage = true
-          tokensIn += Number(usage['input_tokens'] ?? 0)
-          tokensOut += Number(usage['output_tokens'] ?? 0)
+      if (obj['type'] === 'event_msg') {
+        const payload = obj['payload'] as Record<string, unknown> | undefined
+        if (payload?.['type'] === 'token_count') {
+          const info = payload['info'] as Record<string, unknown> | undefined
+          const total = info?.['total_token_usage'] as Record<string, unknown> | undefined
+          if (total) {
+            sawUsage = true
+            lastIn = Number(total['input_tokens'] ?? 0)
+            lastOut = Number(total['output_tokens'] ?? 0)
+          }
         }
+      }
+      if (obj['type'] === 'session.created') {
         const m = obj['model']
         if (typeof m === 'string' && !modelName) modelName = m
       }
@@ -143,9 +156,9 @@ codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {
   } catch {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
-  const ti = sawUsage ? tokensIn : null
-  const to = sawUsage ? tokensOut : null
-  return { sessionLogPath: path, tokensIn: ti, tokensOut: to, costUsd: deriveCost(modelName, ti, to), model: modelName, raw: null }
+  const ti = sawUsage ? lastIn : null
+  const to = sawUsage ? lastOut : null
+  return { sessionLogPath: path, tokensIn: ti, tokensOut: to, costUsd: deriveCost(modelName ?? 'gpt-5.4', ti, to), model: modelName, raw: null }
 }
 
 codexAdapter.installMeta = {

@@ -8,3 +8,7 @@ build/
 .mypy_cache/
 .python-version
 CLAUDE.md
+
+# flt agent fleet artifacts (per-spawn .flt/ scratch + agent handoff docs)
+.flt/
+handoffs/

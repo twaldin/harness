@@ -150,17 +150,32 @@ const kiloAdapter: Adapter = {
 
 kiloAdapter.submitKeys = ['Enter']
 kiloAdapter.detectReady = function (pane: string): ReadyState {
-  const last30 = lastNonEmptyJoin(pane, 30)
-  if (/Ask anything\.\.\./i.test(last30)) return 'ready'
-  if (/Update available/i.test(last30)) return 'dialog'
+  // Discriminate dialog by visible button row at the bottom (not title).
+  const tail = lastNonEmptyJoin(pane, 12)
+  if (/Confirm\s+Cancel/i.test(tail)) return 'dialog'
+  if (/Allow once\s+Allow always\s+Reject/i.test(tail)) return 'dialog'
+  if (/Update available/i.test(tail)) return 'dialog'
+  if (/Ask anything\.\.\./i.test(tail)) return 'ready'
   return 'loading'
 }
 kiloAdapter.handleDialog = function (pane: string): string[] | null {
-  if (/Update available/i.test(stripAnsi(pane))) return ['Escape']
+  // kilo permission flow has two dialogs back-to-back. Discriminate by the
+  // BUTTON ROW (always at the bottom of the visible pane), not by the title
+  // (which lingers in scrollback after the dialog closes):
+  //   1. "Allow once   Allow always   Reject" → Right + Enter picks "Allow always".
+  //   2. "Confirm   Cancel" → Enter (Confirm is default).
+  // Look for the button row in the LAST few non-empty lines.
+  const tail = lastNonEmptyJoin(pane, 12)
+  if (/Confirm\s+Cancel/i.test(tail)) return ['Enter']
+  if (/Allow once\s+Allow always\s+Reject/i.test(tail)) return ['Right', 'Enter']
+  if (/Update available/i.test(tail)) return ['Escape']
   return null
 }
 kiloAdapter.detectStatus = function (pane: string): AgentStatus {
+  const tail = lastNonEmptyJoin(pane, 12)
   const last10 = lastNonEmptyJoin(pane, 10)
+  if (/Confirm\s+Cancel/i.test(tail)) return 'dialog'
+  if (/Allow once\s+Allow always\s+Reject/i.test(tail)) return 'dialog'
   if (/rate.?limit/i.test(last10)) return 'rate-limited'
   if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10) || /thinking|working/i.test(last10)) return 'running'
   if (/Ask anything\.\.\./i.test(last10)) return 'idle'

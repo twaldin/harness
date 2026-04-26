@@ -1,7 +1,11 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { deriveCost } from '../pricing.js'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 function stripMarkdownFences(s: string): string {
   const m = /^```(?:[a-z]+)?\n([\s\S]*?)\n```\s*$/.exec(s)
@@ -56,6 +60,101 @@ const claudeCodeAdapter: Adapter = {
     }
     return { costUsd: null, tokensIn: null, tokensOut: null, raw }
   },
+}
+
+// ===== session-aware additions =====
+
+claudeCodeAdapter.submitKeys = ['Enter']
+
+claudeCodeAdapter.detectReady = function (pane: string) {
+  const last20 = lastNonEmptyJoin(pane, 20)
+  const all = stripAnsi(pane)
+  const hasPrompt = stripAnsi(pane).split('\n').some(l => /^\s*[>❯]\s*$/.test(l.trim()))
+  const hasStatusBar = /bypass permissions/i.test(all) || /Claude Code/i.test(all)
+  if (hasPrompt && hasStatusBar) return 'ready'
+  if (/bypass.?permissions/i.test(last20) && /Yes, I accept/i.test(last20)) return 'dialog'
+  if (/trust this folder/i.test(last20) || /Do you trust the files/i.test(last20)) return 'dialog'
+  if (/Update available/i.test(last20) && /\?/.test(last20)) return 'dialog'
+  return 'loading'
+}
+
+claudeCodeAdapter.handleDialog = function (pane: string) {
+  const text = stripAnsi(pane)
+  if (/bypass.?permissions/i.test(text) && /Yes, I accept/i.test(text)) return ['2', 'Enter']
+  if (/trust this folder/i.test(text) || /Do you trust the files/i.test(text)) return ['Enter']
+  // Decline updates mid-run; explicit `flt clis update` is the install path.
+  if (/Update available/i.test(text)) return ['Escape']
+  return null
+}
+
+claudeCodeAdapter.detectStatus = function (pane: string) {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  if (/rate.?limit|hit your limit/i.test(last10)) return 'rate-limited'
+  if (/Update available/i.test(last10) && /\?/.test(last10)) return 'dialog'
+  // claude-code shows "(Xs · ↑M ↓N)" or "·X tokens·" while running
+  if (/\((?:\d+m\s+)?\d+s[\s·)]/.test(last10)) return 'running'
+  // Idle: prompt visible without timer
+  if (stripAnsi(pane).split('\n').some(l => /^\s*[>❯]\s*$/.test(l.trim()))) return 'idle'
+  return 'unknown'
+}
+
+// ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+claudeCodeAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
+  const home = process.env.HOME ?? ''
+  const encoded = workdir.replace(/\//g, '-')
+  const dir = join(home, '.claude', 'projects', encoded)
+  if (!existsSync(dir)) return null
+  try {
+    const items = readdirSync(dir)
+      .filter(n => n.endsWith('.jsonl'))
+      .map(n => ({ n, t: statSync(join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)
+    return items.length ? join(dir, items[0].n) : null
+  } catch {
+    return null
+  }
+}
+
+claudeCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
+  if (!existsSync(path)) {
+    return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+  }
+  let tokensIn = 0, tokensOut = 0, costUsd = 0, modelName: string | null = null
+  let sawUsage = false, sawCost = false
+  try {
+    for (const line of readFileSync(path, 'utf-8').split('\n')) {
+      const t = line.trim()
+      if (!t) continue
+      let ev: unknown
+      try { ev = JSON.parse(t) } catch { continue }
+      if (!ev || typeof ev !== 'object') continue
+      const obj = ev as Record<string, unknown>
+      const msg = obj['message'] as Record<string, unknown> | undefined
+      const usage = msg?.['usage'] as Record<string, unknown> | undefined
+      if (usage) {
+        sawUsage = true
+        tokensIn += Number(usage['input_tokens'] ?? 0)
+        tokensOut += Number(usage['output_tokens'] ?? 0)
+      }
+      const cost = obj['costUSD'] ?? obj['total_cost_usd']
+      if (typeof cost === 'number') { sawCost = true; costUsd += cost }
+      const model = msg?.['model']
+      if (typeof model === 'string' && !modelName) modelName = model
+    }
+  } catch {
+    return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+  }
+  const finalTokensIn = sawUsage ? tokensIn : null
+  const finalTokensOut = sawUsage ? tokensOut : null
+  const finalCost = sawCost ? costUsd : deriveCost(modelName, finalTokensIn, finalTokensOut)
+  return { sessionLogPath: path, tokensIn: finalTokensIn, tokensOut: finalTokensOut, costUsd: finalCost, model: modelName, raw: null }
+}
+
+claudeCodeAdapter.installMeta = {
+  packageManager: 'npm',
+  installCommand: ['npm', 'install', '-g', '@anthropic-ai/claude-code'],
+  updateCommand: ['npm', 'install', '-g', '@anthropic-ai/claude-code@latest'],
+  versionCommand: ['claude', '--version'],
 }
 
 register('claude-code', claudeCodeAdapter)

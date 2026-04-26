@@ -1,11 +1,13 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
 import { homedir } from 'os'
 import { existsSync } from 'fs'
 import { resolve, basename } from 'path'
 import { createRequire } from 'module'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { deriveCost } from '../pricing.js'
 
 function openCodeDbPath(): string {
   const envPath = process.env['OPENCODE_DB']
@@ -126,6 +128,61 @@ const openCodeAdapter: Adapter = {
     const { tokensIn, tokensOut, costUsd } = readOpenCodeSessionTotals(spec.workdir)
     return { costUsd, tokensIn, tokensOut, raw: null }
   },
+}
+
+// ===== session-aware additions =====
+
+openCodeAdapter.submitKeys = ['Enter']
+openCodeAdapter.flattenOnPaste = true
+
+openCodeAdapter.detectReady = function (pane: string) {
+  const full = stripAnsi(pane)
+  const last5 = lastNonEmptyJoin(pane, 5)
+  if (/update available|a new version of opencode|upgrade now/i.test(full)) return 'dialog'
+  if (/Ask anything/i.test(full) && /\d+\.\d+\.\d+/.test(last5)) return 'ready'
+  return 'loading'
+}
+
+openCodeAdapter.handleDialog = function (pane: string) {
+  const text = stripAnsi(pane)
+  if (/update available|a new version of opencode|upgrade now/i.test(text)) return ['Escape']
+  return null
+}
+
+openCodeAdapter.detectStatus = function (pane: string) {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  const full = stripAnsi(pane)
+  if (/update available|a new version of opencode|upgrade now/i.test(full)) return 'dialog'
+  if (/rate.?limit|try again later/i.test(last10)) return 'rate-limited'
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10)) return 'running'
+  if (/thinking|running/i.test(last10)) return 'running'
+  if (/Ask anything/i.test(full)) return 'idle'
+  return 'unknown'
+}
+
+// opencode telemetry already lives in SQLite; re-use the existing reader.
+openCodeAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
+  // Path is shared SQLite — return DB path so consumer knows where to look.
+  const dbPath = process.env['OPENCODE_DB']?.replace(/^~/, homedir()) ?? `${homedir()}/.local/share/opencode/opencode.db`
+  return existsSync(dbPath) ? `${dbPath}#session(${basename(resolve(workdir))})` : null
+}
+
+openCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
+  const dbPath = path.split('#')[0]
+  const wdHint = path.split('session(')[1]?.replace(/\)$/, '') ?? ''
+  if (!existsSync(dbPath)) {
+    return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+  }
+  const result = readOpenCodeSessionTotals(wdHint || '/')
+  const cost = result.costUsd ?? deriveCost(null, result.tokensIn, result.tokensOut)
+  return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd: cost, model: null, raw: null }
+}
+
+openCodeAdapter.installMeta = {
+  packageManager: 'npm',
+  installCommand: ['npm', 'install', '-g', 'opencode-ai'],
+  updateCommand: ['npm', 'install', '-g', 'opencode-ai@latest'],
+  versionCommand: ['opencode', '--version'],
 }
 
 register('opencode', openCodeAdapter)

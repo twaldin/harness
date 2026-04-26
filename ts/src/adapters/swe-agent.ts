@@ -1,10 +1,12 @@
 import { register } from '../registry.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
 import { HarnessError } from '../base.js'
 import { homedir } from 'os'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
-import { resolve } from 'path'
+import { resolve, join } from 'path'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { deriveCost } from '../pricing.js'
 
 const DEFAULT_COST_LIMIT_USD = 10.0
 
@@ -95,6 +97,55 @@ const sweAgentAdapter: Adapter = {
     const { tokensIn, tokensOut, costUsd, raw } = readSweTrajectory(trajFile)
     return { costUsd, tokensIn, tokensOut, raw }
   },
+}
+
+// ===== session-aware additions (mini-swe-agent interactive) =====
+
+sweAgentAdapter.submitKeys = ['Escape', 'Enter']
+
+sweAgentAdapter.detectReady = function (pane: string) {
+  const last20 = lastNonEmptyJoin(pane, 20)
+  if (/Submit message/i.test(last20)) return 'ready'
+  if (/What do you want to do/i.test(last20)) return 'ready'
+  return 'loading'
+}
+
+sweAgentAdapter.handleDialog = function (_pane: string) {
+  return null
+}
+
+sweAgentAdapter.detectStatus = function (pane: string) {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  if (/rate.?limit|quota/i.test(last10)) return 'rate-limited'
+  if (/error/i.test(last10) && /fatal|crash/i.test(last10)) return 'error'
+  if (/What do you want to do|Submit message/i.test(last10)) return 'idle'
+  // mini shows a Rich spinner / "thinking" while working
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10) || /thinking/i.test(last10)) return 'running'
+  return 'unknown'
+}
+
+// mini interactive doesn't write a per-session file by default; tasks can
+// snapshot via /save. Use the workdir trajectory file when present.
+sweAgentAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
+  const candidates = [
+    join(workdir, '.harness', 'swe-traj.json'),
+    join(workdir, 'mini-traj.json'),
+  ]
+  for (const c of candidates) if (existsSync(c)) return c
+  return null
+}
+
+sweAgentAdapter.parseSessionLog = function (path: string): SessionTelemetry {
+  const r = readSweTrajectory(path)
+  const cost = r.costUsd ?? deriveCost(null, r.tokensIn, r.tokensOut)
+  return { sessionLogPath: path, tokensIn: r.tokensIn, tokensOut: r.tokensOut, costUsd: cost, model: null, raw: r.raw }
+}
+
+sweAgentAdapter.installMeta = {
+  packageManager: 'pip',
+  installCommand: ['pip', 'install', '--user', 'mini-swe-agent'],
+  updateCommand: ['pip', 'install', '--user', '--upgrade', 'mini-swe-agent'],
+  versionCommand: ['mini', '--version'],
 }
 
 register('swe-agent', sweAgentAdapter)

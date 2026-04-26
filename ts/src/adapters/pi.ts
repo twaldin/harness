@@ -141,12 +141,17 @@ piAdapter.handleDialog = function (pane: string) {
 }
 
 piAdapter.detectStatus = function (pane: string) {
+  // pi's UI is binary: when a model turn is in flight, the working banner
+  // contains a braille spinner glyph followed by 'Working...'. When the turn
+  // ends, the spinner disappears and the prompt is restored. Pi prints model
+  // OUTPUT (test failures, error messages, stack traces) into the pane during
+  // and after a turn — those words MUST NOT influence status detection. Only
+  // the spinner is authoritative.
   const last10 = lastNonEmptyJoin(pane, 10)
-  if (/rate.?limit|too many requests|quota/i.test(last10)) return 'rate-limited'
-  if (/error|fatal|crash/i.test(last10)) return 'error'
+  // Rate-limit overlay is a specific status-bar message (not free-form text).
+  if (/^.*rate.?limit/im.test(last10) && /retry|wait|seconds/i.test(last10)) return 'rate-limited'
   if (/[⠁-⣿]\s*Working\.\.\./i.test(last10)) return 'running'
-  if (/\/[a-z][a-z0-9_-]*/i.test(last10) || /[>❯]\s*$/.test(last10)) return 'idle'
-  return 'unknown'
+  return 'idle'
 }
 
 // ~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<sid>.jsonl

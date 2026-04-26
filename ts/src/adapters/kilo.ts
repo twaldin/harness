@@ -1,7 +1,8 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { createRequire } from 'module'
 import { existsSync, mkdirSync } from 'fs'
 import { basename, dirname, join, resolve } from 'path'
@@ -145,6 +146,31 @@ const kiloAdapter: Adapter = {
     const { tokensIn, tokensOut, costUsd } = readKiloSessionTotals(spec.workdir, spec.env)
     return { costUsd, tokensIn, tokensOut, raw: null }
   },
+}
+
+kiloAdapter.submitKeys = ['Enter']
+kiloAdapter.detectReady = function (pane: string): ReadyState {
+  const last30 = lastNonEmptyJoin(pane, 30)
+  if (/Ask anything\.\.\./i.test(last30)) return 'ready'
+  if (/Update available/i.test(last30)) return 'dialog'
+  return 'loading'
+}
+kiloAdapter.handleDialog = function (pane: string): string[] | null {
+  if (/Update available/i.test(stripAnsi(pane))) return ['Escape']
+  return null
+}
+kiloAdapter.detectStatus = function (pane: string): AgentStatus {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  if (/rate.?limit/i.test(last10)) return 'rate-limited'
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10) || /thinking|working/i.test(last10)) return 'running'
+  if (/Ask anything\.\.\./i.test(last10)) return 'idle'
+  return 'unknown'
+}
+kiloAdapter.installMeta = {
+  packageManager: 'npm',
+  installCommand: ['npm', 'install', '-g', 'kilo'],
+  updateCommand: ['npm', 'install', '-g', 'kilo@latest'],
+  versionCommand: ['kilo', '--version'],
 }
 
 register('kilo', kiloAdapter)

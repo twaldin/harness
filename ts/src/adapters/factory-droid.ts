@@ -1,7 +1,8 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 
 function parseLastJsonObject(stdout: string): Record<string, unknown> | null {
   const blob = stdout.trim()
@@ -93,6 +94,31 @@ const factoryDroidAdapter: Adapter = {
       raw,
     }
   },
+}
+
+factoryDroidAdapter.submitKeys = ['Enter']
+factoryDroidAdapter.detectReady = function (pane: string): ReadyState {
+  const last30 = lastNonEmptyJoin(pane, 30)
+  if (/Try\s+"/i.test(last30) || /Auto.*\(Off\)|Auto.*\(On\)/i.test(last30)) return 'ready'
+  if (/Update available/i.test(last30)) return 'dialog'
+  return 'loading'
+}
+factoryDroidAdapter.handleDialog = function (pane: string): string[] | null {
+  if (/Update available/i.test(stripAnsi(pane))) return ['Escape']
+  return null
+}
+factoryDroidAdapter.detectStatus = function (pane: string): AgentStatus {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  if (/rate.?limit/i.test(last10)) return 'rate-limited'
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10) || /Thinking|Working/i.test(last10)) return 'running'
+  if (/Try\s+"|Auto.*\(/i.test(last10)) return 'idle'
+  return 'unknown'
+}
+factoryDroidAdapter.installMeta = {
+  packageManager: 'npm',
+  installCommand: ['npm', 'install', '-g', '@factory-ai/droid'],
+  updateCommand: ['npm', 'install', '-g', '@factory-ai/droid@latest'],
+  versionCommand: ['droid', '--version'],
 }
 
 register('factory-droid', factoryDroidAdapter)

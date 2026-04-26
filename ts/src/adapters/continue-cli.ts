@@ -1,7 +1,8 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
@@ -96,6 +97,32 @@ const continueCliAdapter: Adapter = {
     }
     return { costUsd: null, tokensIn: null, tokensOut: null, raw }
   },
+}
+
+continueCliAdapter.submitKeys = ['Enter']
+continueCliAdapter.detectReady = function (pane: string): ReadyState {
+  const last20 = lastNonEmptyJoin(pane, 20)
+  if (/Ask anything/i.test(last20)) return 'ready'
+  if (/Update available/i.test(last20)) return 'dialog'
+  return 'loading'
+}
+continueCliAdapter.handleDialog = function (pane: string): string[] | null {
+  if (/Update available/i.test(stripAnsi(pane))) return ['Escape']
+  return null
+}
+continueCliAdapter.detectStatus = function (pane: string): AgentStatus {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  if (/rate.?limit/i.test(last10)) return 'rate-limited'
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10)) return 'running'
+  if (/thinking|working/i.test(last10)) return 'running'
+  if (/Ask anything/i.test(last10)) return 'idle'
+  return 'unknown'
+}
+continueCliAdapter.installMeta = {
+  packageManager: 'npm',
+  installCommand: ['npm', 'install', '-g', '@continuedev/cli'],
+  updateCommand: ['npm', 'install', '-g', '@continuedev/cli@latest'],
+  versionCommand: ['cn', '--version'],
 }
 
 register('continue-cli', continueCliAdapter)

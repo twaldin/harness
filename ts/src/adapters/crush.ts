@@ -1,7 +1,8 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { createRequire } from 'module'
 import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
@@ -106,6 +107,35 @@ const crushAdapter: Adapter = {
     const { tokensIn, tokensOut, costUsd } = readCrushSessionTotals(spec.workdir, spec.env)
     return { costUsd, tokensIn, tokensOut, raw: null }
   },
+}
+
+crushAdapter.submitKeys = ['Enter']
+crushAdapter.detectReady = function (pane: string): ReadyState {
+  const last30 = lastNonEmptyJoin(pane, 30)
+  // First-time setup: model picker shown
+  if (/choose.*confirm/i.test(last30) && /↑\/↓/.test(last30)) return 'dialog'
+  // Ready: prompt visible (crush uses ▎ or > marker) + model status bar
+  if (/Ready|Charm|Crush/i.test(last30) && /\$|>|▎|❯/.test(last30)) return 'ready'
+  return 'loading'
+}
+crushAdapter.handleDialog = function (pane: string): string[] | null {
+  const text = stripAnsi(pane)
+  if (/choose.*confirm/i.test(text)) return ['Enter'] // accept the highlighted (default) model
+  return null
+}
+crushAdapter.detectStatus = function (pane: string): AgentStatus {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  if (/rate.?limit/i.test(last10)) return 'rate-limited'
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10) || /thinking|working/i.test(last10)) return 'running'
+  if (/Ready|>\s*$|❯\s*$/.test(last10)) return 'idle'
+  return 'unknown'
+}
+crushAdapter.installMeta = {
+  packageManager: 'brew',
+  installCommand: ['brew', 'install', 'charmbracelet/tap/crush'],
+  updateCommand: ['brew', 'upgrade', 'crush'],
+  versionCommand: ['crush', '--version'],
+  platforms: ['darwin', 'linux'],
 }
 
 register('crush', crushAdapter)

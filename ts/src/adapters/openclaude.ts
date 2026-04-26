@@ -1,7 +1,8 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
+import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 
 function parseLastJsonObject(stdout: string): Record<string, unknown> | null {
   const blob = stdout.trim()
@@ -96,6 +97,32 @@ const openClaudeAdapter: Adapter = {
       raw,
     }
   },
+}
+
+openClaudeAdapter.submitKeys = ['Enter']
+openClaudeAdapter.detectReady = function (pane: string): ReadyState {
+  const last20 = lastNonEmptyJoin(pane, 20)
+  // openclaude shows "Ready — type /help to begin" + ❯ prompt
+  if (/Ready\s*[-—]/i.test(last20) || stripAnsi(pane).split('\n').some(l => /^\s*❯\s*$/.test(l.trim()))) return 'ready'
+  if (/Update available/i.test(last20)) return 'dialog'
+  return 'loading'
+}
+openClaudeAdapter.handleDialog = function (pane: string): string[] | null {
+  if (/Update available/i.test(stripAnsi(pane))) return ['Escape']
+  return null
+}
+openClaudeAdapter.detectStatus = function (pane: string): AgentStatus {
+  const last10 = lastNonEmptyJoin(pane, 10)
+  if (/rate.?limit/i.test(last10)) return 'rate-limited'
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(last10) || /Thinking|Working/i.test(last10)) return 'running'
+  if (/Ready\s*[-—]/i.test(last10) || /❯\s*$/.test(last10)) return 'idle'
+  return 'unknown'
+}
+openClaudeAdapter.installMeta = {
+  packageManager: 'npm',
+  installCommand: ['npm', 'install', '-g', 'openclaude'],
+  updateCommand: ['npm', 'install', '-g', 'openclaude@latest'],
+  versionCommand: ['openclaude', '--version'],
 }
 
 register('openclaude', openClaudeAdapter)

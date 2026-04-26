@@ -7,11 +7,13 @@ IDs like `gpt-5.4` work against an OpenAI-compatible endpoint.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec, SessionTelemetry
 from harness.model_normalization import normalize_model_for_harness
+from harness.pricing import derive_cost
 
 
 class ContinueCliAdapter(Adapter):
@@ -50,6 +52,50 @@ class ContinueCliAdapter(Adapter):
             cost = raw.get("total_cost_usd")
 
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": raw}
+
+    def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
+        env_dir = os.environ.get("CONTINUE_SESSION_DIR")
+        if env_dir:
+            d = Path(env_dir).expanduser()
+            if d.exists() and d.is_dir():
+                files = sorted((p for p in d.glob("*.json") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
+                if files:
+                    return str(files[0])
+
+        base = workdir.name
+        candidates = [
+            Path.home() / ".continue" / "sessions" / base,
+            Path.home() / ".continue" / "dev_data" / base,
+            Path.home() / ".continue" / "index" / base,
+        ]
+        for d in candidates:
+            if not d.exists() or not d.is_dir():
+                continue
+            files = sorted((p for p in d.glob("*.json") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
+            if files:
+                return str(files[0])
+            idx = d / "session.json"
+            if idx.exists():
+                return str(idx)
+        return None
+
+    def parse_session_log(self, path: str) -> SessionTelemetry:
+        p = Path(path)
+        if not p.exists():
+            return SessionTelemetry(path, None, None, None, None, None)
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            obj = raw if isinstance(raw, dict) else {}
+            usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else {}
+            tokens_in = int(usage.get("input_tokens")) if isinstance(usage.get("input_tokens"), (int, float)) else None
+            tokens_out = int(usage.get("output_tokens")) if isinstance(usage.get("output_tokens"), (int, float)) else None
+            model = obj.get("model") if isinstance(obj.get("model"), str) else None
+            cost = float(obj.get("total_cost_usd")) if isinstance(obj.get("total_cost_usd"), (int, float)) else None
+            if cost is None:
+                cost = derive_cost(model, tokens_in, tokens_out)
+            return SessionTelemetry(path, tokens_in, tokens_out, cost, model, raw)
+        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+            return SessionTelemetry(path, None, None, None, None, None)
 
     def run(self, spec: RunSpec) -> RunResult:
         bc = self.build_command(spec)

@@ -7,9 +7,10 @@ Alibaba Cloud does not embed pricing in the response.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec, SessionTelemetry
 from harness.model_normalization import normalize_model_for_harness
 
 
@@ -33,6 +34,26 @@ class QwenAdapter(Adapter):
             "tokens_out": tokens_out if raw is not None else None,
             "raw": raw,
         }
+
+    def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
+        base = workdir.name
+        primary = Path.home() / ".qwen" / "tmp" / base / "logs.json"
+        if primary.exists():
+            return str(primary)
+        compat = Path.home() / ".gemini" / "tmp" / base / "logs.json"
+        if compat.exists():
+            return str(compat)
+        return None
+
+    def parse_session_log(self, path: str) -> SessionTelemetry:
+        p = Path(path)
+        if not p.exists():
+            return SessionTelemetry(path, None, None, None, None, None)
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            return SessionTelemetry(path, None, None, None, None, raw)
+        except (OSError, json.JSONDecodeError):
+            return SessionTelemetry(path, None, None, None, None, None)
 
     def run(self, spec: RunSpec) -> RunResult:
         bc = self.build_command(spec)

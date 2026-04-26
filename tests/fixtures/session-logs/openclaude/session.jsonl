@@ -1,0 +1,2 @@
+{"message":{"model":"gpt-5.4","usage":{"input_tokens":120,"output_tokens":30}},"total_cost_usd":0.01}
+{"message":{"usage":{"input_tokens":80,"output_tokens":20}},"costUSD":0.005}

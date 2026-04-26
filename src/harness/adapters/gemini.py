@@ -10,6 +10,7 @@ import json
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
 from harness.base import Adapter, BuildCommand, RunResult, RunSpec
 from harness.model_normalization import normalize_model_for_harness
+from harness.pricing import derive_cost
 
 
 class GeminiAdapter(Adapter):
@@ -26,10 +27,16 @@ class GeminiAdapter(Adapter):
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
         tokens_in, tokens_out, raw = _parse_gemini_stats(outcome.stdout)
+        if raw is None:
+            return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
+
+        stats = raw.get("stats") if isinstance(raw, dict) else {}
+        models = stats.get("models") if isinstance(stats, dict) else {}
+        model_name = next(iter(models.keys()), None) if isinstance(models, dict) and models else None
         return {
-            "cost_usd": None,
-            "tokens_in": tokens_in if raw is not None else None,
-            "tokens_out": tokens_out if raw is not None else None,
+            "cost_usd": derive_cost(model_name, tokens_in, tokens_out),
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
             "raw": raw,
         }
 

@@ -6,8 +6,9 @@ import sqlite3
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, write_instructions
-from harness.base import Adapter, BuildCommand, RunSpec
+from harness.base import Adapter, BuildCommand, RunSpec, SessionTelemetry
 from harness.model_normalization import normalize_model_for_harness
+from harness.pricing import derive_cost
 
 
 class CrushAdapter(Adapter):
@@ -40,6 +41,19 @@ class CrushAdapter(Adapter):
         tokens_in, tokens_out, cost = _read_crush_session_totals(Path(spec.workdir), spec.env)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
 
+    def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
+        db_path = _crush_db_path(workdir, None)
+        if not db_path.exists():
+            return None
+        return f"{db_path}#session({workdir.resolve().name if workdir.exists() else workdir.name})"
+
+    def parse_session_log(self, path: str) -> SessionTelemetry:
+        db_raw = path.split("#", 1)[0]
+        tokens_in, tokens_out, cost = _read_crush_session_totals_by_db_path(Path(db_raw))
+        if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
+            cost = derive_cost("gpt-5.4", tokens_in, tokens_out) or cost
+        return SessionTelemetry(path, tokens_in, tokens_out, cost, None, None)
+
 
 def _crush_data_dir(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
     env_path = (extra_env or {}).get("CRUSH_DATA_DIR") or os.environ.get("CRUSH_DATA_DIR")
@@ -52,11 +66,7 @@ def _crush_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Pa
     return _crush_data_dir(workdir, extra_env) / "crush.db"
 
 
-def _read_crush_session_totals(
-    workdir: Path,
-    extra_env: dict[str, str] | None = None,
-) -> tuple[int | None, int | None, float | None]:
-    db_path = _crush_db_path(workdir, extra_env)
+def _read_crush_session_totals_by_db_path(db_path: Path) -> tuple[int | None, int | None, float | None]:
     if not db_path.exists():
         return None, None, None
 
@@ -87,3 +97,10 @@ def _read_crush_session_totals(
     tokens_out = int(row[1]) if isinstance(row[1], (int, float)) else None
     cost = float(row[2]) if isinstance(row[2], (int, float)) else None
     return tokens_in, tokens_out, cost
+
+
+def _read_crush_session_totals(
+    workdir: Path,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[int | None, int | None, float | None]:
+    return _read_crush_session_totals_by_db_path(_crush_db_path(workdir, extra_env))

@@ -7,8 +7,9 @@ import sqlite3
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, write_instructions
-from harness.base import Adapter, BuildCommand, RunSpec
+from harness.base import Adapter, BuildCommand, RunSpec, SessionTelemetry
 from harness.model_normalization import normalize_model_for_harness
+from harness.pricing import derive_cost
 
 
 class KiloAdapter(Adapter):
@@ -65,6 +66,22 @@ class KiloAdapter(Adapter):
         tokens_in, tokens_out, cost = _read_kilo_session_totals(Path(spec.workdir), spec.env)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
 
+    def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
+        db_path = _kilo_db_path(workdir, None)
+        if not db_path.exists():
+            return None
+        return f"{db_path}#session({workdir.resolve().name if workdir.exists() else workdir.name})"
+
+    def parse_session_log(self, path: str) -> SessionTelemetry:
+        db_raw = path.split("#", 1)[0]
+        hint = ""
+        if "session(" in path and path.endswith(")"):
+            hint = path.split("session(", 1)[1][:-1]
+        tokens_in, tokens_out, cost = _read_kilo_session_totals_by_db_path(Path(db_raw), hint or "/")
+        if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
+            cost = derive_cost("gpt-5.4", tokens_in, tokens_out) or cost
+        return SessionTelemetry(path, tokens_in, tokens_out, cost, None, None)
+
 
 def _kilo_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
     env_path = (extra_env or {}).get("KILO_DB") or os.environ.get("KILO_DB")
@@ -73,19 +90,12 @@ def _kilo_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Pat
     return workdir / ".harness" / "kilo" / "kilo.db"
 
 
-def _read_kilo_session_totals(
-    workdir: Path,
-    extra_env: dict[str, str] | None = None,
+def _read_kilo_session_totals_by_db_path(
+    db_path: Path,
+    workdir_basename: str,
 ) -> tuple[int | None, int | None, float | None]:
-    db_path = _kilo_db_path(workdir, extra_env)
     if not db_path.exists():
         return None, None, None
-
-    try:
-        workdir_real = workdir.resolve()
-    except OSError:
-        workdir_real = workdir
-    workdir_basename = workdir_real.name
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
@@ -120,3 +130,15 @@ def _read_kilo_session_totals(
         return None, None, None
 
     return int(row[0]), int(row[1]), float(row[2])
+
+
+def _read_kilo_session_totals(
+    workdir: Path,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[int | None, int | None, float | None]:
+    try:
+        workdir_real = workdir.resolve()
+    except OSError:
+        workdir_real = workdir
+    workdir_basename = workdir_real.name
+    return _read_kilo_session_totals_by_db_path(_kilo_db_path(workdir, extra_env), workdir_basename)

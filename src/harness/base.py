@@ -4,6 +4,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 class HarnessError(RuntimeError):
@@ -53,6 +54,16 @@ class BuildCommand:
     cwd: Path
     env: dict[str, str]
     instructions_file: Path | None
+
+
+@dataclass
+class SessionTelemetry:
+    session_log_path: str | None
+    tokens_in: int | None
+    tokens_out: int | None
+    cost_usd: float | None
+    model: str | None
+    raw: Any
 
 
 @dataclass
@@ -158,6 +169,19 @@ class Adapter(ABC):
             tokens_in=parsed.get("tokens_in"),
             tokens_out=parsed.get("tokens_out"),
             raw=parsed.get("raw"),
+        )
+
+    def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
+        return None
+
+    def parse_session_log(self, path: str) -> SessionTelemetry:
+        return SessionTelemetry(
+            session_log_path=path,
+            tokens_in=None,
+            tokens_out=None,
+            cost_usd=None,
+            model=None,
+            raw=None,
         )
 
     def __repr__(self) -> str:  # pragma: no cover

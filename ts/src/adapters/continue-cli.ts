@@ -102,6 +102,9 @@ const continueCliAdapter: Adapter = {
 continueCliAdapter.submitKeys = ['Enter']
 continueCliAdapter.detectReady = function (pane: string): ReadyState {
   const last20 = lastNonEmptyJoin(pane, 20)
+  // cn shows "Ask anything" placeholder while model is still loading.
+  // Real ready = input visible AND model loaded (no "Model: Loading..." line).
+  if (/Model:\s*Loading/i.test(last20)) return 'loading'
   if (/Ask anything/i.test(last20)) return 'ready'
   if (/Update available/i.test(last20)) return 'dialog'
   return 'loading'

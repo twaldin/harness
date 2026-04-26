@@ -1,8 +1,9 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { deriveCost } from '../pricing.js'
 import { createRequire } from 'module'
 import { existsSync, mkdirSync } from 'fs'
 import { basename, dirname, join, resolve } from 'path'
@@ -52,20 +53,11 @@ function kiloDbPath(workdir: string, extraEnv: Record<string, string> | undefine
   return join(workdir, '.harness', 'kilo', 'kilo.db')
 }
 
-function readKiloSessionTotals(
-  workdir: string,
-  extraEnv: Record<string, string> | undefined,
+function readKiloSessionTotalsByDbPath(
+  dbPath: string,
+  wdBasename: string,
 ): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
-  const dbPath = kiloDbPath(workdir, extraEnv)
   if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
-
-  let resolvedWorkdir = workdir
-  try {
-    resolvedWorkdir = resolve(workdir)
-  } catch {
-    // keep raw
-  }
-  const wdBasename = basename(resolvedWorkdir)
 
   const db = openDb(dbPath)
   if (!db) return { tokensIn: null, tokensOut: null, costUsd: null }
@@ -103,6 +95,20 @@ function readKiloSessionTotals(
   } finally {
     db.close()
   }
+}
+
+function readKiloSessionTotals(
+  workdir: string,
+  extraEnv: Record<string, string> | undefined,
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
+  let resolvedWorkdir = workdir
+  try {
+    resolvedWorkdir = resolve(workdir)
+  } catch {
+    // keep raw
+  }
+  const wdBasename = basename(resolvedWorkdir)
+  return readKiloSessionTotalsByDbPath(kiloDbPath(workdir, extraEnv), wdBasename)
 }
 
 const kiloAdapter: Adapter = {
@@ -145,6 +151,25 @@ const kiloAdapter: Adapter = {
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
     const { tokensIn, tokensOut, costUsd } = readKiloSessionTotals(spec.workdir, spec.env)
     return { costUsd, tokensIn, tokensOut, raw: null }
+  },
+
+  sessionLogPath(workdir: string, _since?: number): string | null {
+    const dbPath = kiloDbPath(workdir, undefined)
+    if (!existsSync(dbPath)) return null
+    let wd = workdir
+    try { wd = basename(resolve(workdir)) } catch { wd = basename(workdir) }
+    return `${dbPath}#session(${wd})`
+  },
+
+  parseSessionLog(path: string): SessionTelemetry {
+    const dbPath = path.split('#')[0] ?? path
+    const wdHint = path.split('session(')[1]?.replace(/\)$/, '') ?? ''
+    const result = readKiloSessionTotalsByDbPath(dbPath, wdHint || '/')
+    let costUsd = result.costUsd
+    if ((costUsd == null || costUsd === 0) && (result.tokensIn != null || result.tokensOut != null)) {
+      costUsd = deriveCost('gpt-5.4', result.tokensIn, result.tokensOut) ?? costUsd
+    }
+    return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd, model: null, raw: null }
   },
 }
 

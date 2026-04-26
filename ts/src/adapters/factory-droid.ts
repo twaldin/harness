@@ -1,8 +1,11 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
+import { basename, join } from 'path'
+import { homedir } from 'os'
 
 function parseLastJsonObject(stdout: string): Record<string, unknown> | null {
   const blob = stdout.trim()
@@ -40,6 +43,33 @@ function asNumber(value: unknown): number | null {
 function asInt(value: unknown): number | null {
   const n = asNumber(value)
   return n === null ? null : Math.trunc(n)
+}
+
+function findFactorySession(workdir: string): string | null {
+  const base = basename(workdir)
+  const home = process.env.HOME ?? homedir()
+  const roots = [
+    process.env['FACTORY_HOME'] ? process.env['FACTORY_HOME']!.replace(/^~/, home) : null,
+    join(home, '.factory'),
+  ].filter((x): x is string => Boolean(x))
+
+  const rels = ['sessions', 'trajectories', 'data']
+  for (const root of roots) {
+    for (const rel of rels) {
+      const dir = join(root, rel, base)
+      if (!existsSync(dir)) continue
+      try {
+        const files = readdirSync(dir)
+          .filter((n) => n.endsWith('.json'))
+          .map((n) => ({ path: join(dir, n), mtimeMs: statSync(join(dir, n)).mtimeMs }))
+          .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        if (files.length > 0) return files[0].path
+      } catch {
+        continue
+      }
+    }
+  }
+  return null
 }
 
 const factoryDroidAdapter: Adapter = {
@@ -92,6 +122,40 @@ const factoryDroidAdapter: Adapter = {
       tokensIn: asInt(usageObj['input_tokens'] ?? usageObj['input']),
       tokensOut: asInt(usageObj['output_tokens'] ?? usageObj['output']),
       raw,
+    }
+  },
+
+  sessionLogPath(workdir: string, _since?: number): string | null {
+    return findFactorySession(workdir)
+  },
+
+  parseSessionLog(path: string): SessionTelemetry {
+    if (!existsSync(path)) {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    }
+    try {
+      const raw = JSON.parse(readFileSync(path, 'utf-8')) as unknown
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw }
+      }
+      const obj = raw as Record<string, unknown>
+      const usage = obj['usage'] && typeof obj['usage'] === 'object' ? obj['usage'] as Record<string, unknown> : {}
+      let costUsd = asNumber(obj['total_cost_usd'])
+      if (costUsd === null) {
+        const usageCost = usage['cost']
+        if (typeof usageCost === 'number') costUsd = usageCost
+        else if (usageCost && typeof usageCost === 'object' && !Array.isArray(usageCost)) costUsd = asNumber((usageCost as Record<string, unknown>)['total'])
+      }
+      return {
+        sessionLogPath: path,
+        tokensIn: asInt(usage['input_tokens'] ?? usage['input']),
+        tokensOut: asInt(usage['output_tokens'] ?? usage['output']),
+        costUsd,
+        model: typeof obj['model'] === 'string' ? obj['model'] : null,
+        raw,
+      }
+    } catch {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
     }
   },
 }

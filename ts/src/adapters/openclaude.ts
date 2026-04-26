@@ -1,8 +1,11 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { deriveCost } from '../pricing.js'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 function parseLastJsonObject(stdout: string): Record<string, unknown> | null {
   const blob = stdout.trim()
@@ -96,6 +99,66 @@ const openClaudeAdapter: Adapter = {
       tokensOut: asInt(usageObj['output_tokens']),
       raw,
     }
+  },
+
+  sessionLogPath(workdir: string, _since?: number): string | null {
+    const home = process.env.HOME ?? ''
+    let real = workdir
+    try { real = require('node:fs').realpathSync(workdir) } catch {}
+    const encoded = real.replace(/[\/_]/g, '-')
+    const dir = join(home, '.claude', 'projects', encoded)
+    if (!existsSync(dir)) return null
+    try {
+      const items = readdirSync(dir)
+        .filter((n) => n.endsWith('.jsonl'))
+        .map((n) => ({ n, t: statSync(join(dir, n)).mtimeMs }))
+        .sort((a, b) => b.t - a.t)
+      return items.length > 0 ? join(dir, items[0].n) : null
+    } catch {
+      return null
+    }
+  },
+
+  parseSessionLog(path: string): SessionTelemetry {
+    if (!existsSync(path)) {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    }
+    let tokensIn = 0
+    let tokensOut = 0
+    let costUsd = 0
+    let model: string | null = null
+    let sawUsage = false
+    let sawCost = false
+    try {
+      for (const line of readFileSync(path, 'utf-8').split('\n')) {
+        const t = line.trim()
+        if (!t) continue
+        let ev: unknown
+        try { ev = JSON.parse(t) } catch { continue }
+        if (!ev || typeof ev !== 'object') continue
+        const obj = ev as Record<string, unknown>
+        const msg = obj['message'] && typeof obj['message'] === 'object' ? obj['message'] as Record<string, unknown> : undefined
+        const usage = msg?.['usage'] && typeof msg['usage'] === 'object' ? msg['usage'] as Record<string, unknown> : undefined
+        if (usage) {
+          sawUsage = true
+          tokensIn += Number(usage['input_tokens'] ?? 0)
+          tokensOut += Number(usage['output_tokens'] ?? 0)
+        }
+        const eventCost = obj['costUSD'] ?? obj['total_cost_usd']
+        if (typeof eventCost === 'number') {
+          sawCost = true
+          costUsd += eventCost
+        }
+        if (!model && typeof msg?.['model'] === 'string') model = msg['model'] as string
+      }
+    } catch {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    }
+
+    const finalIn = sawUsage ? tokensIn : null
+    const finalOut = sawUsage ? tokensOut : null
+    const finalCost = sawCost ? costUsd : deriveCost(model, finalIn, finalOut)
+    return { sessionLogPath: path, tokensIn: finalIn, tokensOut: finalOut, costUsd: finalCost, model, raw: null }
   },
 }
 

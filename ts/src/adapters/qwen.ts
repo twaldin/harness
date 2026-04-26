@@ -1,8 +1,10 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { existsSync, readFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 
 const qwenAdapter: Adapter = {
   name: 'qwen',
@@ -49,6 +51,27 @@ const qwenAdapter: Adapter = {
     }
 
     return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
+  },
+
+  sessionLogPath(workdir: string, _since?: number): string | null {
+    const home = process.env.HOME ?? ''
+    const base = basename(workdir)
+    const primary = join(home, '.qwen', 'tmp', base, 'logs.json')
+    if (existsSync(primary)) return primary
+    const compat = join(home, '.gemini', 'tmp', base, 'logs.json')
+    return existsSync(compat) ? compat : null
+  },
+
+  parseSessionLog(path: string): SessionTelemetry {
+    if (!existsSync(path)) {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+    } catch {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    }
   },
 }
 

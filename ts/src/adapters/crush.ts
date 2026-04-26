@@ -1,11 +1,12 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
+import { deriveCost } from '../pricing.js'
 import { createRequire } from 'module'
 import { existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { basename, join, resolve } from 'path'
 import { homedir } from 'os'
 
 interface SqliteDriver {
@@ -51,11 +52,9 @@ function crushDataDir(workdir: string, extraEnv: Record<string, string> | undefi
   return envPath ? envPath.replace(/^~/, homedir()) : join(workdir, '.harness', 'crush-data')
 }
 
-function readCrushSessionTotals(
-  workdir: string,
-  extraEnv: Record<string, string> | undefined,
+function readCrushSessionTotalsByDbPath(
+  dbPath: string,
 ): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
-  const dbPath = join(crushDataDir(workdir, extraEnv), 'crush.db')
   if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
 
   const db = openDb(dbPath)
@@ -83,6 +82,13 @@ function readCrushSessionTotals(
   }
 }
 
+function readCrushSessionTotals(
+  workdir: string,
+  extraEnv: Record<string, string> | undefined,
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
+  return readCrushSessionTotalsByDbPath(join(crushDataDir(workdir, extraEnv), 'crush.db'))
+}
+
 const crushAdapter: Adapter = {
   name: 'crush',
   instructionsFilename: 'AGENTS.md',
@@ -106,6 +112,24 @@ const crushAdapter: Adapter = {
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
     const { tokensIn, tokensOut, costUsd } = readCrushSessionTotals(spec.workdir, spec.env)
     return { costUsd, tokensIn, tokensOut, raw: null }
+  },
+
+  sessionLogPath(workdir: string, _since?: number): string | null {
+    const dbPath = join(crushDataDir(workdir, undefined), 'crush.db')
+    if (!existsSync(dbPath)) return null
+    let wd = workdir
+    try { wd = basename(resolve(workdir)) } catch { wd = basename(workdir) }
+    return `${dbPath}#session(${wd})`
+  },
+
+  parseSessionLog(path: string): SessionTelemetry {
+    const dbPath = path.split('#')[0] ?? path
+    const { tokensIn, tokensOut, costUsd } = readCrushSessionTotalsByDbPath(dbPath)
+    let finalCost = costUsd
+    if ((finalCost == null || finalCost === 0) && (tokensIn != null || tokensOut != null)) {
+      finalCost = deriveCost('gpt-5.4', tokensIn, tokensOut) ?? finalCost
+    }
+    return { sessionLogPath: path, tokensIn, tokensOut, costUsd: finalCost, model: null, raw: null }
   },
 }
 

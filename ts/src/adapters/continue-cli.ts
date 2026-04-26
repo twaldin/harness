@@ -1,10 +1,12 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
-import { mkdirSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { deriveCost } from '../pricing.js'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { basename, join } from 'path'
+import { homedir } from 'os'
 
 /**
  * continue-cli adapter — invokes the `cn` CLI (Continue) in print mode.
@@ -43,6 +45,48 @@ function writeContinueConfig(
   }
   writeFileSync(configPath, lines.join('\n') + '\n', 'utf-8')
   return configPath
+}
+
+function continueSessionPath(workdir: string): string | null {
+  const envDir = process.env['CONTINUE_SESSION_DIR']
+  if (envDir) {
+    try {
+      const files = readdirSync(envDir)
+        .filter((n) => n.endsWith('.json'))
+        .map((n) => ({ path: join(envDir, n), mtimeMs: statSync(join(envDir, n)).mtimeMs }))
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      if (files.length > 0) return files[0].path
+    } catch {
+      return null
+    }
+  }
+
+  const home = process.env.HOME ?? homedir()
+  const base = basename(workdir)
+  const candidates = [
+    join(home, '.continue', 'sessions', base),
+    join(home, '.continue', 'dev_data', base),
+    join(home, '.continue', 'index', base),
+  ]
+  for (const dir of candidates) {
+    if (!existsSync(dir)) continue
+    try {
+      const files = readdirSync(dir)
+        .filter((n) => n.endsWith('.json'))
+        .map((n) => ({ path: join(dir, n), mtimeMs: statSync(join(dir, n)).mtimeMs }))
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      if (files.length > 0) return files[0].path
+      const indexPath = join(dir, 'session.json')
+      if (existsSync(indexPath)) return indexPath
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+function numberOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
 const continueCliAdapter: Adapter = {
@@ -96,6 +140,29 @@ const continueCliAdapter: Adapter = {
       }
     }
     return { costUsd: null, tokensIn: null, tokensOut: null, raw }
+  },
+
+  sessionLogPath(workdir: string, _since?: number): string | null {
+    return continueSessionPath(workdir)
+  },
+
+  parseSessionLog(path: string): SessionTelemetry {
+    if (!existsSync(path)) {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
+      const obj = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+      const usage = obj['usage'] && typeof obj['usage'] === 'object' ? obj['usage'] as Record<string, unknown> : {}
+      const tokensIn = numberOrNull(usage['input_tokens'])
+      const tokensOut = numberOrNull(usage['output_tokens'])
+      const rawCost = numberOrNull(obj['total_cost_usd'])
+      const model = typeof obj['model'] === 'string' ? obj['model'] : null
+      const costUsd = rawCost ?? deriveCost(model, tokensIn, tokensOut)
+      return { sessionLogPath: path, tokensIn, tokensOut, costUsd, model, raw: parsed }
+    } catch {
+      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    }
   },
 }
 

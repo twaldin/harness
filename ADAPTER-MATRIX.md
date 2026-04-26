@@ -2,7 +2,24 @@
 
 Per-CLI reference: what flags get built, what instructions filename gets written, how tokens/cost are parsed. **This is the source of truth both `harness` (py) and `@twaldin/harness-ts` implement.** Fixture tests in `tests/fixtures/` enforce byte-level agreement.
 
-Last updated: 2026-04-23. Python source: `src/harness/adapters/*.py`.
+Last updated: 2026-04-26. Python source: `src/harness/adapters/*.py`.
+
+## Session telemetry coverage (12/12)
+
+| adapter | sessionLogPath | extract (tokens/cost) | notes |
+|---|---|---|---|
+| claude-code | wired | wired | JSONL under `~/.claude/projects/<encoded>/` |
+| codex | wired | wired | existing JSONL path + parser |
+| gemini | wired | wired | `logs.json` path; interactive logs carry no usage so extract returns null tokens/cost |
+| opencode | wired | wired | SQLite selector path |
+| swe-agent | wired | wired | trajectory JSON |
+| pi | wired | wired | JSONL event stream |
+| continue-cli | wired | wired | probes `~/.continue/...` + `CONTINUE_SESSION_DIR` override |
+| crush | wired | wired | SQLite selector path |
+| factory-droid | wired | wired | probes `FACTORY_HOME` / `~/.factory/...` |
+| openclaude | wired | wired | claude-code-compatible JSONL path |
+| qwen | wired | wired | `~/.qwen/tmp/<basename>/logs.json` (fallback `.gemini`); logs contain no usage |
+| kilo | wired | wired | SQLite selector path |
 
 ---
 

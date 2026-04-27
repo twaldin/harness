@@ -61,9 +61,9 @@ function openDb(dbPath: string): SqliteDriver | null {
 
 function readOpenCodeSessionTotals(
   workdir: string,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
-  const dbPath = openCodeDbPath()
-  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
+  dbPath = openCodeDbPath(),
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
+  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   let resolvedWorkdir = workdir
   try {
@@ -74,7 +74,7 @@ function readOpenCodeSessionTotals(
   const wdBasename = basename(resolvedWorkdir)
 
   const db = openDb(dbPath)
-  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null }
+  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   try {
     const row = db.get(
@@ -83,25 +83,28 @@ function readOpenCodeSessionTotals(
         COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
         COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
         COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
+        MAX(s.model)                                             AS model,
         COUNT(*)                                                 AS row_count
-      FROM message
-      WHERE session_id IN (
+      FROM message m
+      JOIN session s ON s.id = m.session_id
+      WHERE m.session_id IN (
         SELECT id FROM session WHERE directory LIKE ? ORDER BY time_updated DESC LIMIT 1
       )
     `,
       `%${wdBasename}%`,
-    ) as { tokens_in: number; tokens_out: number; cost: number; row_count: number } | undefined
+    ) as { tokens_in: number; tokens_out: number; cost: number; model: unknown; row_count: number } | undefined
 
     if (!row || row.row_count === 0) {
-      return { tokensIn: null, tokensOut: null, costUsd: null }
+      return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
     }
     return {
       tokensIn: Math.round(row.tokens_in),
       tokensOut: Math.round(row.tokens_out),
       costUsd: row.cost,
+      model: typeof row.model === 'string' ? row.model : null,
     }
   } catch {
-    return { tokensIn: null, tokensOut: null, costUsd: null }
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
   } finally {
     db.close()
   }
@@ -173,14 +176,14 @@ openCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
   if (!existsSync(dbPath)) {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
-  const result = readOpenCodeSessionTotals(wdHint || '/')
+  const result = readOpenCodeSessionTotals(wdHint || '/', dbPath)
   // SQLite cost can be 0 when opencode used a custom provider (no upstream
   // pricing): fall back to deriveCost from tokens if we have any.
   let cost = result.costUsd
   if ((cost == null || cost === 0) && result.tokensIn != null && (result.tokensIn > 0 || (result.tokensOut ?? 0) > 0)) {
     cost = deriveCost('gpt-5.4', result.tokensIn, result.tokensOut) ?? cost
   }
-  return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd: cost, model: null, raw: null }
+  return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd: cost, model: result.model, raw: null }
 }
 
 openCodeAdapter.installMeta = {

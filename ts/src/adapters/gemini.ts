@@ -4,8 +4,39 @@ import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunS
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
-import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+function parseGeminiStatsBlob(blob: string): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null; raw: unknown | null } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(blob)
+  } catch {
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+  }
+  if (parsed === null || typeof parsed !== 'object') return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+  const obj = parsed as Record<string, unknown>
+  const stats = obj['stats'] as Record<string, unknown> | undefined
+  const models = stats?.['models']
+  if (!models || typeof models !== 'object') return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+  let tokensIn = 0
+  let tokensOut = 0
+  let modelName: string | null = null
+  for (const [name, modelStats] of Object.entries(models as Record<string, unknown>)) {
+    if (!modelStats || typeof modelStats !== 'object') continue
+    if (!modelName) modelName = name
+    const t = (modelStats as Record<string, unknown>)['tokens'] as Record<string, unknown> | undefined
+    tokensIn += Number(t?.['input'] ?? 0)
+    tokensOut += Number(t?.['candidates'] ?? 0)
+  }
+  return {
+    tokensIn,
+    tokensOut,
+    costUsd: deriveCost(modelName, tokensIn, tokensOut),
+    model: modelName,
+    raw: parsed,
+  }
+}
 
 const geminiAdapter: Adapter = {
   name: 'gemini',
@@ -32,29 +63,9 @@ const geminiAdapter: Adapter = {
 
     for (const blob of candidates) {
       if (!blob) continue
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(blob)
-      } catch {
-        continue
-      }
-      if (parsed === null || typeof parsed !== 'object') continue
-      const obj = parsed as Record<string, unknown>
-      const stats = obj['stats'] as Record<string, unknown> | undefined
-      const models = stats?.['models']
-      if (!models || typeof models !== 'object') continue
-      let tokensIn = 0
-      let tokensOut = 0
-      let modelName: string | null = null
-      for (const [name, stats] of Object.entries(models as Record<string, unknown>)) {
-        if (!stats || typeof stats !== 'object') continue
-        if (!modelName) modelName = name
-        const t = (stats as Record<string, unknown>)['tokens'] as Record<string, unknown> | undefined
-        tokensIn += Number(t?.['input'] ?? 0)
-        tokensOut += Number(t?.['candidates'] ?? 0)
-      }
-      const costUsd = deriveCost(modelName, tokensIn, tokensOut)
-      return { costUsd, tokensIn, tokensOut, raw: parsed }
+      const parsed = parseGeminiStatsBlob(blob)
+      if (parsed.tokensIn == null || parsed.tokensOut == null) continue
+      return { costUsd: parsed.costUsd, tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, raw: parsed.raw }
     }
 
     return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
@@ -107,13 +118,10 @@ const geminiAdapter: Adapter = {
     return null
   },
 
-  // gemini-cli (interactive --yolo) writes a chat log to:
-  //   ~/.gemini/tmp/<basename(workdir)>/logs.json
-  // It contains a JSON array of message objects but does NOT include token
-  // counts in interactive mode (those only appear in --output-format=json
-  // headless runs, parsed by parseOutput above). The conversation log is
-  // still useful for the mutator/GEPA, so we return its path. Tokens/cost
-  // are reported as null — interactive gemini does not expose them.
+  // gemini-cli writes interactive logs to ~/.gemini/tmp/<basename(workdir)>/logs.json
+  // and headless --output-format=json stats to stdout/files with stats.models.
+  // sessionLogPath still points at interactive logs; parseSessionLog can parse
+  // either shape when given a file path.
   sessionLogPath(workdir: string, _since?: number): string | null {
     const home = process.env.HOME ?? ''
     const base = workdir.split('/').filter(Boolean).pop() ?? ''
@@ -126,9 +134,19 @@ const geminiAdapter: Adapter = {
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
     }
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf-8'))
-      // gemini interactive logs.json has user messages only (no usage/cost).
-      // Return raw conversation for mutator consumption; null tokens/cost.
+      const rawText = readFileSync(path, 'utf-8')
+      const parsedStats = parseGeminiStatsBlob(rawText)
+      if (parsedStats.tokensIn != null && parsedStats.tokensOut != null) {
+        return {
+          sessionLogPath: path,
+          tokensIn: parsedStats.tokensIn,
+          tokensOut: parsedStats.tokensOut,
+          costUsd: parsedStats.costUsd,
+          model: parsedStats.model,
+          raw: parsedStats.raw,
+        }
+      }
+      const parsed = JSON.parse(rawText)
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
     } catch {
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }

@@ -54,29 +54,30 @@ function crushDataDir(workdir: string, extraEnv: Record<string, string> | undefi
 
 function readCrushSessionTotalsByDbPath(
   dbPath: string,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
-  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
+  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   const db = openDb(dbPath)
-  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null }
+  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   try {
     const row = db.get(
       `
-      SELECT prompt_tokens, completion_tokens, cost
+      SELECT prompt_tokens, completion_tokens, cost, model
       FROM sessions
       WHERE parent_session_id IS NULL
       ORDER BY updated_at DESC
       LIMIT 1
       `,
-    ) as { prompt_tokens: unknown; completion_tokens: unknown; cost: unknown } | undefined
+    ) as { prompt_tokens: unknown; completion_tokens: unknown; cost: unknown; model: unknown } | undefined
 
     const tokensIn = typeof row?.prompt_tokens === 'number' ? Math.trunc(row.prompt_tokens) : null
     const tokensOut = typeof row?.completion_tokens === 'number' ? Math.trunc(row.completion_tokens) : null
     const costUsd = typeof row?.cost === 'number' ? row.cost : null
-    return { tokensIn, tokensOut, costUsd }
+    const model = typeof row?.model === 'string' ? row.model : null
+    return { tokensIn, tokensOut, costUsd, model }
   } catch {
-    return { tokensIn: null, tokensOut: null, costUsd: null }
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
   } finally {
     db.close()
   }
@@ -85,7 +86,7 @@ function readCrushSessionTotalsByDbPath(
 function readCrushSessionTotals(
   workdir: string,
   extraEnv: Record<string, string> | undefined,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
   return readCrushSessionTotalsByDbPath(join(crushDataDir(workdir, extraEnv), 'crush.db'))
 }
 
@@ -124,12 +125,12 @@ const crushAdapter: Adapter = {
 
   parseSessionLog(path: string): SessionTelemetry {
     const dbPath = path.split('#')[0] ?? path
-    const { tokensIn, tokensOut, costUsd } = readCrushSessionTotalsByDbPath(dbPath)
+    const { tokensIn, tokensOut, costUsd, model } = readCrushSessionTotalsByDbPath(dbPath)
     let finalCost = costUsd
     if ((finalCost == null || finalCost === 0) && (tokensIn != null || tokensOut != null)) {
-      finalCost = deriveCost('gpt-5.4', tokensIn, tokensOut) ?? finalCost
+      finalCost = deriveCost(model ?? 'gpt-5.4', tokensIn, tokensOut) ?? finalCost
     }
-    return { sessionLogPath: path, tokensIn, tokensOut, costUsd: finalCost, model: null, raw: null }
+    return { sessionLogPath: path, tokensIn, tokensOut, costUsd: finalCost, model, raw: null }
   },
 }
 

@@ -15,8 +15,8 @@ describe('crush session log', () => {
     mkdirSync(dataDir, { recursive: true })
     const dbPath = join(dataDir, 'crush.db')
     const db = new Database(dbPath)
-    db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, cost REAL, updated_at INTEGER)')
-    db.exec("INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, updated_at) VALUES ('s1', NULL, 111, 22, 0.005, 1)")
+    db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, cost REAL, model TEXT, updated_at INTEGER)')
+    db.exec("INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, model, updated_at) VALUES ('s1', NULL, 111, 22, 0.005, 'gpt-5.4', 1)")
     db.close()
 
     const adapter = getAdapter('crush')

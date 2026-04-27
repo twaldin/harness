@@ -5,6 +5,44 @@ import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { deriveCost } from '../pricing.js'
+
+function parseQwenStatsBlob(blob: string): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null; raw: unknown | null } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(blob)
+  } catch {
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+  }
+  const obj = parsed as Record<string, unknown>
+  const stats = obj['stats'] as Record<string, unknown> | undefined
+  const models = stats?.['models']
+  if (!models || typeof models !== 'object') {
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+  }
+
+  let tokensIn = 0
+  let tokensOut = 0
+  let model: string | null = null
+  for (const [name, modelStats] of Object.entries(models as Record<string, unknown>)) {
+    if (!modelStats || typeof modelStats !== 'object') continue
+    if (!model) model = name
+    const tokens = (modelStats as Record<string, unknown>)['tokens'] as Record<string, unknown> | undefined
+    tokensIn += Number(tokens?.['input'] ?? 0)
+    tokensOut += Number(tokens?.['candidates'] ?? 0)
+  }
+
+  return {
+    tokensIn,
+    tokensOut,
+    costUsd: deriveCost(model, tokensIn, tokensOut),
+    model,
+    raw: parsed,
+  }
+}
 
 const qwenAdapter: Adapter = {
   name: 'qwen',
@@ -67,7 +105,19 @@ const qwenAdapter: Adapter = {
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
     }
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
+      const rawText = readFileSync(path, 'utf-8')
+      const statsParsed = parseQwenStatsBlob(rawText)
+      if (statsParsed.tokensIn != null && statsParsed.tokensOut != null) {
+        return {
+          sessionLogPath: path,
+          tokensIn: statsParsed.tokensIn,
+          tokensOut: statsParsed.tokensOut,
+          costUsd: statsParsed.costUsd,
+          model: statsParsed.model,
+          raw: statsParsed.raw,
+        }
+      }
+      const parsed = JSON.parse(rawText) as unknown
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
     } catch {
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }

@@ -56,11 +56,11 @@ function kiloDbPath(workdir: string, extraEnv: Record<string, string> | undefine
 function readKiloSessionTotalsByDbPath(
   dbPath: string,
   wdBasename: string,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
-  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null }
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
+  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   const db = openDb(dbPath)
-  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null }
+  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   try {
     const row = db.get(
@@ -69,6 +69,7 @@ function readKiloSessionTotalsByDbPath(
         COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
         COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
         COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
+        MAX(json_extract(data, '$.model'))                      AS model,
         COUNT(*)                                                 AS row_count
       FROM message
       WHERE session_id IN (
@@ -80,18 +81,19 @@ function readKiloSessionTotalsByDbPath(
       AND json_extract(data, '$.role') = 'assistant'
       `,
       `%${wdBasename}%`,
-    ) as { tokens_in: unknown; tokens_out: unknown; cost: unknown; row_count: unknown } | undefined
+    ) as { tokens_in: unknown; tokens_out: unknown; cost: unknown; model: unknown; row_count: unknown } | undefined
 
     if (!row || typeof row.row_count !== 'number' || row.row_count === 0) {
-      return { tokensIn: null, tokensOut: null, costUsd: null }
+      return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
     }
     return {
       tokensIn: typeof row.tokens_in === 'number' ? Math.trunc(row.tokens_in) : null,
       tokensOut: typeof row.tokens_out === 'number' ? Math.trunc(row.tokens_out) : null,
       costUsd: typeof row.cost === 'number' ? row.cost : null,
+      model: typeof row.model === 'string' ? row.model : null,
     }
   } catch {
-    return { tokensIn: null, tokensOut: null, costUsd: null }
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
   } finally {
     db.close()
   }
@@ -100,7 +102,7 @@ function readKiloSessionTotalsByDbPath(
 function readKiloSessionTotals(
   workdir: string,
   extraEnv: Record<string, string> | undefined,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } {
+): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
   let resolvedWorkdir = workdir
   try {
     resolvedWorkdir = resolve(workdir)
@@ -167,9 +169,9 @@ const kiloAdapter: Adapter = {
     const result = readKiloSessionTotalsByDbPath(dbPath, wdHint || '/')
     let costUsd = result.costUsd
     if ((costUsd == null || costUsd === 0) && (result.tokensIn != null || result.tokensOut != null)) {
-      costUsd = deriveCost('gpt-5.4', result.tokensIn, result.tokensOut) ?? costUsd
+      costUsd = deriveCost(result.model ?? 'gpt-5.4', result.tokensIn, result.tokensOut) ?? costUsd
     }
-    return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd, model: null, raw: null }
+    return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd, model: result.model, raw: null }
   },
 }
 

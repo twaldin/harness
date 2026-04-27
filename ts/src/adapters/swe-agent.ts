@@ -24,15 +24,15 @@ function resolveWrapper(env: Record<string, string> | undefined): string {
   )
 }
 
-function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; raw: unknown | null } {
-  if (!existsSync(trajFile)) return { tokensIn: null, tokensOut: null, costUsd: null, raw: null }
+function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null; raw: unknown | null } {
+  if (!existsSync(trajFile)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   let traj: unknown
   try {
     traj = JSON.parse(readFileSync(trajFile, 'utf-8'))
   } catch {
-    return { tokensIn: null, tokensOut: null, costUsd: null, raw: null }
+    return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
-  if (!traj || typeof traj !== 'object') return { tokensIn: null, tokensOut: null, costUsd: null, raw: null }
+  if (!traj || typeof traj !== 'object') return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   const obj = traj as Record<string, unknown>
 
   const info = obj['info'] as Record<string, unknown> | undefined
@@ -43,12 +43,14 @@ function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensO
   let tokensIn = 0
   let tokensOut = 0
   let sawUsage = false
+  let model: string | null = null
   const messages = obj['messages']
   if (Array.isArray(messages)) {
     for (const msg of messages) {
       if (!msg || typeof msg !== 'object') continue
       const extra = (msg as Record<string, unknown>)['extra'] as Record<string, unknown> | undefined
       const response = extra?.['response'] as Record<string, unknown> | undefined
+      if (!model && typeof response?.['model'] === 'string') model = response['model'] as string
       const usage = response?.['usage'] as Record<string, unknown> | undefined
       if (!usage) continue
       sawUsage = true
@@ -57,10 +59,16 @@ function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensO
     }
   }
 
+  if (!model && modelStats) {
+    const modelKeys = Object.keys(modelStats).filter((k) => k !== 'instance_cost')
+    model = modelKeys.length > 0 ? modelKeys[0]! : null
+  }
+
   return {
     tokensIn: sawUsage ? tokensIn : null,
     tokensOut: sawUsage ? tokensOut : null,
     costUsd,
+    model,
     raw: traj,
   }
 }
@@ -146,8 +154,8 @@ sweAgentAdapter.sessionLogPath = function (workdir: string, _since?: number): st
 
 sweAgentAdapter.parseSessionLog = function (path: string): SessionTelemetry {
   const r = readSweTrajectory(path)
-  const cost = r.costUsd ?? deriveCost(null, r.tokensIn, r.tokensOut)
-  return { sessionLogPath: path, tokensIn: r.tokensIn, tokensOut: r.tokensOut, costUsd: cost, model: null, raw: r.raw }
+  const cost = r.costUsd ?? deriveCost(r.model, r.tokensIn, r.tokensOut)
+  return { sessionLogPath: path, tokensIn: r.tokensIn, tokensOut: r.tokensOut, costUsd: cost, model: r.model, raw: r.raw }
 }
 
 sweAgentAdapter.installMeta = {

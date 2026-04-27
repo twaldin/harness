@@ -80,10 +80,11 @@ def _setup_sqlite_fixture(tmp_path: Path, adapter: str) -> Path:
                 prompt_tokens INTEGER,
                 completion_tokens INTEGER,
                 cost REAL,
+                model TEXT,
                 updated_at INTEGER
             );
-            INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, updated_at)
-            VALUES ('s1', NULL, 70, 11, 0.004, 1);
+            INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, model, updated_at)
+            VALUES ('s1', NULL, 70, 11, 0.004, 'gpt-5.4', 1);
             """
         )
         db.commit()

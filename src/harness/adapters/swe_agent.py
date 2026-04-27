@@ -55,7 +55,7 @@ class SweAgentAdapter(Adapter):
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
         traj_file = Path(spec.workdir) / ".harness" / "swe-traj.json"
-        tokens_in, tokens_out, cost, raw = _read_swe_trajectory(traj_file)
+        tokens_in, tokens_out, cost, _model, raw = _read_swe_trajectory(traj_file)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": raw}
 
     def run(self, spec: RunSpec) -> RunResult:
@@ -100,13 +100,17 @@ def _resolve_wrapper(env: dict[str, str]) -> Path:
     )
 
 
-def _read_swe_trajectory(traj_file: Path) -> tuple[int | None, int | None, float | None, dict | None]:
+def _read_swe_trajectory(
+    traj_file: Path,
+) -> tuple[int | None, int | None, float | None, str | None, dict | None]:
     if not traj_file.exists():
-        return None, None, None, None
+        return None, None, None, None, None
     try:
         traj = json.loads(traj_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None, None, None, None
+        return None, None, None, None, None
+    if not isinstance(traj, dict):
+        return None, None, None, None, None
 
     stats = (traj.get("info") or {}).get("model_stats") or {}
     cost = stats.get("instance_cost")
@@ -114,12 +118,32 @@ def _read_swe_trajectory(traj_file: Path) -> tuple[int | None, int | None, float
 
     tokens_in = tokens_out = 0
     saw_usage = False
+    model: str | None = None
     for msg in traj.get("messages") or []:
-        usage = ((msg.get("extra") or {}).get("response") or {}).get("usage")
+        if not isinstance(msg, dict):
+            continue
+        response = (msg.get("extra") or {}).get("response") or {}
+        if model is None:
+            resp_model = response.get("model")
+            if isinstance(resp_model, str):
+                model = resp_model
+        usage = response.get("usage")
         if not isinstance(usage, dict):
             continue
         saw_usage = True
         tokens_in += int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
         tokens_out += int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
 
-    return (tokens_in if saw_usage else None), (tokens_out if saw_usage else None), cost, traj
+    if model is None and stats:
+        for key in stats.keys():
+            if key != "instance_cost":
+                model = key
+                break
+
+    return (
+        tokens_in if saw_usage else None,
+        tokens_out if saw_usage else None,
+        cost,
+        model,
+        traj,
+    )

@@ -12,6 +12,7 @@ from pathlib import Path
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
 from harness.base import Adapter, BuildCommand, RunResult, RunSpec, SessionTelemetry
 from harness.model_normalization import normalize_model_for_harness
+from harness.pricing import derive_cost
 
 
 class QwenAdapter(Adapter):
@@ -50,9 +51,25 @@ class QwenAdapter(Adapter):
         if not p.exists():
             return SessionTelemetry(path, None, None, None, None, None)
         try:
-            raw = json.loads(p.read_text(encoding="utf-8"))
+            raw_text = p.read_text(encoding="utf-8")
+        except OSError:
+            return SessionTelemetry(path, None, None, None, None, None)
+
+        stats = _parse_qwen_stats_blob(raw_text)
+        if stats["tokens_in"] is not None and stats["tokens_out"] is not None:
+            return SessionTelemetry(
+                path,
+                stats["tokens_in"],
+                stats["tokens_out"],
+                stats["cost_usd"],
+                stats["model"],
+                stats["raw"],
+            )
+
+        try:
+            raw = json.loads(raw_text)
             return SessionTelemetry(path, None, None, None, None, raw)
-        except (OSError, json.JSONDecodeError):
+        except json.JSONDecodeError:
             return SessionTelemetry(path, None, None, None, None, None)
 
     def run(self, spec: RunSpec) -> RunResult:
@@ -77,6 +94,47 @@ class QwenAdapter(Adapter):
             tokens_out=parsed.get("tokens_out"),
             raw=parsed.get("raw"),
         )
+
+
+def _parse_qwen_stats_blob(blob: str) -> dict:
+    """Extract token/cost/model from a qwen stats envelope (`stats.models[*]`).
+
+    Mirrors the TS `parseQwenStatsBlob`. Returns a dict with keys
+    `tokens_in`, `tokens_out`, `cost_usd`, `model`, `raw`. Token fields are
+    None when the blob can't be interpreted as a stats envelope.
+    """
+    try:
+        parsed = json.loads(blob)
+    except json.JSONDecodeError:
+        return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": None}
+
+    if not isinstance(parsed, dict):
+        return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": parsed}
+
+    stats = parsed.get("stats")
+    models = stats.get("models") if isinstance(stats, dict) else None
+    if not isinstance(models, dict):
+        return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": parsed}
+
+    tokens_in = 0
+    tokens_out = 0
+    model: str | None = None
+    for name, model_stats in models.items():
+        if not isinstance(model_stats, dict):
+            continue
+        if model is None:
+            model = name
+        tokens = model_stats.get("tokens") or {}
+        tokens_in += int(tokens.get("input") or 0)
+        tokens_out += int(tokens.get("candidates") or 0)
+
+    return {
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "cost_usd": derive_cost(model, tokens_in, tokens_out),
+        "model": model,
+        "raw": parsed,
+    }
 
 
 def _parse_qwen_stats(stdout: str) -> tuple[int, int, list | dict | None]:

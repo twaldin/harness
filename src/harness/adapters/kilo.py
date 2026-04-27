@@ -63,7 +63,7 @@ class KiloAdapter(Adapter):
         return BuildCommand(cmd="kilo", args=args, cwd=workdir, env=env, instructions_file=instructions_file)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
-        tokens_in, tokens_out, cost = _read_kilo_session_totals(Path(spec.workdir), spec.env)
+        tokens_in, tokens_out, cost, _model = _read_kilo_session_totals(Path(spec.workdir), spec.env)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
@@ -77,10 +77,10 @@ class KiloAdapter(Adapter):
         hint = ""
         if "session(" in path and path.endswith(")"):
             hint = path.split("session(", 1)[1][:-1]
-        tokens_in, tokens_out, cost = _read_kilo_session_totals_by_db_path(Path(db_raw), hint or "/")
+        tokens_in, tokens_out, cost, model = _read_kilo_session_totals_by_db_path(Path(db_raw), hint or "/")
         if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
-            cost = derive_cost("gpt-5.4", tokens_in, tokens_out) or cost
-        return SessionTelemetry(path, tokens_in, tokens_out, cost, None, None)
+            cost = derive_cost(model or "gpt-5.4", tokens_in, tokens_out) or cost
+        return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
 def _kilo_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
@@ -93,14 +93,14 @@ def _kilo_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Pat
 def _read_kilo_session_totals_by_db_path(
     db_path: Path,
     workdir_basename: str,
-) -> tuple[int | None, int | None, float | None]:
+) -> tuple[int | None, int | None, float | None, str | None]:
     if not db_path.exists():
-        return None, None, None
+        return None, None, None, None
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
     except sqlite3.Error:
-        return None, None, None
+        return None, None, None, None
 
     try:
         row = conn.execute(
@@ -109,6 +109,7 @@ def _read_kilo_session_totals_by_db_path(
                 COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
                 COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
                 COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
+                MAX(json_extract(data, '$.model'))                      AS model,
                 COUNT(*)                                                 AS row_count
             FROM message
             WHERE session_id IN (
@@ -123,19 +124,20 @@ def _read_kilo_session_totals_by_db_path(
         ).fetchone()
     except sqlite3.Error:
         conn.close()
-        return None, None, None
+        return None, None, None, None
 
     conn.close()
-    if not row or row[3] == 0:
-        return None, None, None
+    if not row or row[4] == 0:
+        return None, None, None, None
 
-    return int(row[0]), int(row[1]), float(row[2])
+    model = row[3] if isinstance(row[3], str) else None
+    return int(row[0]), int(row[1]), float(row[2]), model
 
 
 def _read_kilo_session_totals(
     workdir: Path,
     extra_env: dict[str, str] | None = None,
-) -> tuple[int | None, int | None, float | None]:
+) -> tuple[int | None, int | None, float | None, str | None]:
     try:
         workdir_real = workdir.resolve()
     except OSError:

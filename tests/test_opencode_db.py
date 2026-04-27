@@ -21,7 +21,8 @@ def fake_opencode_db(tmp_path, monkeypatch):
         CREATE TABLE session (
             id TEXT PRIMARY KEY,
             directory TEXT NOT NULL,
-            time_updated INTEGER NOT NULL
+            time_updated INTEGER NOT NULL,
+            model TEXT
         );
         CREATE TABLE message (
             id TEXT PRIMARY KEY,

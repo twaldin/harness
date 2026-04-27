@@ -60,7 +60,7 @@ def test_kilo_sums_assistant_rows_only(tmp_path):
         ],
     )
 
-    tokens_in, tokens_out, cost = _read_kilo_session_totals(workdir, {"KILO_DB": str(db_path)})
+    tokens_in, tokens_out, cost, _model = _read_kilo_session_totals(workdir, {"KILO_DB": str(db_path)})
     assert tokens_in == 125
     assert tokens_out == 60
     assert cost == pytest.approx(0.013)
@@ -88,10 +88,10 @@ def test_kilo_prefers_most_recent_session(tmp_path):
         messages=['{"role":"assistant","tokens":{"input":42,"output":7},"cost":0.001}'],
     )
 
-    assert _read_kilo_session_totals(workdir, {"KILO_DB": str(db_path)}) == (42, 7, 0.001)
+    assert _read_kilo_session_totals(workdir, {"KILO_DB": str(db_path)}) == (42, 7, 0.001, None)
 
 
 def test_kilo_returns_none_when_db_missing(tmp_path):
     workdir = tmp_path / "proj"
     workdir.mkdir()
-    assert _read_kilo_session_totals(workdir, {"KILO_DB": str(tmp_path / "missing.db")}) == (None, None, None)
+    assert _read_kilo_session_totals(workdir, {"KILO_DB": str(tmp_path / "missing.db")}) == (None, None, None, None)

@@ -100,7 +100,7 @@ class ClaudeCodeAdapter(Adapter):
                 if isinstance(event_cost, (int, float)):
                     saw_cost = True
                     cost_usd += float(event_cost)
-                if model_name is None and isinstance(msg.get("model"), str):
+                if model_name is None and isinstance(msg.get("model"), str) and msg.get("model") != "<synthetic>":
                     model_name = msg.get("model")
         except OSError:
             return SessionTelemetry(path, None, None, None, None, None)

@@ -38,7 +38,7 @@ class CrushAdapter(Adapter):
         return BuildCommand(cmd="crush", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
-        tokens_in, tokens_out, cost = _read_crush_session_totals(Path(spec.workdir), spec.env)
+        tokens_in, tokens_out, cost, _model = _read_crush_session_totals(Path(spec.workdir), spec.env)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
@@ -49,10 +49,10 @@ class CrushAdapter(Adapter):
 
     def parse_session_log(self, path: str) -> SessionTelemetry:
         db_raw = path.split("#", 1)[0]
-        tokens_in, tokens_out, cost = _read_crush_session_totals_by_db_path(Path(db_raw))
+        tokens_in, tokens_out, cost, model = _read_crush_session_totals_by_db_path(Path(db_raw))
         if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
-            cost = derive_cost("gpt-5.4", tokens_in, tokens_out) or cost
-        return SessionTelemetry(path, tokens_in, tokens_out, cost, None, None)
+            cost = derive_cost(model or "gpt-5.4", tokens_in, tokens_out) or cost
+        return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
 def _crush_data_dir(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
@@ -66,19 +66,21 @@ def _crush_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Pa
     return _crush_data_dir(workdir, extra_env) / "crush.db"
 
 
-def _read_crush_session_totals_by_db_path(db_path: Path) -> tuple[int | None, int | None, float | None]:
+def _read_crush_session_totals_by_db_path(
+    db_path: Path,
+) -> tuple[int | None, int | None, float | None, str | None]:
     if not db_path.exists():
-        return None, None, None
+        return None, None, None, None
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
     except sqlite3.Error:
-        return None, None, None
+        return None, None, None, None
 
     try:
         row = conn.execute(
             """
-            SELECT prompt_tokens, completion_tokens, cost
+            SELECT prompt_tokens, completion_tokens, cost, model
             FROM sessions
             WHERE parent_session_id IS NULL
             ORDER BY updated_at DESC
@@ -87,20 +89,21 @@ def _read_crush_session_totals_by_db_path(db_path: Path) -> tuple[int | None, in
         ).fetchone()
     except sqlite3.Error:
         conn.close()
-        return None, None, None
+        return None, None, None, None
 
     conn.close()
     if not row:
-        return None, None, None
+        return None, None, None, None
 
     tokens_in = int(row[0]) if isinstance(row[0], (int, float)) else None
     tokens_out = int(row[1]) if isinstance(row[1], (int, float)) else None
     cost = float(row[2]) if isinstance(row[2], (int, float)) else None
-    return tokens_in, tokens_out, cost
+    model = row[3] if isinstance(row[3], str) else None
+    return tokens_in, tokens_out, cost, model
 
 
 def _read_crush_session_totals(
     workdir: Path,
     extra_env: dict[str, str] | None = None,
-) -> tuple[int | None, int | None, float | None]:
+) -> tuple[int | None, int | None, float | None, str | None]:
     return _read_crush_session_totals_by_db_path(_crush_db_path(workdir, extra_env))

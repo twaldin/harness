@@ -1,6 +1,6 @@
 [project]
 name = "harness-cli"
-version = "0.3.1"
+version = "0.3.2"
 description = "Unified Python interface for invoking AI coding-agent CLIs (claude-code, opencode, codex, gemini, aider, swe-agent) as subprocesses."
 requires-python = ">=3.10"
 authors = [{ name = "Tim Waldin" }]

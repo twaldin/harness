@@ -144,7 +144,10 @@ claudeCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
       const cost = obj['costUSD'] ?? obj['total_cost_usd']
       if (typeof cost === 'number') { sawCost = true; costUsd += cost }
       const model = msg?.['model']
-      if (typeof model === 'string' && !modelName) modelName = model
+      // Skip claude-code's "<synthetic>" placeholder — that's an
+      // autoresponder/interrupt turn, not a real model invocation. Pick the
+      // first NON-synthetic string instead.
+      if (typeof model === 'string' && model !== '<synthetic>' && !modelName) modelName = model
     }
   } catch {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }

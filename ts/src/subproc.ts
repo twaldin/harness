@@ -63,15 +63,18 @@ export function projectInstructions(
 
   if (existedBefore) {
     const existing = readFileSync(filePath, 'utf-8')
+    if (backup) {
+      // Always back up before any mutation so restoreProjectedInstructions
+      // can undo. Previously the markers branch skipped this and `restore`
+      // became a silent no-op, leaving flt's projection in the coder diff.
+      mkdirSync(dirname(backupPath), { recursive: true })
+      copyFileSync(filePath, backupPath)
+      wroteBackup = true
+    }
     if (markers && existing.includes(markers.start) && existing.includes(markers.end)) {
       const re = new RegExp(`${escapeRegex(markers.start)}[\\s\\S]*?${escapeRegex(markers.end)}`)
       writeFileSync(filePath, existing.replace(re, content), 'utf-8')
       return { workdir, filename, filePath, existedBefore, backupPath, wroteBackup }
-    }
-    if (backup) {
-      mkdirSync(dirname(backupPath), { recursive: true })
-      copyFileSync(filePath, backupPath)
-      wroteBackup = true
     }
     if (mode === 'prepend') {
       writeFileSync(filePath, `${content}\n\n${existing}`, 'utf-8')

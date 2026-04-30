@@ -122,13 +122,24 @@ const piAdapter: Adapter = {
 
 piAdapter.submitKeys = ['Enter']
 
+// pi's idle prompt has a footer line with cost/token stats:
+// "↑39k ↓6.4k R84k $0.428 (sub) 14.7%/272k (auto)". The "(sub)" + cost
+// pattern is reliable and only renders when pi is at a usable prompt.
+const PI_IDLE_FOOTER_RE = /\$\d+\.\d+\s+\(sub\)/
+
 piAdapter.detectReady = function (pane: string) {
+  const stripped = stripAnsi(pane)
   const last20 = lastNonEmptyJoin(pane, 20)
-  const lines = stripAnsi(pane).split('\n')
-  if (/Update Available/i.test(last20)) return 'dialog' // pi shows update banner above prompt — non-blocking but treat as dialog so handleDialog can dismiss
+  const lines = stripped.split('\n')
+  // Idle-prompt footer is authoritative — present means pi is ready, regardless
+  // of whether an "Update Available" banner is also showing above it.
+  if (PI_IDLE_FOOTER_RE.test(stripped)) return 'ready'
   if (/\/[a-z][a-z0-9_-]*/i.test(last20) && /pi|model|provider/i.test(last20)) return 'ready'
   if (lines.some(l => /^\s*[>❯]\s*$/.test(l.trim()))) return 'ready'
   if (/chatgpt plus|login|oauth|select a provider/i.test(last20)) return 'ready'
+  // Banner check is a last-resort fallback — only fires if no prompt is visible
+  // yet. handleDialog returns null since the banner isn't dismissable.
+  if (/Update Available/i.test(last20)) return 'dialog'
   return 'loading'
 }
 

@@ -1,11 +1,15 @@
 {
   "name": "@twaldin/harness-ts",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "description": "Harness: CLI command construction and output parsing for AI coding agents",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
     "build": "bun build src/index.ts --outdir=dist --target=node",
@@ -13,7 +17,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "better-sqlite3": "^11.0.0"
+    "better-sqlite3": "^12.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

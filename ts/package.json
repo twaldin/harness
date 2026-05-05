@@ -1,6 +1,6 @@
 {
   "name": "@twaldin/harness-ts",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "type": "module",
   "description": "Harness: CLI command construction and output parsing for AI coding agents",
   "main": "./dist/index.js",
@@ -11,9 +11,15 @@
       "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "bun build src/index.ts --outdir=dist --target=node",
     "prepare": "bun build src/index.ts --outdir=dist --target=node",
+    "prepublishOnly": "bun build src/index.ts --outdir=dist --target=node",
     "test": "bun test"
   },
   "dependencies": {

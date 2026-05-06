@@ -21,6 +21,7 @@ from harness.model_normalization import normalize_model_for_harness
 class OpenCodeAdapter(Adapter):
     name = "opencode"
     instructions_filename = "AGENTS.md"
+    scroll_ownership = "app"
 
     DEFAULT_MODEL = "gpt-5.4"
 

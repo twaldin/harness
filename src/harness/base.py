@@ -100,6 +100,19 @@ class Adapter(ABC):
     #: Filename used to inject `instructions` into the workdir.
     instructions_filename: str = ""
 
+    #: Scroll-key routing policy for terminal multiplexer integrations
+    #: (for example flt's TUI). Consumers can use this to decide whether
+    #: scroll-direction keys (j/k, ctrl-u/d, etc.) should be forwarded
+    #: into the CLI or treated as tmux scrollback.
+    #:
+    #:   None / "tmux"      — always tmux copy-mode scrollback. Default.
+    #:   "app"              — always forward into the CLI; this CLI owns
+    #:                        its own viewport regardless of mode.
+    #:   "fullscreen-aware" — forward to the CLI only when the pane is in
+    #:                        alt-screen / fullscreen render mode; else tmux.
+    #:                        Consumer check: tmux #{alternate_on}.
+    scroll_ownership: str | None = None
+
     @abstractmethod
     def build_command(self, spec: RunSpec) -> BuildCommand:
         """Build the subprocess command without executing it.

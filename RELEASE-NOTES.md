@@ -1,5 +1,16 @@
 # Release notes
 
+## 2026-05-06
+
+- Added optional `scrollOwnership` on `Adapter` in `@twaldin/harness-ts` so terminal multiplexer consumers can route scroll keys by adapter policy (`tmux` default, `app`, `fullscreen-aware` with consumer-side tmux `#{alternate_on}` check).
+- Set adapter policy for:
+  - `opencode`: `scrollOwnership: 'app'`
+  - `claude-code`: `scrollOwnership: 'fullscreen-aware'`
+- Added tests for scroll ownership adapter declarations.
+- Version bumps:
+  - `@twaldin/harness-ts`: `0.2.6` (0.2.5 was already published with an unrelated `files` field fix the same day)
+  - Python `harness-cli`: unchanged (`0.3.2`) — TS-only adapter metadata update.
+
 ## 2026-04-29
 
 - `ts/pi.detectReady`: recognizes pi's idle-prompt footer (`(sub) X.X%/Yk`) before falling back to the "Update Available" banner branch, so flt's `waitForReady` returns promptly when pi has both a banner AND a usable prompt visible.

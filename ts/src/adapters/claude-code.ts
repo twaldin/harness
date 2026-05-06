@@ -16,6 +16,7 @@ const claudeCodeAdapter: Adapter = {
   name: 'claude-code',
   instructionsFilename: 'CLAUDE.md',
   defaultModel: 'sonnet',
+  scrollOwnership: 'fullscreen-aware',
 
   buildCommand(spec: RunSpec): BuildCommand {
     const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel

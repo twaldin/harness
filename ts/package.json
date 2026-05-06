@@ -1,6 +1,6 @@
 {
   "name": "@twaldin/harness-ts",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "type": "module",
   "description": "Harness: CLI command construction and output parsing for AI coding agents",
   "main": "./dist/index.js",

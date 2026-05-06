@@ -114,6 +114,7 @@ const openCodeAdapter: Adapter = {
   name: 'opencode',
   instructionsFilename: 'AGENTS.md',
   defaultModel: 'gpt-5.4',
+  scrollOwnership: 'app',
 
   buildCommand(spec: RunSpec): BuildCommand {
     const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel

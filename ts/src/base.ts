@@ -95,6 +95,20 @@ export interface Adapter {
   /** When `flatten=true`, paste-buffer writes will collapse \n → ' ' before send. */
   flattenOnPaste?: boolean
 
+  /**
+   * Scroll-key routing policy for terminal multiplexer integrations (e.g.
+   * flt's TUI). Consumers can use this to decide whether j/k, ctrl-u/d, etc.
+   * should be forwarded into the CLI or treated as tmux scrollback.
+   *
+   *   'tmux'             — always tmux copy-mode scrollback. Default.
+   *   'app'              — always forward to the CLI; this CLI owns its
+   *                        own viewport regardless of mode.
+   *   'fullscreen-aware' — forward to the CLI only when the pane is in
+   *                        alt-screen / fullscreen render mode; else tmux.
+   *                        Consumer check for tmux: #{alternate_on}.
+   */
+  scrollOwnership?: 'tmux' | 'app' | 'fullscreen-aware'
+
   /** Pure pane → ready/loading/dialog. flt drives the polling loop. */
   detectReady?(pane: string): ReadyState
 

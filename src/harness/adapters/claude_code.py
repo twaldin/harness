@@ -17,6 +17,7 @@ from harness.pricing import derive_cost
 class ClaudeCodeAdapter(Adapter):
     name = "claude-code"
     instructions_filename = "CLAUDE.md"
+    scroll_ownership = "fullscreen-aware"
 
     DEFAULT_MODEL = "sonnet"
 

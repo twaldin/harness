@@ -9,7 +9,7 @@
 - Added tests for scroll ownership adapter declarations.
 - Version bumps:
   - `@twaldin/harness-ts`: `0.2.6` (0.2.5 was already published with an unrelated `files` field fix the same day)
-  - Python `harness-cli`: unchanged (`0.3.2`) — TS-only adapter metadata update.
+  - Python `harness-cli`: `0.3.3` (parity mirror of `scrollOwnership` as `scroll_ownership` plus adapter declarations/tests).
 
 ## 2026-04-29
 

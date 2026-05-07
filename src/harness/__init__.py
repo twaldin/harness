@@ -3,7 +3,7 @@
 Public API:
     from harness import run, run_async, build_command, parse_output, RunSpec, RunResult, BuildCommand, list_adapters
 """
-from harness.base import BuildCommand, HarnessError, RunResult, RunSpec, SessionTelemetry
+from harness.base import BuildCommand, HarnessError, RunResult, RunSpec, ScrollKeys, SessionTelemetry
 from harness.pricing import ModelPricing, derive_cost, lookup_pricing
 from harness.registry import build_command, list_adapters, parse_output, run, run_async
 from harness._subproc import (
@@ -18,6 +18,7 @@ __all__ = [
     "HarnessError",
     "RunResult",
     "RunSpec",
+    "ScrollKeys",
     "SessionTelemetry",
     "build_command",
     "project_instructions",
@@ -32,4 +33,4 @@ __all__ = [
     "run",
     "run_async",
 ]
-__version__ = "0.3.1"
+__version__ = "0.3.4"

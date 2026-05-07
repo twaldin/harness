@@ -67,6 +67,19 @@ export interface SessionTelemetry {
   raw: unknown | null
 }
 
+/**
+ * tmux send-keys notation for the four scroll directions an app's
+ * virtualized scrollback responds to. Used by terminal-multiplexer
+ * consumers (e.g. flt) to decide what chord to forward when the user
+ * scrolls a pane belonging to this CLI.
+ */
+export interface ScrollKeys {
+  lineDown: string
+  lineUp: string
+  pageDown: string
+  pageUp: string
+}
+
 export interface InstallMeta {
   /** What package manager owns this CLI's install. */
   packageManager: 'npm' | 'pip' | 'brew' | 'cargo' | 'binary' | 'unknown'
@@ -108,6 +121,16 @@ export interface Adapter {
    *                        Consumer check for tmux: #{alternate_on}.
    */
   scrollOwnership?: 'tmux' | 'app' | 'fullscreen-aware'
+
+  /**
+   * Per-CLI scroll-key chord lookup. Returns the four direction keys the
+   * consumer should forward into this CLI right now, or `null` to fall
+   * through to tmux scrollback. Allows mode-aware CLIs (e.g. claude-code's
+   * `/tui fullscreen` vs `default`) to surface the active routing instead of
+   * relying on alt-screen sniffing. Pure (or near-pure) lookup; consumers
+   * may call it on every scroll keypress.
+   */
+  getCurrentScrollKeys?(): ScrollKeys | null
 
   /** Pure pane → ready/loading/dialog. flt drives the polling loop. */
   detectReady?(pane: string): ReadyState

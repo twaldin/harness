@@ -14,8 +14,11 @@ import sqlite3
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec, ScrollKeys
 from harness.model_normalization import normalize_model_for_harness
+
+
+_OPENCODE_SCROLL_KEYS = ScrollKeys(line_down="C-M-e", line_up="C-M-y", page_down="NPage", page_up="PPage")
 
 
 class OpenCodeAdapter(Adapter):
@@ -24,6 +27,9 @@ class OpenCodeAdapter(Adapter):
     scroll_ownership = "app"
 
     DEFAULT_MODEL = "gpt-5.4"
+
+    def get_current_scroll_keys(self) -> ScrollKeys | None:
+        return _OPENCODE_SCROLL_KEYS
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)

@@ -56,6 +56,20 @@ class BuildCommand:
     instructions_file: Path | None
 
 
+@dataclass(frozen=True)
+class ScrollKeys:
+    """tmux send-keys notation for the four scroll directions an app's
+    virtualized scrollback responds to. Used by terminal-multiplexer
+    consumers (e.g. flt) to decide what chord to forward when the user
+    scrolls a pane belonging to this CLI.
+    """
+
+    line_down: str
+    line_up: str
+    page_down: str
+    page_up: str
+
+
 @dataclass
 class SessionTelemetry:
     session_log_path: str | None
@@ -112,6 +126,16 @@ class Adapter(ABC):
     #:                        alt-screen / fullscreen render mode; else tmux.
     #:                        Consumer check: tmux #{alternate_on}.
     scroll_ownership: str | None = None
+
+    def get_current_scroll_keys(self) -> ScrollKeys | None:
+        """Return the chord map a consumer should forward right now, or None
+        to fall through to tmux scrollback.
+
+        Default: return None. Adapters override when the CLI has a
+        virtualized scrollback that needs key forwarding (e.g. opencode
+        always; claude-code only in `/tui fullscreen` mode).
+        """
+        return None
 
     @abstractmethod
     def build_command(self, spec: RunSpec) -> BuildCommand:

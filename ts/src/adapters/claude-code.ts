@@ -1,10 +1,11 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
+import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, ScrollKeys, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 function stripMarkdownFences(s: string): string {
@@ -66,6 +67,42 @@ const claudeCodeAdapter: Adapter = {
 // ===== session-aware additions =====
 
 claudeCodeAdapter.submitKeys = ['Enter']
+
+// claude-code's `/tui` slash command toggles between the classic main-screen
+// renderer ("default") and the alt-screen virtualized renderer ("fullscreen").
+// Persisted under the `tui` key in ~/.claude/settings.json. When fullscreen,
+// we forward C-M-e/y + NPage/PPage into the app; when default (or absent),
+// real terminal scrollback works and we fall through to tmux.
+//
+// v1: user-scope only. The full claude-code precedence ladder
+// (managed → local → project → user) is intentionally deferred — user-scope
+// is where /tui-style global preferences land and is sufficient in practice.
+const CLAUDE_CODE_FULLSCREEN_SCROLL_KEYS: ScrollKeys = {
+  lineDown: 'C-M-e',
+  lineUp: 'C-M-y',
+  pageDown: 'NPage',
+  pageUp: 'PPage',
+}
+
+function readClaudeCodeTuiMode(): string | null {
+  const home = process.env['HOME'] ?? homedir()
+  const path = join(home, '.claude', 'settings.json')
+  if (!existsSync(path)) return null
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as unknown
+    if (raw && typeof raw === 'object') {
+      const v = (raw as Record<string, unknown>)['tui']
+      return typeof v === 'string' ? v : null
+    }
+  } catch {
+    // unreadable / malformed settings → treat as "default"
+  }
+  return null
+}
+
+claudeCodeAdapter.getCurrentScrollKeys = function (): ScrollKeys | null {
+  return readClaudeCodeTuiMode() === 'fullscreen' ? CLAUDE_CODE_FULLSCREEN_SCROLL_KEYS : null
+}
 
 claudeCodeAdapter.detectReady = function (pane: string) {
   const last20 = lastNonEmptyJoin(pane, 20)

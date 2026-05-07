@@ -1,5 +1,18 @@
 # Release notes
 
+## 2026-05-06 (later)
+
+- Added per-adapter `getCurrentScrollKeys(): ScrollKeys | null` (TS) / `get_current_scroll_keys()` (Python). Returns the four chord keys (`lineDown`/`lineUp`/`pageDown`/`pageUp`) the consumer should forward right now, or `null` to fall through to tmux scrollback. Lets mode-aware CLIs surface the active routing instead of consumers sniffing tmux state.
+- Adapter implementations:
+  - `opencode`: returns the static `C-M-e` / `C-M-y` / `NPage` / `PPage` map on every call (opencode always uses simulated scrollback).
+  - `claude-code`: reads `~/.claude/settings.json` (user scope, v1) and returns the same map when `tui` is `"fullscreen"`, else `null`. The full managed → local → project → user precedence cascade is intentionally deferred — user-scope is where `/tui`-style global preferences live.
+  - All other adapters: default `null` (no key forwarding).
+- The pre-existing `scrollOwnership` field is retained for now (additive release; consumers that haven't migrated keep working).
+- Tests added for opencode + claude-code (`fullscreen` / `default` / absent / malformed / mutation-between-calls) on both runtimes.
+- Version bumps:
+  - `@twaldin/harness-ts`: `0.2.7`
+  - Python `harness-cli`: `0.3.4`
+
 ## 2026-05-06
 
 - Added optional `scrollOwnership` on `Adapter` in `@twaldin/harness-ts` so terminal multiplexer consumers can route scroll keys by adapter policy (`tmux` default, `app`, `fullscreen-aware` with consumer-side tmux `#{alternate_on}` check).

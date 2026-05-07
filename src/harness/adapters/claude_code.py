@@ -6,12 +6,16 @@ Output format: --output-format json gives a structured envelope:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec, SessionTelemetry
+from harness.base import Adapter, BuildCommand, RunResult, RunSpec, ScrollKeys, SessionTelemetry
 from harness.model_normalization import normalize_model_for_harness
 from harness.pricing import derive_cost
+
+
+_CLAUDE_CODE_FULLSCREEN_SCROLL_KEYS = ScrollKeys(line_down="C-M-e", line_up="C-M-y", page_down="NPage", page_up="PPage")
 
 
 class ClaudeCodeAdapter(Adapter):
@@ -20,6 +24,15 @@ class ClaudeCodeAdapter(Adapter):
     scroll_ownership = "fullscreen-aware"
 
     DEFAULT_MODEL = "sonnet"
+
+    def get_current_scroll_keys(self) -> ScrollKeys | None:
+        # claude-code's `/tui` slash command toggles between the classic
+        # main-screen renderer ("default") and the alt-screen virtualized
+        # renderer ("fullscreen"). Persisted under `tui` in
+        # ~/.claude/settings.json. v1: user-scope only — full
+        # managed → local → project → user precedence is intentionally
+        # deferred.
+        return _CLAUDE_CODE_FULLSCREEN_SCROLL_KEYS if _read_claude_code_tui_mode() == "fullscreen" else None
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
@@ -133,3 +146,19 @@ class ClaudeCodeAdapter(Adapter):
             tokens_out=parsed.get("tokens_out"),
             raw=parsed.get("raw"),
         )
+
+
+def _read_claude_code_tui_mode() -> str | None:
+    home_str = os.environ.get("HOME")
+    home = Path(home_str) if home_str else Path.home()
+    settings_path = home / ".claude" / "settings.json"
+    if not settings_path.exists():
+        return None
+    try:
+        raw = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(raw, dict):
+        v = raw.get("tui")
+        return v if isinstance(v, str) else None
+    return None

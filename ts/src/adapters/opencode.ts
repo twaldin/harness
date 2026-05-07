@@ -139,6 +139,12 @@ const openCodeAdapter: Adapter = {
 openCodeAdapter.submitKeys = ['Enter']
 openCodeAdapter.flattenOnPaste = true
 
+// opencode always renders into its own virtualized scrollback — return the
+// fixed chord map regardless of any external mode.
+openCodeAdapter.getCurrentScrollKeys = function () {
+  return { lineDown: 'C-M-e', lineUp: 'C-M-y', pageDown: 'NPage', pageUp: 'PPage' }
+}
+
 openCodeAdapter.detectReady = function (pane: string) {
   const full = stripAnsi(pane)
   const last5 = lastNonEmptyJoin(pane, 5)

@@ -99,7 +99,9 @@ codexAdapter.sessionLogPath = function (_workdir: string, since?: number): strin
   if (!existsSync(dir)) return null
   // walk yyyy/mm/dd
   const cutoff = since ?? 0
-  let best: { path: string; mtime: number } | null = null
+  // Single-element holder: TS cannot track narrowing of a `let` assigned
+  // inside the nested scan() closure, but indexed access stays `T | undefined`.
+  const best: { path: string; mtime: number }[] = []
   function scan(d: string): void {
     try {
       for (const name of readdirSync(d)) {
@@ -107,13 +109,14 @@ codexAdapter.sessionLogPath = function (_workdir: string, since?: number): strin
         const st = statSync(p)
         if (st.isDirectory()) scan(p)
         else if (name.endsWith('.jsonl') && st.mtimeMs >= cutoff) {
-          if (!best || st.mtimeMs > best.mtime) best = { path: p, mtime: st.mtimeMs }
+          const cur = best[0]
+          if (!cur || st.mtimeMs > cur.mtime) best[0] = { path: p, mtime: st.mtimeMs }
         }
       }
     } catch { /* ignore */ }
   }
   scan(dir)
-  return best ? best.path : null
+  return best[0]?.path ?? null
 }
 
 codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {

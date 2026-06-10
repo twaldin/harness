@@ -182,7 +182,8 @@ piAdapter.sessionLogPath = function (workdir: string, _since?: number): string |
       .filter(n => n.endsWith('.jsonl'))
       .map(n => ({ n, t: statSync(join(dir, n)).mtimeMs }))
       .sort((a, b) => b.t - a.t)
-    return items.length ? join(dir, items[0].n) : null
+    const newest = items[0]
+    return newest ? join(dir, newest.n) : null
   } catch {
     return null
   }

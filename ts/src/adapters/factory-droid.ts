@@ -63,7 +63,8 @@ function findFactorySession(workdir: string): string | null {
           .filter((n) => n.endsWith('.json'))
           .map((n) => ({ path: join(dir, n), mtimeMs: statSync(join(dir, n)).mtimeMs }))
           .sort((a, b) => b.mtimeMs - a.mtimeMs)
-        if (files.length > 0) return files[0].path
+        const newest = files[0]
+        if (newest) return newest.path
       } catch {
         continue
       }

@@ -178,7 +178,7 @@ openCodeAdapter.sessionLogPath = function (workdir: string, _since?: number): st
 }
 
 openCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
-  const dbPath = path.split('#')[0]
+  const dbPath = path.split('#')[0] ?? path
   const wdHint = path.split('session(')[1]?.replace(/\)$/, '') ?? ''
   if (!existsSync(dbPath)) {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }

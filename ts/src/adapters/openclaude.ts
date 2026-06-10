@@ -113,7 +113,8 @@ const openClaudeAdapter: Adapter = {
         .filter((n) => n.endsWith('.jsonl'))
         .map((n) => ({ n, t: statSync(join(dir, n)).mtimeMs }))
         .sort((a, b) => b.t - a.t)
-      return items.length > 0 ? join(dir, items[0].n) : null
+      const newest = items[0]
+      return newest ? join(dir, newest.n) : null
     } catch {
       return null
     }

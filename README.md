@@ -1,5 +1,7 @@
 # harness
 
+<img src=".github/social-card.png" alt="harness" width="100%" />
+
 One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start

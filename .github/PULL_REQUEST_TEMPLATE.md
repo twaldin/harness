@@ -6,7 +6,7 @@
 
 <!-- how did you verify? which tests cover this? -->
 
-- [ ] Existing tests pass (`bun test` / `npm test` / `pytest`)
+- [ ] Both test suites pass (`PYTHONPATH=src uv run pytest tests/` and `cd ts && bun test`)
 - [ ] New tests added where relevant
 - [ ] Manually tested (describe how)
 

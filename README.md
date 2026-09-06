@@ -17,7 +17,8 @@ r = run(RunSpec(
     prompt="Write a one-line Python hello-world.",
     workdir="/tmp/scratch",
 ))
-print(f"exit={r.exit_code}  cost=${r.cost_usd:.4f}  tokens={r.tokens_in}/{r.tokens_out}")
+cost = f"${r.cost_usd:.4f}" if r.cost_usd is not None else "n/a"
+print(f"exit={r.exit_code}  cost={cost}  tokens={r.tokens_in}/{r.tokens_out}")
 ```
 
 **TypeScript** — `npm install @twaldin/harness-ts`
@@ -31,7 +32,8 @@ const r = await run({
   prompt: 'Write a one-line TypeScript hello-world.',
   workdir: '/tmp/scratch',
 })
-console.log(`exit=${r.exitCode}  cost=$${r.costUsd?.toFixed(4)}  tokens=${r.tokensIn}/${r.tokensOut}`)
+const cost = r.costUsd == null ? 'n/a' : `$${r.costUsd.toFixed(4)}`
+console.log(`exit=${r.exitCode}  cost=${cost}  tokens=${r.tokensIn}/${r.tokensOut}`)
 ```
 
 See [`examples/hello-world.py`](examples/hello-world.py) and [`ts/examples/hello-world.ts`](ts/examples/hello-world.ts) for runnable versions.
@@ -82,7 +84,8 @@ result = run(RunSpec(
     timeout_seconds=1800,
 ))
 
-print(f"exit={result.exit_code} cost=${result.cost_usd:.4f} "
+cost = f"${result.cost_usd:.4f}" if result.cost_usd is not None else "n/a"
+print(f"exit={result.exit_code} cost={cost} "
       f"tokens={result.tokens_in}/{result.tokens_out} "
       f"wall={result.duration_seconds:.1f}s")
 ```
@@ -96,7 +99,8 @@ for spec in [
     RunSpec(harness="gemini",      model="gemini-2.5-pro",  prompt=task, workdir=wd),
 ]:
     r = run(spec)
-    print(f"{spec.harness:12} {spec.model:25} ${r.cost_usd or 0:.4f}")
+    cost = f"${r.cost_usd:.4f}" if r.cost_usd is not None else "n/a"
+    print(f"{spec.harness:12} {spec.model:25} {cost}")
 ```
 
 Canonical model names like `gpt-5.4` are normalized per harness at command-build time. Provider-prefixed forms are added where required (for example `opencode -> openai/gpt-5.4`, `pi -> openai-codex/gpt-5.4`) and stripped for CLIs that expect bare model IDs.
@@ -184,7 +188,7 @@ harness run --harness opencode --model gpt-5.4 \
     --timeout 1800 \
     "Fix the failing tests."
 
-# bypass normalization and pass the model string through exactly as given
+# bypass harness-specific normalization (surrounding whitespace is still trimmed)
 harness run --harness pi --model openai-codex/gpt-5.4 --model-no-resolve \
     --workdir /tmp/repo \
     "Fix the failing tests."
@@ -255,7 +259,7 @@ Looking for a pre-scoped first PR? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md).
 
 ## Status
 
-v0.5 — thirteen adapters shipped: `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush`.
+Thirteen adapters are included: `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
 ### host Node version
 
@@ -288,7 +292,7 @@ The current resolution layer is deliberately rough:
 - keep harness-specific fixes tiny
 - prefer explicit escape hatches over clever inference
 
-If you need an exact raw model string, use `--model-no-resolve` (or `RunSpec(model_no_resolve=True)` in Python) and pass the provider/model form you want.
+To bypass harness-specific normalization, use `--model-no-resolve` (Python: `RunSpec(model_no_resolve=True)`; TypeScript: `modelNoResolve: true`). Surrounding whitespace is still trimmed.
 
 ### Linux/container caveats (harness-bench)
 

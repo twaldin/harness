@@ -7,14 +7,14 @@ TypeScript-specific build, test, and adapter conventions.
 
 ## Build and test
 
-Bun is the build and test runner. Node 18+ at runtime, Node 20+ for the frontier
-adapters that depend on modern Node prebuilds.
+Bun is the build and test runner. For Node runtime requirements, consult
+[`README.md`](README.md#install): `better-sqlite3` 12 does not support Node 18.
 
 ```bash
 cd ts
 bun install                # uses bun.lock
 bun test                   # runs ts/tests + ts/tests/adapters
-bun run build              # bundles src/index.ts -> dist/ (target=node, ESM)
+bun run build              # bundles ESM + generates declarations with tsc
 ```
 
 `prepare` and `prepublishOnly` both run the build, so `npm publish` from a clean
@@ -27,14 +27,14 @@ only; the package has `"type": "module"`.
 
 ## Adapter pattern
 
-Every adapter is a single file under `src/adapters/<name>.ts` that exports
-nothing — it self-registers via `register('<name>', adapter)`. The adapter
+Each adapter lives under `src/adapters/<name>.ts` and self-registers via
+`register('<name>', adapter)`. Some modules also export helpers. The adapter
 object satisfies the `Adapter` interface from `src/base.ts`:
 
 ```typescript
 const myAdapter: Adapter = {
   name: 'mycli',
-  instructionsFilename: 'AGENTS.md',     // empty string = inline into prompt
+  instructionsFilename: 'AGENTS.md',     // inline instructions need adapter-specific handling
   defaultModel: 'mycli/default',
   buildCommand(spec: RunSpec): BuildCommand { /* writes instructions, returns argv */ },
   parseOutput(spec, outcome): ParsedOutput { /* extracts cost + tokens */ },
@@ -48,12 +48,13 @@ JSON) but MUST NOT block on long I/O. Both are pure with respect to network
 state.
 
 New adapters are wired in by adding an `import './<name>.js'` line to
-`src/adapters/index.ts` and dropping a fixture at `../tests/fixtures/<name>.json`.
+`src/adapters/index.ts`, a fixture at `../tests/fixtures/<name>.json` and the
+name to `ADAPTER_NAMES` in `tests/fixtures.test.ts`.
 
 ## Model normalization
 
-`src/model-normalization.ts` resolves canonical model names per harness. Adapters
-fall into three buckets, defined as sets at the top of the file:
+`src/model-normalization.ts` resolves canonical model names per harness.
+Most adapters use the sets at the top of the file:
 
 - `BARE_MODEL_HARNESSES` — pass the model through stripped of any provider
   prefix (`claude-code`, `codex`, `gemini`, `qwen`, `continue-cli`, `openclaude`).
@@ -62,24 +63,27 @@ fall into three buckets, defined as sets at the top of the file:
 - `PRESERVE_EXPLICIT_PROVIDER_HARNESSES` — pass through unchanged when the
   user supplied a provider prefix (`crush`).
 
-Adding a harness that doesn't fit one bucket means editing this file and
-adding both a unit test in `ts/tests/model-normalization.test.ts` AND a Python
-counterpart in `src/harness/model_normalization.py`. `RunSpec.modelNoResolve`
-is the per-call escape hatch; honor it in every adapter.
+`pi` and `factory-droid` have explicit branches: pi handles provider prefixes,
+while factory-droid produces a `custom:` model ID for a configured BYOK model.
+
+For a new normalization rule, update this file and its Python counterpart
+`src/harness/model_normalization.py`, with coverage in both languages'
+model-normalization tests. Honor `RunSpec.modelNoResolve`: it bypasses
+harness-specific rewriting, but surrounding whitespace is still trimmed.
 
 ## Fixture parity
 
-`ts/tests/fixtures.test.ts` loads every JSON file in `../tests/fixtures/`,
-runs `buildCommand(spec)` against `expectedCommand`, and `parseOutput(spec,
-sampleOutput)` against `expectedParsed`. The Python suite does the same in
-`tests/test_fixtures.py`. The fixtures are the single source of truth for
-command shape — if you change argv assembly in a TS adapter, the fixture diff
-is what will (or won't) make the Python suite agree.
+`tests/fixtures.test.ts` loads the adapter names in its explicit
+`ADAPTER_NAMES` list from `../tests/fixtures/`. It compares command arguments
+and instruction paths exactly. Fixtures with `expectedParsed.note` assert
+null metrics instead of the recorded values. Python uses adapter-specific
+assertions rather than the same generic loop. See the
+[shared coverage notes](../CLAUDE.md#how-parity-is-enforced).
 
-`ts/tests/adapters/*-sessionlog.test.ts` cover the database-backed adapters
-that read sqlite or session logs after the CLI exits (`opencode`, `kilo`,
-`crush`, `continue-cli`, `factory-droid`, `qwen`). These tests build temporary
-session DBs so the parser exercises real schema rather than mocks.
+`tests/adapters/*-sessionlog.test.ts` covers selected session-log parsers:
+crush and kilo create temporary sqlite databases; continue-cli, factory-droid,
+openclaude and qwen use JSON/JSONL files. There is no opencode test in that
+directory. Python's `tests/test_*_db.py` covers opencode, kilo and crush schemas.
 
 ## Things to keep in lockstep
 

@@ -114,6 +114,11 @@ Add the import to `ts/src/adapters/index.ts`:
 import './mycli.js'
 ```
 
+These examples mirror the existing Gemini adapters, including current
+empty-model skew: Python falls back for `None` or `""`, while TypeScript falls
+back only for a nullish model. Both trim whitespace after choosing the fallback.
+This records existing behavior, not an exception to the same-PR parity rule.
+
 ### 3. Add a fixture
 
 Create `tests/fixtures/<name>.json` following the shape in [SPEC.md](SPEC.md#json-fixture-driven-verification). Add Python tests in `tests/test_fixtures.py` and the adapter name to `ADAPTER_NAMES` in `ts/tests/fixtures.test.ts`; neither suite discovers new fixture files automatically. TypeScript compares command arguments exactly; Python uses adapter-specific assertions and temporary-path substitutions. See SPEC.md for the database-fixture limitations.

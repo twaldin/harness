@@ -107,11 +107,11 @@ runAsync(spec: RunSpec): Promise<RunResult>  // py: async def run_async(spec) ->
 Both raise `HarnessError` (py) / throw `HarnessError` (ts) on:
 - unknown harness name
 - adapter prerequisites missing (e.g. swe-agent wrapper not on disk)
-- duplicate adapter registration
 
-**Current registration skew:** TypeScript rejects any duplicate name. Python
-allows idempotently registering the same class again and rejects a different
-class under an existing name.
+**Current registration skew:**
+- TypeScript throws `HarnessError` for any duplicate name.
+- Python raises `HarnessError` only when a different class uses an existing
+  name; registering the same class again is idempotent.
 
 Subprocess failures (non-zero exit, timeout) do NOT throw — they're reflected in RunResult.
 

@@ -55,8 +55,10 @@ const r = await run({
   timeoutSeconds: 1800,
 })
 
+const cost = r.costUsd == null ? 'n/a' : `$${r.costUsd.toFixed(4)}`
+
 if (r.timedOut) console.error('timed out')
-else console.log(`done — exit ${r.exitCode}, $${r.costUsd?.toFixed(4)}`)
+else console.log(`done — exit ${r.exitCode}, ${cost}`)
 ```
 
 ### `runAsync(spec: RunSpec): Promise<RunResult>`

@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the contract both `harness` (Python) and `@twaldin/harness-ts` (TypeScript) implement. Consumers (hone, agentelo, flt) call this API and expect identical behavior regardless of language.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). Consumers (hone, agentelo, flt) depend on cross-language parity. Current implementation differences are noted below and in [CLAUDE.md](CLAUDE.md#dual-language-parity-contract); the contract remains the parity target.
 
 **Repo layout (monorepo):**
 ```
@@ -21,13 +21,13 @@ harness/
     └── src/subproc.ts
 ```
 
-Version lockstep: `harness` (py) and `@twaldin/harness-ts` release together. CI fails if one changes the public API surface without the other catching up.
+Version lockstep is the documented release requirement (see [Versioning](#versioning)). The current manifests are not aligned. The checked-in GitHub workflows publish each language separately and check its version against its own tag; they do not enforce cross-language API equivalence on PRs.
 
 ---
 
 ## Public API
 
-Both implementations export exactly these symbols.
+The core headless API is described here. The packages also expose instruction-projection, pricing and session helpers; their complete export surfaces differ. See `src/harness/__init__.py` and `ts/src/index.ts`.
 
 ### Types
 
@@ -69,7 +69,7 @@ interface RunResult {
 }
 ```
 
-(Python equivalents use dataclass names; field names match the JSON below.)
+(Python equivalents are dataclasses with snake_case fields, such as `exit_code` and `cost_usd`; the TypeScript examples below use camelCase. The Python CLI's JSON output uses snake_case and omits `raw`.)
 
 ### Functions
 
@@ -93,7 +93,7 @@ parseOutput(spec: RunSpec, outcome: SubprocOutcome): {
 // Where SubprocOutcome = { exitCode, durationSeconds, stdout, stderr, timedOut }
 
 // Full headless invocation — buildCommand + exec + parseOutput. Blocks until complete.
-// py: synchronous (returns RunResult directly); ts: returns Promise<RunResult> (still blocks the awaiter)
+// py: synchronous (returns RunResult directly); ts: Promise<RunResult>, but synchronous subprocess execution blocks the event loop
 run(spec: RunSpec): Promise<RunResult>
 
 // Non-blocking headless invocation — same as run() but uses async subprocess execution.
@@ -107,7 +107,11 @@ runAsync(spec: RunSpec): Promise<RunResult>  // py: async def run_async(spec) ->
 Both raise `HarnessError` (py) / throw `HarnessError` (ts) on:
 - unknown harness name
 - adapter prerequisites missing (e.g. swe-agent wrapper not on disk)
-- duplicate adapter registration
+
+**Current registration skew:**
+- TypeScript throws `HarnessError` for any duplicate name.
+- Python raises `HarnessError` only when a different class uses an existing
+  name; registering the same class again is idempotent.
 
 Subprocess failures (non-zero exit, timeout) do NOT throw — they're reflected in RunResult.
 
@@ -160,7 +164,7 @@ What `run()` returns for each adapter on a successful invocation. `raw` holds th
 
 ### gemini
 
-`costUsd` is always null — gemini CLI does not emit pricing data.
+Gemini CLI does not report a dollar cost. The adapter estimates `costUsd` from token totals and the first model in `stats.models` when that model has a known price; otherwise it returns null.
 
 ```json
 {
@@ -169,7 +173,7 @@ What `run()` returns for each adapter on a successful invocation. `raw` holds th
   "exitCode": 0,
   "durationSeconds": 15.7,
   "timedOut": false,
-  "costUsd": null,
+  "costUsd": 0.00573,
   "tokensIn": 2104,
   "tokensOut": 310,
   "raw": {
@@ -336,7 +340,7 @@ Every adapter has a matching fixture at `tests/fixtures/<name>.json`:
   },
   "expectedCommand": {
     "cmd": "claude",
-    "args": ["-p", "fix the bug in main.py", "--model", "sonnet", "--output-format", "json", "--dangerously-skip-permissions"],
+    "args": ["-p", "fix the bug in main.py", "--model", "sonnet", "--output-format", "json", "--dangerously-skip-permissions", "--append-system-prompt", "You are a careful engineer.\n"],
     "instructionsFile": "/tmp/harness-fixture/CLAUDE.md"
   },
   "sampleOutput": {
@@ -354,9 +358,9 @@ Every adapter has a matching fixture at `tests/fixtures/<name>.json`:
 }
 ```
 
-Both implementations load the fixture, run `buildCommand(spec)` → assert-equal on `expectedCommand`, then run `parseOutput(spec, sampleOutput)` → assert-equal on `expectedParsed`.
+Both suites load the shared fixtures, but the assertions are not identical. TypeScript compares command arguments and instruction paths exactly; Python uses adapter-specific checks and temporary-path substitutions. Database fixtures with an `expectedParsed.note` cover missing-DB/null results rather than asserting the recorded non-null metrics.
 
-This is the primary drift-prevention mechanism: adding a new adapter flag in py that the fixture doesn't enforce = ts doesn't need to catch up = diverged state. Fixtures force both impls to agree at the byte level.
+Fixtures support drift prevention for the cases actually asserted; they do not prove byte-level equivalence of all behavior. New adapters need explicit test registration in `tests/test_fixtures.py` and `ts/tests/fixtures.test.ts`, not just a new JSON file.
 
 ---
 
@@ -372,7 +376,13 @@ Exception: `extraEnv` from RunSpec.env is always passed through unchanged.
 
 ## Registry behavior
 
-At import of the harness package, all shipped adapters self-register. `listAdapters()` returns:
+The registry contract is import-time registration of all shipped adapters, with the sorted list below. TypeScript implements it at the package entrypoint.
+
+**Current Python skew:** importing `harness` alone does not populate its registry.
+Import `harness.adapters` before calling `list_adapters()` or
+`harness.registry.get_adapter()` in a fresh process. The command-build, parse
+and run entrypoints import adapters lazily; TypeScript's package entrypoint
+registers them immediately.
 
 ```
 ["aider", "claude-code", "codex", "continue-cli", "crush", "factory-droid", "gemini", "kilo", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
@@ -388,14 +398,13 @@ Adapter lookup is case-sensitive. `"Claude-Code"` → `HarnessError`.
 
 Explicit non-goals, to keep the library narrow:
 
-- tmux lifecycle, pane scraping, idle detection — **flt's job**
-- permission-dialog auto-approval — **flt's job**
+- tmux lifecycle, pane capture and polling — **the consumer's job**; TypeScript adapters expose optional pure pane-status/dialog helpers, but the consumer drives capture and sends any returned keystrokes
 - challenge seeding, grading, ELO — **agentelo's job**
 - prompt mutation, GEPA, training loops — **hone's job**
 - Vertex/OAuth proxy shims, regional routing — **agentelo's job** (context-specific, varies by billing arrangement)
-- Streaming callbacks (`onOutput`) — **future**; v1 is blocking subprocess
+- Streaming callbacks (`onOutput`) — not implemented; use `run_async()` / `runAsync()` for non-blocking subprocess execution without streaming callbacks
 
-Harness ships ONLY: CLI command construction, output parsing, and convenience `run()` / `runAsync()` for headless consumers.
+Harness provides CLI command construction, output parsing and headless execution, plus instruction-projection, pricing and session helpers. It does not own the consumer's terminal lifecycle.
 
 ---
 
@@ -410,7 +419,9 @@ Harness ships ONLY: CLI command construction, output parsing, and convenience `r
 
 ## Versioning
 
-- `harness` (py) — semver, tracked in `pyproject.toml`
+- `harness-cli` (Python distribution; import `harness`) — semver, tracked in `pyproject.toml`
 - `@twaldin/harness-ts` — semver, tracked in `ts/package.json`
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
+
+Current manifests record Python `0.3.4` and TypeScript `0.2.8`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.

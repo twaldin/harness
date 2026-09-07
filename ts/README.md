@@ -9,7 +9,7 @@ npm install @twaldin/harness-ts
 # or: bun add @twaldin/harness-ts
 ```
 
-Requires Node 18+ or Bun 1.0+. The package ships ESM only.
+The package ships ESM only. Use a Node version supported by the installed `better-sqlite3` dependency. The `better-sqlite3@12.9.0` package selected by `bun.lock` declares `engines.node` as `20.x || 22.x || 23.x || 24.x || 25.x`, not Node 18. Bun is used for the repository's build and test commands.
 
 For frontier adapters in containers, prefer Node `>=20` (`openclaude`, `factory-droid`, `kilo` upstream CLIs require modern Node runtimes).
 
@@ -30,7 +30,8 @@ const r = await run({
   workdir: wd,
 })
 
-console.log(`exit=${r.exitCode}  cost=$${r.costUsd?.toFixed(4) ?? 'n/a'}  tokens=${r.tokensIn}/${r.tokensOut}`)
+const cost = r.costUsd == null ? 'n/a' : `$${r.costUsd.toFixed(4)}`
+console.log(`exit=${r.exitCode}  cost=${cost}  tokens=${r.tokensIn}/${r.tokensOut}`)
 console.log(r.stdout.slice(0, 200))
 ```
 
@@ -40,7 +41,7 @@ See [`examples/hello-world.ts`](examples/hello-world.ts) for a runnable file.
 
 ### `run(spec: RunSpec): Promise<RunResult>`
 
-Full headless invocation: builds the command, executes it as a subprocess, parses output. Awaiting blocks until the agent exits or times out.
+Full headless invocation: builds the command, executes it as a subprocess, parses output. Although it returns a Promise, `run()` uses synchronous subprocess execution and blocks the event loop until the agent exits or times out. Use `runAsync()` for concurrent calls.
 
 ```typescript
 import { run } from '@twaldin/harness-ts'
@@ -54,8 +55,10 @@ const r = await run({
   timeoutSeconds: 1800,
 })
 
+const cost = r.costUsd == null ? 'n/a' : `$${r.costUsd.toFixed(4)}`
+
 if (r.timedOut) console.error('timed out')
-else console.log(`done — exit ${r.exitCode}, $${r.costUsd?.toFixed(4)}`)
+else console.log(`done — exit ${r.exitCode}, ${cost}`)
 ```
 
 ### `runAsync(spec: RunSpec): Promise<RunResult>`
@@ -109,6 +112,7 @@ interface RunSpec {
   instructions?: string      // written to per-harness file in workdir
   timeoutSeconds?: number    // default 1800
   env?: Record<string, string>
+  modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
 }
 
 interface RunResult {
@@ -119,14 +123,14 @@ interface RunResult {
   stdout: string
   stderr: string
   timedOut: boolean
-  costUsd: number | null     // null if the CLI doesn't report cost
+  costUsd: number | null     // reported or estimated cost; null when unavailable
   tokensIn: number | null
   tokensOut: number | null
   raw: unknown | null        // adapter-specific parsed payload
 }
 ```
 
-`costUsd` is null for codex, gemini, aider, and qwen — those CLIs don't report cost. It's populated for claude-code (from the `--output-format json` envelope), opencode (from its sqlite session DB), swe-agent (from the trajectory JSON), continue-cli (from the `--json` envelope), and pi (summed from the `--mode json` event stream). See [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) for details.
+Headless `parseOutput` returns null cost for codex, aider and qwen. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Other adapters read reported cost from stdout, trajectory files or session databases where available. Session-log helpers may also derive estimates and need not match headless parsing. See [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) for details.
 
 ---
 
@@ -142,6 +146,6 @@ Subprocess failures (non-zero exit, timeout) are surfaced in RunResult, not as t
 
 ## Shared context
 
-- [SPEC.md](../SPEC.md) — full contract; Python and TypeScript implement the same interface
+- [SPEC.md](../SPEC.md) — shared contract and current cross-language differences
 - [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) — per-CLI flags, cost-reporting quirks, output shapes
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — adding a new adapter

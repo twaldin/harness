@@ -11,7 +11,7 @@ is `harness-cli` (the unprefixed `harness` was squatted) but the import is alway
 as `harness` on PATH after install.
 
 ```bash
-pip install -e ".[dev]"                  # editable + pytest deps
+pip install -e ".[dev]"                 # run from the repository root
 PYTHONPATH=src uv run pytest tests/      # full suite
 harness list                             # smoke check the registry
 ```
@@ -27,7 +27,7 @@ Each adapter is a class in `src/harness/adapters/<name>.py` extending
 ```python
 class MyCLIAdapter(Adapter):
     name = "mycli"
-    instructions_filename = "AGENTS.md"   # or "" to fold into prompt
+    instructions_filename = "AGENTS.md"   # inline instructions require adapter-specific handling
     DEFAULT_MODEL = "mycli/default"
 
     def build_command(self, spec: RunSpec) -> BuildCommand: ...
@@ -41,22 +41,25 @@ artifacts but MUST NOT block on long I/O (sqlite reads use `timeout=5.0`).
 
 ## Output parsing strategies
 
-The thirteen CLIs expose totals in five different shapes; each adapter picks one:
+Adapters use several output shapes; check the adapter and [matrix](../../ADAPTER-MATRIX.md) for exact fields:
 
-- **JSON envelope on stdout** — `claude-code`, `continue-cli`. Parse the final
-  line as a JSON object; read `usage.input_tokens`, `usage.output_tokens`,
-  `total_cost_usd`.
-- **JSONL event stream** — `pi`, `qwen`, `codex`. Sum `usage` across
-  `assistant` / `turn_end` events.
+- **JSON envelope on stdout** — `claude-code`, `openclaude`, `continue-cli`,
+  `factory-droid`; their usage and cost field names differ.
+- **JSONL event stream** — `pi`, `codex`; their event names and accumulation
+  rules differ, so mirror the existing parser rather than summing every
+  usage-bearing event.
+- **JSON array** — `qwen`; read the last `type: "result"` item's usage, with a
+  legacy stats-envelope fallback.
 - **Stats blob** — `gemini`. Look up `stats.models.<model>.tokens.{input, candidates}`.
 - **Log scrape** — `aider`. Regex `r"Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received"`.
 - **Trajectory file** — `swe-agent`. Parse `info.model_stats.instance_cost`
   from the wrapper's JSON trajectory.
 - **sqlite session DB** — `opencode`, `kilo`, `crush` (see below).
 
-When tokens are available but cost is not, fall through to
-`harness.pricing.derive_cost(model, tokens_in, tokens_out)` so consumers get a
-best-effort number rather than `null`.
+`gemini` derives headless cost from token totals and known model pricing.
+Selected session-log parsers also use `harness.pricing.derive_cost`.
+This is not a universal fallback: headless codex, aider and qwen parsing
+still returns `None` for cost.
 
 ## Database adapters (kilo / crush / opencode)
 
@@ -64,31 +67,35 @@ Three adapters read sqlite session DBs after the CLI exits — substantially
 different from the stdout-parsers:
 
 - **`opencode`** — DB at `~/.local/share/opencode/opencode.db` (or `OPENCODE_DB`).
-  Query by `session.directory == workdir` to find the session this run created.
+  Match the latest session whose directory contains the resolved workdir basename.
 - **`kilo` / `crush`** — Force a deterministic per-workdir DB path under
   `<workdir>/.harness/...` via env vars (`KILO_DB`) or `--data-dir`. Keeps
   benchmark containers isolated from shared user state.
 
 All three open the DB read-only (`mode=ro` URI, 5s timeout) and tolerate
-`sqlite3.Error` by returning `None`. TS counterparts use `better-sqlite3` with
-the same logic; parity tests live in `tests/test_*_db.py` and
-`ts/tests/adapters/*-sessionlog.test.ts`.
+`sqlite3.Error` by returning `None`. Python schema tests live in
+`tests/test_*_db.py`. TypeScript selects `bun:sqlite` under Bun and
+`better-sqlite3` under Node. Its session-log tests create temporary databases
+for crush and kilo, but do not cover opencode in that directory.
 
-`kilo` and `crush` also enforce `model == small_model` (pin both flags to the
-same value) to prevent helper-model drift skewing benchmark numbers.
+`crush` pins `--model` and `--small-model` to the same value; `kilo` sets
+`model` and `small_model` in `KILO_CONFIG_CONTENT`. Both avoid helper-model drift.
 
 ## Session telemetry and fixture parity
 
-Several adapters return a `SessionTelemetry` payload (`base.py`) alongside the
-standard parsed dict; parity is checked in `tests/adapters/test_session_parity.py`.
-`tests/test_fixtures.py` walks `../../tests/fixtures/*.json` and runs every
-adapter's `build_command` and `parse_output` against JSON-encoded expectations.
-A change to argv, env, or instructions filename in either language MUST be
-reflected in the fixture, otherwise the other language silently passes.
+Several adapters expose `session_log_path` and `parse_session_log` methods
+returning a `SessionTelemetry` payload (`base.py`), separate from headless
+`parse_output`. Selected cross-runtime cases are checked in
+`tests/adapters/test_session_parity.py`.
+
+`tests/test_fixtures.py` explicitly loads named fixtures and uses
+adapter-specific assertions; it does not discover new JSON files. Add tests
+for each new adapter in both languages. See
+[the shared fixture coverage notes](../../CLAUDE.md#how-parity-is-enforced).
 
 ## What to keep in lockstep with TypeScript
 
-Mirror these in `ts/src/` (same PR, or a tracked-skew follow-up):
+Mirror these in `ts/src/` in the same PR:
 
 - A new adapter, or a removed one.
 - A new field on `RunSpec` / `RunResult` / `BuildCommand` / `SessionTelemetry`.

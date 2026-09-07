@@ -45,23 +45,29 @@ Adding an adapter takes about 20 minutes if the CLI is straightforward. Here's h
 Create `src/harness/adapters/<name>.py`. Copy the shape of an existing simple adapter (e.g. `gemini.py`):
 
 ```python
-from harness.base import Adapter, BuildCommand, ParsedOutput, RunResult, RunSpec, SubprocOutcome
-from harness._subproc import run_subprocess, write_instructions
+from __future__ import annotations
+
+from harness.base import Adapter, BuildCommand, RunSpec
+from harness._subproc import SubprocOutcome, write_instructions
+from harness.model_normalization import normalize_model_for_harness
 
 class MyCLIAdapter(Adapter):
     name = "mycli"
-    instructions_filename = "AGENTS.md"   # or "" to fold into prompt
-    default_model = "mycli/default"
+    instructions_filename = "AGENTS.md"
+    DEFAULT_MODEL = "mycli/default"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
-        args = ["run", "--model", spec.model or self.default_model, spec.prompt]
-        return BuildCommand(cmd="mycli", args=args, cwd=str(spec.workdir),
+        model = normalize_model_for_harness(
+            self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve,
+        )
+        args = ["run", "--model", model, spec.prompt]
+        return BuildCommand(cmd="mycli", args=args, cwd=spec.workdir,
                             env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
-        # parse stdout/stderr for cost + tokens; return None for unknown fields
-        return ParsedOutput(cost_usd=None, tokens_in=None, tokens_out=None, raw=None)
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+        # Parse this CLI's output; use None only for metrics it cannot report.
+        return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
 ```
 
 Register it in `src/harness/adapters/__init__.py`:
@@ -78,6 +84,7 @@ Create `ts/src/adapters/<name>.ts`. Copy the shape of `ts/src/adapters/gemini.ts
 ```typescript
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
+import { normalizeModelForHarness } from '../model-normalization.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
 
 const myCLIAdapter: Adapter = {
@@ -87,12 +94,13 @@ const myCLIAdapter: Adapter = {
 
   buildCommand(spec: RunSpec): BuildCommand {
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-    const model = spec.model ?? this.defaultModel
+    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     return { cmd: 'mycli', args: ['run', '--model', model, spec.prompt],
              cwd: spec.workdir, env: {}, instructionsFile }
   },
 
   parseOutput(_spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
+    // Parse this CLI's output; use null only for metrics it cannot report.
     return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
   },
 }
@@ -106,9 +114,14 @@ Add the import to `ts/src/adapters/index.ts`:
 import './mycli.js'
 ```
 
+These examples mirror the existing Gemini adapters, including current
+empty-model skew: Python falls back for `None` or `""`, while TypeScript falls
+back only for a nullish model. Both trim whitespace after choosing the fallback.
+This records existing behavior, not an exception to the same-PR parity rule.
+
 ### 3. Add a fixture
 
-Create `tests/fixtures/<name>.json` following the shape in [SPEC.md](SPEC.md#json-fixture-driven-verification). Both Python (`pytest`) and TypeScript (`bun test`) load fixtures and verify `buildCommand` output matches `expectedCommand` byte-for-byte.
+Create `tests/fixtures/<name>.json` following the shape in [SPEC.md](SPEC.md#json-fixture-driven-verification). Add Python tests in `tests/test_fixtures.py` and the adapter name to `ADAPTER_NAMES` in `ts/tests/fixtures.test.ts`; neither suite discovers new fixture files automatically. TypeScript compares command arguments exactly; Python uses adapter-specific assertions and temporary-path substitutions. See SPEC.md for the database-fixture limitations.
 
 ### 4. Document it
 

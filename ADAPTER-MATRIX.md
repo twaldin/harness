@@ -1,29 +1,38 @@
 # Adapter matrix
 
-Per-CLI reference: what flags get built, what instructions filename gets written, how tokens/cost are parsed. **This is the source of truth both `harness` (py) and `@twaldin/harness-ts` implement.** Fixture tests in `tests/fixtures/` enforce byte-level agreement.
+Per-CLI reference for current command construction, instruction files and token/cost parsing. [SPEC.md](SPEC.md) defines the shared contract; [fixture coverage notes](SPEC.md#json-fixture-driven-verification) describe what the two suites actually assert.
 
-Last updated: 2026-04-26. Python source: `src/harness/adapters/*.py`.
+Audited against the Python and TypeScript source on 2026-09-06. Sources: `src/harness/adapters/*.py` and `ts/src/adapters/*.ts`.
 
-## Session telemetry coverage (12/12)
+## Session telemetry coverage
 
-| adapter | sessionLogPath | extract (tokens/cost) | notes |
+TypeScript wires session-path and parsing hooks for 12 of 13 adapters; Python
+overrides both base methods for 7 of 13. "Wired" means the hooks exist, not
+that every log contains usage. Python's unwired adapters return base-class
+null results. This is current implementation skew, not a parity exemption.
+
+| adapter | TypeScript hooks | Python hooks | notes |
 |---|---|---|---|
 | claude-code | wired | wired | JSONL under `~/.claude/projects/<encoded>/` |
-| codex | wired | wired | existing JSONL path + parser |
-| gemini | wired | wired | `logs.json` path; interactive logs carry no usage so extract returns null tokens/cost |
-| opencode | wired | wired | SQLite selector path |
-| swe-agent | wired | wired | trajectory JSON |
-| pi | wired | wired | JSONL event stream |
+| codex | wired | unwired | JSONL path + parser |
+| gemini | wired | unwired | `logs.json` path; interactive logs without usage return null metrics; stats blobs can supply usage |
+| opencode | wired | unwired | SQLite selector path |
+| swe-agent | wired | unwired | trajectory JSON |
+| pi | wired | unwired | JSONL event stream |
 | continue-cli | wired | wired | probes `~/.continue/...` + `CONTINUE_SESSION_DIR` override |
 | crush | wired | wired | SQLite selector path |
 | factory-droid | wired | wired | probes `FACTORY_HOME` / `~/.factory/...` |
 | openclaude | wired | wired | claude-code-compatible JSONL path |
-| qwen | wired | wired | `~/.qwen/tmp/<basename>/logs.json` (fallback `.gemini`); logs contain no usage |
+| qwen | wired | wired | `~/.qwen/tmp/<basename>/logs.json` (fallback `.gemini`); stats blobs can supply usage, other logs return null metrics |
 | kilo | wired | wired | SQLite selector path |
+| aider | unwired | unwired | no session-log hooks |
 
 ---
 
 ## Cost + token reporting at a glance
+
+This table describes headless `parseOutput` / `parse_output`, not session-log
+helpers. "Populated" requires the expected output or database to be available.
 
 | adapter      | `cost_usd`        | `tokens_in` / `tokens_out`    | source                            |
 | ------------ | ----------------- | ----------------------------- | --------------------------------- |
@@ -32,7 +41,7 @@ Last updated: 2026-04-26. Python source: `src/harness/adapters/*.py`.
 | factory-droid| populated         | populated                     | `--output-format json` envelope   |
 | opencode     | populated         | populated                     | sqlite session DB post-exit       |
 | codex        | **null**          | populated (summed from JSONL) | JSONL turn events on stdout       |
-| gemini       | **null**          | populated (summed)            | JSON envelope `stats.models`      |
+| gemini       | estimated         | populated (summed)            | `stats.models` tokens + built-in pricing |
 | aider        | **null**          | populated (regex parse)       | "Tokens: N sent, M received" log  |
 | swe-agent    | populated         | populated                     | trajectory JSON post-exit         |
 | qwen         | **null**          | populated                     | JSON array, last `type:'result'` item `usage` |
@@ -41,7 +50,7 @@ Last updated: 2026-04-26. Python source: `src/harness/adapters/*.py`.
 | crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
 | kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
 
-Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pricing data. Use your own per-token pricing if you need cost attribution for these adapters.
+Headless cost is null for codex, aider and qwen. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
 ---
 
@@ -50,7 +59,11 @@ Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pr
 - Canonical model names (for example `gpt-5.4`) are accepted across adapters.
 - Harness normalizes model IDs at `buildCommand` time:
   - **Provider-required CLIs** (`opencode`, `swe-agent`, `aider`, `kilo`) get `provider/model` forms.
-  - **Bare-model CLIs** (`codex`, `claude-code`, `openclaude`, `factory-droid`, `continue-cli`, `qwen`, `pi`, `gemini`, `crush`) get provider prefixes stripped.
+  - **Bare-model CLIs** (`codex`, `claude-code`, `openclaude`, `continue-cli`, `qwen`, `gemini`) get known provider prefixes stripped.
+  - **pi** prefixes bare `gpt-5*` models with `openai-codex/` and preserves recognized explicit providers.
+  - **factory-droid** strips known provider prefixes and adds `custom:` for a configured BYOK model.
+  - **crush** preserves explicit provider prefixes and passes bare names through.
+  - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
   - `crush`: `--model == --small-model`
   - `kilo`: `model == small_model` via `KILO_CONFIG_CONTENT`
@@ -64,7 +77,7 @@ Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pr
 - **CLI**: `claude`
 - **Instructions file**: `CLAUDE.md`
 - **Default model**: `sonnet`
-- **Command**: `claude -p <prompt> --model <model> --output-format json --dangerously-skip-permissions`
+- **Command**: `claude -p <prompt> --model <model> --output-format json --dangerously-skip-permissions`; appends `--append-system-prompt <instructions>` when instructions are non-empty.
 - **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
 - **Cost source**: JSON envelope → `total_cost_usd`
 - **Env**: none required
@@ -81,8 +94,8 @@ Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pr
 - **CLI**: `openclaude`
 - **Instructions file**: `CLAUDE.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `openclaude -p <prompt> --model <model> --output-format json --dangerously-skip-permissions`
-- **OpenAI-compatible mode**: when caller provides `OPENAI_API_KEY` or `OPENAI_BASE_URL`, harness sets `CLAUDE_CODE_USE_OPENAI=1`, passes `--provider openai`, and sets `OPENAI_MODEL=<model>` unless already set.
+- **Command**: `openclaude -p <prompt> --output-format json --dangerously-skip-permissions`; appends `--append-system-prompt <instructions>` when non-empty, then `--model <model>` unless OpenAI-compatible mode is selected.
+- **OpenAI-compatible mode**: when `RunSpec.env` contains a non-empty `OPENAI_API_KEY` or `OPENAI_BASE_URL`, harness sets `CLAUDE_CODE_USE_OPENAI=1`, omits `--model`, and sets `OPENAI_MODEL=<model>` unless already in `RunSpec.env`. It does not add a `--provider` flag. Process environment alone does not select this branch.
 - **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
 - **Cost source**: JSON envelope → `total_cost_usd`
 - **Fairness**: harness does not pass `--fallback-model` (single-model default)
@@ -99,7 +112,7 @@ Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pr
 - **CLI**: `droid`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `droid exec --output-format json --auto --skip-permissions-unsafe --model <model> --spec-model <model> <prompt>`
+- **Command**: `droid exec --output-format json --skip-permissions-unsafe --model <model> --spec-model <model> <prompt>`; normalization turns the default into `custom:gpt-5.4`.
 - **Token source**: JSON envelope on stdout → `usage.{input_tokens,output_tokens}` (fallbacks: `usage.{input,output}`)
 - **Cost source**: JSON envelope → `total_cost_usd` (fallbacks to `usage.cost[.total]`)
 - **Fairness**: harness pins `--model` and `--spec-model` to the same normalized model
@@ -133,7 +146,7 @@ Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pr
 - **Default model**: `gemini-2.5-pro`
 - **Command**: `gemini -p <prompt> -y -m <model> --output-format json`
 - **Token source**: JSON envelope → iterate `stats.models[*].tokens.{input, candidates}` and sum
-- **Cost source**: not reported — always `null`
+- **Cost source**: estimated from token totals and the first model in `stats.models` using built-in pricing; null if pricing is unavailable.
 - **Env**: `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT` (consumer sets for free $300 credits; harness doesn't require them)
 
 ### Output shape
@@ -148,7 +161,7 @@ Cost is null for codex, gemini, aider, and qwen because those CLIs don't emit pr
 }
 ```
 
-Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`-prefixed line. First match with non-zero tokens wins.
+Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`-prefixed line. A recognized stats block can report zero tokens; zero is distinct from an unparseable response.
 
 ---
 
@@ -168,14 +181,17 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`
 SELECT
   COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
   COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
-  COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost
-FROM message
-WHERE session_id IN (
+  COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
+  MAX(s.model)                                         AS model,
+  COUNT(*)                                             AS row_count
+FROM message m
+JOIN session s ON s.id = m.session_id
+WHERE m.session_id IN (
   SELECT id FROM session WHERE directory LIKE ? ORDER BY time_updated DESC LIMIT 1
 )
 ```
 
-TS port uses `better-sqlite3` (already a flt dep). Query string is identical.
+The parameter is `%<resolved-workdir-basename>%`. No matching message rows returns null metrics; a matching session can legitimately total zero. TypeScript selects `bun:sqlite` under Bun and `better-sqlite3` under Node; driver-load failure returns null metrics rather than throwing.
 
 ---
 
@@ -292,16 +308,16 @@ Full event reference: [pi-mono/packages/coding-agent/docs/json.md](https://githu
 - **CLI**: `crush`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `crush --yolo --data-dir <workdir>/.harness/crush-data run --model <model> --small-model <model> <prompt>`
+- **Command**: `crush run --data-dir <data-dir> --model <model> --small-model <model> <prompt>`
 - **Token source**: sqlite `<data-dir>/crush.db` (`sessions.prompt_tokens`, `sessions.completion_tokens`)
 - **Cost source**: sqlite `<data-dir>/crush.db` (`sessions.cost`)
 - **Fairness**: harness always passes both `--model` and `--small-model` with the same normalized model
-- **Container note**: adapter uses per-workdir `--data-dir` by default for deterministic DB lookup in task containers
+- **Container note**: `<data-dir>` defaults to `<workdir>/.harness/crush-data`; `CRUSH_DATA_DIR` in `RunSpec.env`, then process environment, overrides it. The same path is used for command construction and headless DB lookup.
 
 ### Post-exit DB query
 
 ```sql
-SELECT prompt_tokens, completion_tokens, cost
+SELECT prompt_tokens, completion_tokens, cost, model
 FROM sessions
 WHERE parent_session_id IS NULL
 ORDER BY updated_at DESC
@@ -359,5 +375,5 @@ Shared across adapters:
 - Merges `extra_env` onto `process.env` (os.environ for py)
 - Closes stdin (`DEVNULL`) by default
 - Captures stdout + stderr separately
-- Enforces `timeout_seconds`; on timeout, kills process group, returns `{exit_code: -1, timed_out: true, stdout, stderr}` with partial output
+- Enforces `timeout_seconds`; on timeout, returns `{exit_code: -1, timed_out: true, stdout, stderr}` with captured output. Python's runners and TypeScript's synchronous runner terminate the direct child; TypeScript's async runner creates and kills a process group.
 - Returns `{exit_code, duration_seconds, stdout, stderr, timed_out}` — never throws on non-zero exit

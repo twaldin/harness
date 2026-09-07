@@ -6,7 +6,19 @@ If you're looking for a first PR to harness, pick one of these, open an issue sa
 
 ## Shipped
 
-See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) for the current lineup: `claude-code`, `codex`, `gemini`, `opencode`, `aider`, `swe-agent`. `qwen-code` and `continue-cli` land next.
+See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) for the current thirteen-adapter lineup. `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` and `openclaude` are already implemented alongside the original six.
+
+### Crush (Charm)
+
+[charmbracelet/crush](https://github.com/charmbracelet/crush) — MIT, Go binary, Charm-family. Modern TUI with split-pane diff view; multi-model via OpenRouter. The earlier headless-mode investigation is resolved in this repository: both adapters construct `crush run` and read sqlite metrics. See [the current adapter reference](ADAPTER-MATRIX.md#crush).
+
+### OpenClaude: shipped, historical caution retained
+
+`openclaude` is implemented in both languages with a shared fixture. The earlier
+caution about OpenClaude / Claw Code / forks of the leaked Claude Code source
+was legal ambiguity, fragmentation and unstable release cycles, with a request
+to wait for legal resolution or consolidation. Shipping this adapter does not
+establish that those concerns are resolved or approve other forks.
 
 ---
 
@@ -67,12 +79,6 @@ Role-based modes (Architect, Code, Debug, Ask, Custom) map to tool dispatch. Pla
 
 Plugin system with hooks, custom tools, and output types. Multi-platform (CLI, Web, Desktop). Cost reporting through the plugin interface. Harder to wrap because of plugin model. Adapter-to-copy-from: experimental — no direct analog.
 
-### Crush (Charm)
-
-[charmbracelet/crush](https://github.com/charmbracelet/crush) — MIT, Go binary, Charm-family.
-
-Modern TUI with split-pane diff view. Multi-model via OpenRouter. Headless execution **unconfirmed** — the TUI-first design makes non-interactive output uncertain. If you can confirm a `--non-interactive` or `-p` mode works cleanly, this drops to the high-priority list. If not, skip.
-
 ---
 
 ## Not wanted — but here's why so you don't ask
@@ -97,10 +103,6 @@ Python libraries. Wrap your own CLI around them first, then submit that.
 
 Proprietary. GitHub Copilot subscription only. No BYOK. Harness is BYOK-only by design.
 
-### OpenClaude / Claw Code / forks of the leaked Claude Code source
-
-Legal ambiguity + fragmented ecosystem + unstable release cycle. Wait for legal resolution and/or consolidation before harness picks a winner. Not a principled skip — a wait.
-
 ---
 
 ## Opening a PR
@@ -111,4 +113,4 @@ Legal ambiguity + fragmented ecosystem + unstable release cycle. Wait for legal 
 
 ## Help with harder entries
 
-If you're picking Crush (uncertain headless) or Neovate (plugin system), open an issue before the PR and confirm the approach. The review will be easier if the architectural question is resolved upfront.
+If you're picking Neovate (plugin system), open an issue before the PR and confirm the approach. The review will be easier if the architectural question is resolved upfront.

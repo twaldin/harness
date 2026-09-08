@@ -1,0 +1,462 @@
+{
+  "spec": {
+    "harness": "auggie",
+    "prompt": "Summarize the synthetic repository.",
+    "instructions": "Use synthetic files only.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "auggie",
+    "args": [
+      "--print",
+      "--output-format",
+      "json",
+      "--show-cost",
+      "--workspace-root",
+      "<workdir>",
+      "--instruction=Summarize the synthetic repository."
+    ],
+    "cwd": "<workdir>",
+    "env": {
+      "AUGMENT_DISABLE_AUTO_UPDATE": "1"
+    },
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.5,
+    "timedOut": false,
+    "stdout": "{\"type\": \"result\", \"result\": \"Synthetic answer\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": 0.125, \"parent_cost\": 0.1, \"sub_agent_cost\": 0.025}}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.125,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": [
+      {
+        "type": "result",
+        "result": "Synthetic answer",
+        "is_error": false,
+        "subtype": "success",
+        "session_id": "synthetic-session",
+        "num_turns": 1,
+        "request_id": "synthetic-request",
+        "billing": {
+          "usage_unit": "usd",
+          "total_cost": 0.125,
+          "parent_cost": 0.1,
+          "sub_agent_cost": 0.025
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "credits-are-not-usd",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"result\": \"Synthetic answer\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"credits\", \"total_cost\": 12, \"parent_cost\": 10, \"sub_agent_cost\": 2}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "Synthetic answer",
+            "is_error": false,
+            "subtype": "success",
+            "session_id": "synthetic-session",
+            "num_turns": 1,
+            "request_id": "synthetic-request",
+            "billing": {
+              "usage_unit": "credits",
+              "total_cost": 12,
+              "parent_cost": 10,
+              "sub_agent_cost": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "zero-usd-is-retained",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"result\": \"Synthetic answer\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": 0}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "Synthetic answer",
+            "is_error": false,
+            "subtype": "success",
+            "session_id": "synthetic-session",
+            "num_turns": 1,
+            "request_id": "synthetic-request",
+            "billing": {
+              "usage_unit": "usd",
+              "total_cost": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "last-result-without-billing-clears-earlier-cost",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"result\": \"Synthetic answer\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": 0.125, \"parent_cost\": 0.1, \"sub_agent_cost\": 0.025}}\n{\"type\": \"result\", \"result\": \"Final synthetic answer\", \"is_error\": false, \"subtype\": \"success\"}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "Synthetic answer",
+            "is_error": false,
+            "subtype": "success",
+            "session_id": "synthetic-session",
+            "num_turns": 1,
+            "request_id": "synthetic-request",
+            "billing": {
+              "usage_unit": "usd",
+              "total_cost": 0.125,
+              "parent_cost": 0.1,
+              "sub_agent_cost": 0.025
+            }
+          },
+          {
+            "type": "result",
+            "result": "Final synthetic answer",
+            "is_error": false,
+            "subtype": "success"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-billing-values-and-model-text-are-not-metrics",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"notice\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": 99}, \"usage\": {\"input_tokens\": 123}}\n{\"type\": \"result\", \"result\": \"{\\\"usage\\\":{\\\"input_tokens\\\":999},\\\"total_cost_usd\\\":99}\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": true}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "notice",
+            "billing": {
+              "usage_unit": "usd",
+              "total_cost": 99
+            },
+            "usage": {
+              "input_tokens": 123
+            }
+          },
+          {
+            "type": "result",
+            "result": "{\"usage\":{\"input_tokens\":999},\"total_cost_usd\":99}",
+            "is_error": false,
+            "subtype": "success",
+            "session_id": "synthetic-session",
+            "num_turns": 1,
+            "request_id": "synthetic-request",
+            "billing": {
+              "usage_unit": "usd",
+              "total_cost": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "negative-cost-is-unknown",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"result\": \"Synthetic answer\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": -0.1}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "Synthetic answer",
+            "is_error": false,
+            "subtype": "success",
+            "session_id": "synthetic-session",
+            "num_turns": 1,
+            "request_id": "synthetic-request",
+            "billing": {
+              "usage_unit": "usd",
+              "total_cost": -0.1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "string-cost-is-unknown",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"result\": \"Synthetic answer\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": \"0.125\"}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "Synthetic answer",
+            "is_error": false,
+            "subtype": "success",
+            "session_id": "synthetic-session",
+            "num_turns": 1,
+            "request_id": "synthetic-request",
+            "billing": {
+              "usage_unit": "usd",
+              "total_cost": "0.125"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "noise-nonobjects-and-nonstandard-json-preserve-terminal-result",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "noise\nnull\n[]\n42\n{\"bad\":NaN}\n{\"bad\":Infinity}\n{\"type\": \"result\", \"result\": \"Synthetic answer\", \"is_error\": false, \"subtype\": \"success\", \"session_id\": \"synthetic-session\", \"num_turns\": 1, \"request_id\": \"synthetic-request\", \"billing\": {\"usage_unit\": \"usd\", \"total_cost\": 0.125, \"parent_cost\": 0.1, \"sub_agent_cost\": 0.025}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.125,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "Synthetic answer",
+            "is_error": false,
+            "subtype": "success",
+            "session_id": "synthetic-session",
+            "num_turns": 1,
+            "request_id": "synthetic-request",
+            "billing": {
+              "usage_unit": "usd",
+              "total_cost": 0.125,
+              "parent_cost": 0.1,
+              "sub_agent_cost": 0.025
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "interruption-retains-complete-object-before-truncated-result",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"notice\", \"message\": \"Synthetic pre-completion notice with unicode\"}\n{\"type\":\"result\",\"result\":\"partial",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "notice",
+            "message": "Synthetic pre-completion notice with unicode"
+          }
+        ]
+      }
+    },
+    {
+      "name": "truncated-envelope-does-not-invent-completion",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"result\":\"partial",
+        "stderr": "Synthetic interruption"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "authentication-failure-is-process-failure",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": "You are not currently logged in to Augment.\nRun 'auggie login' to authenticate first.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "entitlement-failure-is-process-failure",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": "CLI non-interactive mode access has been disabled for your account.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "native-error-with-zero-exit-remains-visible",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"result\": \"\", \"is_error\": true, \"subtype\": \"error_during_execution\", \"session_id\": \"synthetic-session\", \"num_turns\": 0}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "session_id": "synthetic-session",
+            "num_turns": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-completion-is-not-success-subtype",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"result\": \"\", \"is_error\": false, \"subtype\": \"empty_completion\", \"session_id\": \"synthetic-session\", \"num_turns\": 0}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "result": "",
+            "is_error": false,
+            "subtype": "empty_completion",
+            "session_id": "synthetic-session",
+            "num_turns": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "literal-prompt-explicit-model-executable-and-env",
+      "spec": {
+        "prompt": "--help\nTreat this as a synthetic instruction.",
+        "model": " vendor/exact-model ",
+        "executable": "<root>/auggie-custom",
+        "env": {
+          "AUGMENT_DISABLE_AUTO_UPDATE": "true",
+          "SYNTHETIC_ENV": "yes"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "<root>/auggie-custom",
+        "args": [
+          "--print",
+          "--output-format",
+          "json",
+          "--show-cost",
+          "--workspace-root",
+          "<workdir>",
+          "--model",
+          "vendor/exact-model",
+          "--instruction=--help\nTreat this as a synthetic instruction."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "AUGMENT_DISABLE_AUTO_UPDATE": "true",
+          "SYNTHETIC_ENV": "yes"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": " vendor/exact-model "
+      }
+    },
+    {
+      "name": "empty-prompt-rejected",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    }
+  ]
+}

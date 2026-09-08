@@ -144,14 +144,16 @@ async def test_async_backpressure_serializes_callbacks_and_pauses_inactivity(tmp
         nonlocal in_flight, peak
         in_flight += 1
         peak = max(peak, in_flight)
-        await asyncio.sleep(0.15)  # longer than the inactivity window: paused time must not count
+        # One callback outlasts inactivity; chunk count must not consume the
+        # wall timeout or the bounded post-exit drain budget.
+        await asyncio.sleep(1.1 if not received else 0)
         received.append(chunk)
         in_flight -= 1
 
     lines = "".join(f"{i:06d}\n" for i in range(20000))  # 140 KB, dwarfs the pipe buffer
     outcome = await run_subprocess_async(
         _py("import sys; sys.stdout.write(''.join(f'{i:06d}\\n' for i in range(20000)))"), cwd=tmp_path, timeout_seconds=20,
-        inactivity_timeout_seconds=0.1, on_output=slow,
+        inactivity_timeout_seconds=1, on_output=slow,
     )
     assert (outcome.termination, outcome.exit_code, outcome.callback_error) == ("exited", 0, None)
     assert peak == 1

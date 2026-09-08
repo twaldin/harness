@@ -601,7 +601,7 @@ class Adapter(ABC):
                     "codex sandbox conflicts with permission_policy='bypass' (the bypass flag disables the sandbox); choose one",
                     code="invalid-options",
                 )
-        else:
+        elif isinstance(native, ClineOptions):
             provider = native.provider
             if provider is not None and (not isinstance(provider, str) or not provider or "\0" in provider):
                 raise HarnessError("cline provider must be None or a non-empty string without NUL bytes", code="invalid-options")

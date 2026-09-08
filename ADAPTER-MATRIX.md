@@ -105,7 +105,7 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 
 ## Backend and permission capabilities
 
-All twenty support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All twenty-one support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /

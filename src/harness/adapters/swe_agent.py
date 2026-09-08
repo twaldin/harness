@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome
@@ -111,26 +110,20 @@ class SweAgentAdapter(Adapter):
             return "running"
         return "unknown"
 
-    # mini-swe-agent interactive writes the most recent run's trajectory to
-    #   ~/Library/Application Support/mini-swe-agent/last_mini_run.traj.json (macOS)
-    #   ~/.local/share/mini-swe-agent/last_mini_run.traj.json (linux, XDG)
-    # Headless runs (with --output) drop the per-task trajectory at
-    # <workdir>/.harness/swe-traj.json — prefer that when present.
+    # Wrapper output is workdir-local. A global last_mini_run trajectory has
+    # no reliable workdir identity and must not fill missing local telemetry.
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
-        home = Path.home()
-        app_support = (
-            home / "Library" / "Application Support" / "mini-swe-agent"
-            if sys.platform == "darwin"
-            else home / ".local" / "share" / "mini-swe-agent"
-        )
+        """Discover local artifacts by mtime, not native run ownership."""
         candidates = [
             workdir / ".harness" / "swe-traj.json",
             workdir / "mini-traj.json",
-            app_support / "last_mini_run.traj.json",
         ]
         for c in candidates:
-            if c.exists():
-                return str(c)
+            try:
+                if c.is_file() and (session_started_after is None or c.stat().st_mtime >= session_started_after):
+                    return str(c)
+            except OSError:
+                continue
         return None
 
     def parse_session_log(self, path: str) -> SessionTelemetry:
@@ -192,11 +185,13 @@ def _read_swe_trajectory(
         tokens_in += int(_usage_count(usage, "prompt_tokens", "input_tokens"))
         tokens_out += int(_usage_count(usage, "completion_tokens", "output_tokens"))
 
-    if model is None and stats:
-        for key in stats.keys():
-            if key != "instance_cost":
-                model = key
-                break
+    if model is None:
+        info = traj.get("info")
+        config = info.get("config") if isinstance(info, dict) else None
+        model_config = config.get("model") if isinstance(config, dict) else None
+        configured_model = model_config.get("model_name") if isinstance(model_config, dict) else None
+        if isinstance(configured_model, str) and configured_model:
+            model = configured_model
 
     return (
         tokens_in if saw_usage else None,

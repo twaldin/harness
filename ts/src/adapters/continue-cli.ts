@@ -2,47 +2,57 @@ import { register } from '../registry.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { HarnessError, finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
-import { deriveCost } from '../pricing.js'
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
-import { basename, join } from 'path'
-import { homedir } from 'os'
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import type { Dirent } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 
-function continueSessionPath(workdir: string): string | null {
-  const envDir = process.env['CONTINUE_SESSION_DIR']
-  if (envDir) {
-    try {
-      const files = readdirSync(envDir)
-        .filter((n) => n.endsWith('.json'))
-        .map((n) => ({ path: join(envDir, n), mtimeMs: statSync(join(envDir, n)).mtimeMs }))
-        .sort((a, b) => b.mtimeMs - a.mtimeMs)
-      const newest = files[0]
-      if (newest) return newest.path
-    } catch {
-      return null
-    }
+/**
+ * Session artifacts (continuedev/continue@5522c6f, `extensions/cli/src/session.ts`
+ * and `core/util/{history,paths}.ts`): `<CONTINUE_GLOBAL_DIR or ~/.continue>/sessions/
+ * <uuid>.json` holding `{sessionId, title, workspaceDirectory, history, usage?}`
+ * where `workspaceDirectory` is the `cn` process cwd and `usage` is the CLI's own
+ * cumulative `{totalCost, promptTokens, completionTokens, ...}`. `sessions.json`
+ * in the same directory is the upstream index, not a session. The CLI never
+ * persists a model id (`chatModelTitle` is unset), so `model` stays null.
+ */
+
+/** `<CONTINUE_GLOBAL_DIR or ~/.continue>/sessions`; a relative override resolves against the process cwd. */
+export function continueSessionsDir(): string {
+  const override = process.env['CONTINUE_GLOBAL_DIR']
+  return join(override ? resolve(override) : join(process.env['HOME'] || homedir(), '.continue'), 'sessions')
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function readJsonObject(path: string): Record<string, unknown> | null {
+  try { return asRecord(JSON.parse(readFileSync(path, 'utf8'))) } catch { return null }
+}
+
+function continueSessionPath(workdir: string, since?: number): string | null {
+  const absolute = resolve(workdir)
+  let resolved = absolute
+  try { resolved = realpathSync(absolute) } catch { /* keep the unresolved path */ }
+  // Distinct case-sensitive POSIX paths must not share telemetry.
+
+  const dir = continueSessionsDir()
+  let entries: Dirent[]
+  try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return null }
+  const candidates: { mtimeMs: number; path: string }[] = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json') || entry.name === 'sessions.json') continue
+    const path = join(dir, entry.name)
+    let mtimeMs: number
+    try { mtimeMs = statSync(path).mtimeMs } catch { continue }
+    if (since !== undefined && mtimeMs < since) continue
+    candidates.push({ mtimeMs, path })
   }
-
-  const home = process.env.HOME ?? homedir()
-  const base = basename(workdir)
-  const candidates = [
-    join(home, '.continue', 'sessions', base),
-    join(home, '.continue', 'dev_data', base),
-    join(home, '.continue', 'index', base),
-  ]
-  for (const dir of candidates) {
-    if (!existsSync(dir)) continue
-    try {
-      const files = readdirSync(dir)
-        .filter((n) => n.endsWith('.json'))
-        .map((n) => ({ path: join(dir, n), mtimeMs: statSync(join(dir, n)).mtimeMs }))
-        .sort((a, b) => b.mtimeMs - a.mtimeMs)
-      const newest = files[0]
-      if (newest) return newest.path
-      const indexPath = join(dir, 'session.json')
-      if (existsSync(indexPath)) return indexPath
-    } catch {
-      continue
-    }
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.path < b.path ? 1 : a.path > b.path ? -1 : 0))
+  for (const { path } of candidates) {
+    const workspace = readJsonObject(path)?.['workspaceDirectory']
+    if (workspace === absolute || workspace === resolved) return path
   }
   return null
 }
@@ -163,26 +173,24 @@ const continueCliAdapter: Adapter = {
     return { costUsd: null, tokensIn: null, tokensOut: null, raw: parseHeadlessJson(outcome.stdout) }
   },
 
-  sessionLogPath(workdir: string, _since?: number): string | null {
-    return continueSessionPath(workdir)
+  sessionLogPath(workdir: string, since?: number): string | null {
+    return continueSessionPath(workdir, since)
   },
 
   parseSessionLog(path: string): SessionTelemetry {
-    if (!existsSync(path)) {
+    const usage = asRecord(readJsonObject(path)?.['usage'])
+    if (usage === null) {
       return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
     }
-    try {
-      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
-      const obj = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
-      const usage = obj['usage'] && typeof obj['usage'] === 'object' ? obj['usage'] as Record<string, unknown> : {}
-      const tokensIn = numberOrNull(usage['input_tokens'])
-      const tokensOut = numberOrNull(usage['output_tokens'])
-      const rawCost = numberOrNull(obj['total_cost_usd'])
-      const model = typeof obj['model'] === 'string' ? obj['model'] : null
-      const costUsd = rawCost ?? deriveCost(model, tokensIn, tokensOut)
-      return { sessionLogPath: path, tokensIn, tokensOut, costUsd, model, raw: parsed }
-    } catch {
-      return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+    const tokensIn = numberOrNull(usage['promptTokens'])
+    const tokensOut = numberOrNull(usage['completionTokens'])
+    return {
+      sessionLogPath: path,
+      tokensIn: tokensIn === null ? null : Math.trunc(tokensIn),
+      tokensOut: tokensOut === null ? null : Math.trunc(tokensOut),
+      costUsd: numberOrNull(usage['totalCost']),
+      model: null,
+      raw: usage,
     }
   },
 }

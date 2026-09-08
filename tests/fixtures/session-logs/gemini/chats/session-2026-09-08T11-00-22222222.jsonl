@@ -1,0 +1,3 @@
+{"sessionId":"22222222-aaaa-4bbb-8ccc-000000000002","projectHash":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","startTime":"2026-09-08T11:00:00.000Z","lastUpdated":"2026-09-08T11:00:00.000Z","kind":"main"}
+{"id":"u1","timestamp":"2026-09-08T11:00:01.000Z","type":"user","content":[{"text":"unrelated project prompt"}]}
+{"id":"g1","timestamp":"2026-09-08T11:00:02.000Z","type":"gemini","content":[{"text":"unrelated answer"}],"thoughts":[],"tokens":{"input":7777,"output":7777,"cached":0,"thoughts":0,"tool":0,"total":15554},"model":"gemini-2.5-pro"}

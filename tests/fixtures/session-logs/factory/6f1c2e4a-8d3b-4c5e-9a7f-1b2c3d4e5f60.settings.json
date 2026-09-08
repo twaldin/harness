@@ -1,0 +1,16 @@
+{
+  "assistantActiveTimeMs": 4200,
+  "model": "claude-sonnet-4-5-20250929",
+  "reasoningEffort": "off",
+  "interactionMode": "auto",
+  "autonomyLevel": "off",
+  "autonomyMode": "normal",
+  "tags": [{ "name": "exec" }],
+  "tokenUsage": {
+    "inputTokens": 210,
+    "outputTokens": 44,
+    "cacheCreationTokens": 0,
+    "cacheReadTokens": 128,
+    "thinkingTokens": 0
+  }
+}

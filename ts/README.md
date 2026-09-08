@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, or mistral-vibe as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, auggie, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, or mistral-vibe as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mini-swe-agent', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'amp', 'auggie', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mini-swe-agent', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 

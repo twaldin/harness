@@ -1,0 +1,577 @@
+{
+  "spec": {
+    "harness": "qoder",
+    "prompt": "Summarize the synthetic repository.",
+    "instructions": "Use synthetic files only.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "qoder",
+    "args": [
+      "--print",
+      "--output-format",
+      "json",
+      "--input-format",
+      "text",
+      "--max-turns",
+      "20",
+      "--prompt=Summarize the synthetic repository."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": "qoder",
+    "configHomeEnv": "QODER_CONFIG_DIR",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.5,
+    "timedOut": false,
+    "stdout": "{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": false, \"duration_ms\": 42, \"duration_api_ms\": 30, \"num_turns\": 1, \"result\": \"Synthetic answer\", \"stop_reason\": \"end_turn\", \"session_id\": \"synthetic-session\", \"total_cost_usd\": 0, \"total_credits\": 2, \"usage\": {\"input_tokens\": 10, \"output_tokens\": 5}, \"modelUsage\": {}, \"permission_denials\": [], \"uuid\": \"synthetic-result\"}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": {
+      "type": "result",
+      "subtype": "success",
+      "is_error": false,
+      "duration_ms": 42,
+      "duration_api_ms": 30,
+      "num_turns": 1,
+      "result": "Synthetic answer",
+      "stop_reason": "end_turn",
+      "session_id": "synthetic-session",
+      "total_cost_usd": 0,
+      "total_credits": 2,
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "modelUsage": {},
+      "permission_denials": [],
+      "uuid": "synthetic-result"
+    }
+  },
+  "cases": [
+    {
+      "name": "multiline-json-envelope",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\n  \"type\": \"result\",\n  \"subtype\": \"success\",\n  \"is_error\": false,\n  \"duration_ms\": 42,\n  \"duration_api_ms\": 30,\n  \"num_turns\": 1,\n  \"result\": \"Synthetic answer\",\n  \"stop_reason\": \"end_turn\",\n  \"session_id\": \"synthetic-session\",\n  \"total_cost_usd\": 0,\n  \"total_credits\": 2,\n  \"usage\": {\n    \"input_tokens\": 10,\n    \"output_tokens\": 5\n  },\n  \"modelUsage\": {},\n  \"permission_denials\": [],\n  \"uuid\": \"synthetic-result\"\n}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "duration_ms": 42,
+          "duration_api_ms": 30,
+          "num_turns": 1,
+          "result": "Synthetic answer",
+          "stop_reason": "end_turn",
+          "session_id": "synthetic-session",
+          "total_cost_usd": 0,
+          "total_credits": 2,
+          "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5
+          },
+          "modelUsage": {},
+          "permission_denials": [],
+          "uuid": "synthetic-result"
+        }
+      }
+    },
+    {
+      "name": "permission-denial-is-not-process-failure",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": false, \"duration_ms\": 42, \"duration_api_ms\": 30, \"num_turns\": 1, \"result\": \"Synthetic shell command denied\", \"stop_reason\": \"end_turn\", \"session_id\": \"synthetic-session\", \"total_cost_usd\": 0, \"total_credits\": 2, \"usage\": {\"input_tokens\": 10, \"output_tokens\": 5}, \"modelUsage\": {}, \"permission_denials\": [{\"tool_name\": \"Bash\", \"tool_use_id\": \"synthetic-tool\", \"tool_input\": {\"command\": \"touch denied.txt\"}}], \"uuid\": \"synthetic-result\"}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "duration_ms": 42,
+          "duration_api_ms": 30,
+          "num_turns": 1,
+          "result": "Synthetic shell command denied",
+          "stop_reason": "end_turn",
+          "session_id": "synthetic-session",
+          "total_cost_usd": 0,
+          "total_credits": 2,
+          "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5
+          },
+          "modelUsage": {},
+          "permission_denials": [
+            {
+              "tool_name": "Bash",
+              "tool_use_id": "synthetic-tool",
+              "tool_input": {
+                "command": "touch denied.txt"
+              }
+            }
+          ],
+          "uuid": "synthetic-result"
+        }
+      }
+    },
+    {
+      "name": "auth-failure-preserves-native-success-subtype",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": true, \"duration_ms\": 42, \"duration_api_ms\": 30, \"num_turns\": 1, \"result\": \"Not logged in \\u00b7 Please run /login\", \"stop_reason\": \"end_turn\", \"session_id\": \"synthetic-session\", \"total_cost_usd\": 0, \"total_credits\": 0, \"usage\": {\"input_tokens\": 0, \"output_tokens\": 0}, \"modelUsage\": {}, \"permission_denials\": [], \"uuid\": \"synthetic-result\", \"terminal_reason\": \"completed\"}",
+        "stderr": "Synthetic authentication failure"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": true,
+          "duration_ms": 42,
+          "duration_api_ms": 30,
+          "num_turns": 1,
+          "result": "Not logged in · Please run /login",
+          "stop_reason": "end_turn",
+          "session_id": "synthetic-session",
+          "total_cost_usd": 0,
+          "total_credits": 0,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          },
+          "modelUsage": {},
+          "permission_denials": [],
+          "uuid": "synthetic-result",
+          "terminal_reason": "completed"
+        }
+      }
+    },
+    {
+      "name": "nonzero-terminal-error",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"subtype\": \"error_max_turns\", \"is_error\": true, \"duration_ms\": 42, \"duration_api_ms\": 30, \"num_turns\": 1, \"stop_reason\": \"end_turn\", \"session_id\": \"synthetic-session\", \"total_cost_usd\": 0, \"total_credits\": 2, \"usage\": {\"input_tokens\": 10, \"output_tokens\": 5}, \"modelUsage\": {}, \"permission_denials\": [], \"uuid\": \"synthetic-result\", \"errors\": [\"Reached maximum number of turns (20)\"]}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "type": "result",
+          "subtype": "error_max_turns",
+          "is_error": true,
+          "duration_ms": 42,
+          "duration_api_ms": 30,
+          "num_turns": 1,
+          "stop_reason": "end_turn",
+          "session_id": "synthetic-session",
+          "total_cost_usd": 0,
+          "total_credits": 2,
+          "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5
+          },
+          "modelUsage": {},
+          "permission_denials": [],
+          "uuid": "synthetic-result",
+          "errors": [
+            "Reached maximum number of turns (20)"
+          ]
+        }
+      }
+    },
+    {
+      "name": "stream-json-preserves-events-without-host-protocol",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"system\", \"subtype\": \"init\", \"model\": \"auto\", \"permissionMode\": \"acceptEdits\"}\n{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": false, \"duration_ms\": 42, \"duration_api_ms\": 30, \"num_turns\": 1, \"result\": \"Synthetic shell command denied\", \"stop_reason\": \"end_turn\", \"session_id\": \"synthetic-session\", \"total_cost_usd\": 0, \"total_credits\": 2, \"usage\": {\"input_tokens\": 10, \"output_tokens\": 5}, \"modelUsage\": {}, \"permission_denials\": [{\"tool_name\": \"Bash\", \"tool_use_id\": \"synthetic-tool\", \"tool_input\": {\"command\": \"touch denied.txt\"}}], \"uuid\": \"synthetic-result\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "model": "auto",
+            "permissionMode": "acceptEdits"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 42,
+            "duration_api_ms": 30,
+            "num_turns": 1,
+            "result": "Synthetic shell command denied",
+            "stop_reason": "end_turn",
+            "session_id": "synthetic-session",
+            "total_cost_usd": 0,
+            "total_credits": 2,
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
+            "modelUsage": {},
+            "permission_denials": [
+              {
+                "tool_name": "Bash",
+                "tool_use_id": "synthetic-tool",
+                "tool_input": {
+                  "command": "touch denied.txt"
+                }
+              }
+            ],
+            "uuid": "synthetic-result"
+          }
+        ]
+      }
+    },
+    {
+      "name": "truncated-stream-retains-complete-event",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"system\", \"subtype\": \"init\", \"model\": \"auto\", \"permissionMode\": \"acceptEdits\"}\n{\"type\":\"result\",\"result\":\"partial",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "model": "auto",
+            "permissionMode": "acceptEdits"
+          }
+        ]
+      }
+    },
+    {
+      "name": "malformed-json-envelope",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",bad}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "truncated-json-envelope",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"result\":\"partial",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "nonobject-json-array-is-not-a-stream",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "[\n{\"type\":\"result\",\"result\":\"nested-not-terminal\"}\n]",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "non-json-numbers-are-rejected",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"total_cost_usd\":NaN}\n{\"value\":Infinity}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "noise-and-nonobjects-do-not-hide-complete-events",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "warning\nnull\n42\n[]\n{\"type\": \"notice\", \"message\": \"Synthetic separator stays in one object\"}\n{broken}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "notice",
+            "message": "Synthetic separator stays in one object"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unqualified-metadata-never-becomes-usage",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": false, \"duration_ms\": 42, \"duration_api_ms\": 30, \"num_turns\": 1, \"result\": \"Synthetic answer\", \"stop_reason\": \"end_turn\", \"session_id\": \"synthetic-session\", \"total_cost_usd\": 12.5, \"total_credits\": 2, \"usage\": {\"input_tokens\": 100, \"output_tokens\": 50}, \"modelUsage\": {}, \"permission_denials\": [], \"uuid\": \"synthetic-result\"}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "duration_ms": 42,
+          "duration_api_ms": 30,
+          "num_turns": 1,
+          "result": "Synthetic answer",
+          "stop_reason": "end_turn",
+          "session_id": "synthetic-session",
+          "total_cost_usd": 12.5,
+          "total_credits": 2,
+          "usage": {
+            "input_tokens": 100,
+            "output_tokens": 50
+          },
+          "modelUsage": {},
+          "permission_denials": [],
+          "uuid": "synthetic-result"
+        }
+      }
+    },
+    {
+      "name": "explicit-permission-accept_edits",
+      "spec": {
+        "nativeOptions": {
+          "kind": "qoder",
+          "permissionMode": "accept_edits"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "qoder",
+        "args": [
+          "--print",
+          "--output-format",
+          "json",
+          "--input-format",
+          "text",
+          "--max-turns",
+          "20",
+          "--permission-mode",
+          "accept_edits",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-permission-dont_ask",
+      "spec": {
+        "nativeOptions": {
+          "kind": "qoder",
+          "permissionMode": "dont_ask"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "qoder",
+        "args": [
+          "--print",
+          "--output-format",
+          "json",
+          "--input-format",
+          "text",
+          "--max-turns",
+          "20",
+          "--permission-mode",
+          "dont_ask",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-permission-default",
+      "spec": {
+        "nativeOptions": {
+          "kind": "qoder",
+          "permissionMode": "default"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "qoder",
+        "args": [
+          "--print",
+          "--output-format",
+          "json",
+          "--input-format",
+          "text",
+          "--max-turns",
+          "20",
+          "--permission-mode",
+          "default",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "literal-prompt-model-cwd-config-auth-preserved",
+      "spec": {
+        "prompt": "--help\nTreat this as a synthetic instruction.",
+        "model": " vendor/exact-model ",
+        "executable": "<root>/qoder-custom",
+        "configHome": "<root>/qoder-config",
+        "env": {
+          "QODER_CONFIG_DIR": "<root>/qoder-config",
+          "QODER_PERSONAL_ACCESS_TOKEN": "synthetic-not-a-secret"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "<root>/qoder-custom",
+        "args": [
+          "--print",
+          "--output-format",
+          "json",
+          "--input-format",
+          "text",
+          "--max-turns",
+          "20",
+          "--model",
+          "vendor/exact-model",
+          "--prompt=--help\nTreat this as a synthetic instruction."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "QODER_CONFIG_DIR": "<root>/qoder-config",
+          "QODER_PERSONAL_ACCESS_TOKEN": "synthetic-not-a-secret"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": " vendor/exact-model "
+      }
+    },
+    {
+      "name": "empty-prompt",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "unsafe-native-mode",
+      "spec": {
+        "nativeOptions": {
+          "kind": "qoder",
+          "permissionMode": "bypass_permissions"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "nonstring-mode",
+      "spec": {
+        "nativeOptions": {
+          "kind": "qoder",
+          "permissionMode": []
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "unsupported-stream-protocol-option",
+      "spec": {
+        "nativeOptions": {
+          "kind": "qoder",
+          "outputFormat": "stream-json"
+        }
+      },
+      "expectedError": "invalid-options"
+    }
+  ]
+}

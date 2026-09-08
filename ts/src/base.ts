@@ -317,6 +317,9 @@ export type ErrorCode =
   | 'unsupported-capability'
   | 'invalid-options'
   | 'instruction-conflict'
+  | 'session-closed'
+  | 'protocol-error'
+  | 'launch-failed'
 
 export class HarnessError extends Error {
   readonly code: ErrorCode

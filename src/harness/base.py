@@ -37,6 +37,9 @@ ErrorCode = Literal[
     "unsupported-capability",
     "invalid-options",
     "instruction-conflict",
+    "launch-failed",
+    "protocol-error",
+    "session-closed",
 ]
 NativeOptionsKind = Literal["claude-code", "codex", "copilot"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]

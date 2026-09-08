@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). The current implementation provides CLI command construction, one-shot execution, output parsing and optional externally hosted session helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) specify requirements for future RPC/SDK support; they are not shipped APIs.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC sessions and optional externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to controlled sessions and future backends; SDK execution remains unsupported.
 
 **Repo layout (monorepo):**
 ```
@@ -202,14 +202,18 @@ wording:
 | `invalid-options` | invalid backend/policy/native options, mismatched native kind, or conflicting choices |
 | `adapter-error` | other adapter prerequisite error, including a missing swe-agent wrapper |
 | `instruction-conflict` | an overlapping lease, unsafe projection path, or modified owned artifact prevents safe preparation/restoration |
+| `launch-failed` | session process could not start, or exited/disconnected before the native handshake |
+| `protocol-error` | session handshake/response/framing failure, including command-response deadline |
+| `session-closed` | operation attempted after session disposal |
 
 Selector/permission/native-option/config-override rejection happens before
 preparation and before any subprocess starts. A caller can
 catch `HarnessError` without parsing its message. Existing message-only
 construction retains `adapter-error`.
 
-Non-zero subprocess exit, timeout, explicit cancellation, OS launch failure and
-output callback failure are represented in `RunResult`, not `HarnessError`.
+For one-shot execution, non-zero subprocess exit, timeout, explicit cancellation,
+OS launch failure and output callback failure are represented in `RunResult`,
+not `HarnessError`. Session startup rejects; accepted turns use `SessionTurnResult`.
 Execution catches parser exceptions into `parseError`, with null metrics/raw and
 the original terminal outcome and captured text. Standalone `parseOutput` remains
 strict. Python task cancellation propagates `CancelledError` after cleanup.
@@ -224,8 +228,10 @@ returning a result that falsely implies completed cleanup. See
 `harness` identifies the agent; `backend` identifies its execution integration.
 Omitted backend means CLI for existing callers. No preference order, dependency
 probe or failure path may silently change CLI into SDK/RPC, or vice versa.
-Selecting `rpc` or `sdk` currently raises `unsupported-backend` in both languages;
-importing Harness loads no optional SDK and does not initialize upstream settings.
+Selecting `rpc` or `sdk` through the one-shot `RunSpec` API raises
+`unsupported-backend` in both languages. Controlled RPC uses the separate
+[session API](#controlled-rpc-sessions); no one-shot call changes into a session.
+Importing Harness loads no optional SDK and does not initialize upstream settings.
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
@@ -992,11 +998,152 @@ Raw payloads retain upstream details but are untrusted and may contain prompts,
 paths or secrets. No telemetry is transmitted by Harness. Upstream tools may
 have their own telemetry settings, which remain caller-controlled.
 
+## Controlled RPC sessions
+
+`open_session(SessionSpec(...))` / `openSession(spec)` opens an owned native
+Pi JSONL subprocess on macOS/Linux. This is separate from one-shot `run` and
+from consumer-owned tmux/PTY sessions. Both package roots export the same
+session types and operations, with snake_case in Python and camelCase in TS.
+
+The qualified protocol is **Pi 0.85.1**, distributed as
+`@earendil-works/pi-coding-agent` (`pi`, Node >=22.19). Install/select it
+explicitly; Harness does not install, change provider accounts, or fall back to
+another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
+OMP has different framing, acknowledgement and local-command completion rules.
+Other registered adapters reject session selection with `unsupported-backend`.
+Unknown names still produce `unknown-harness`.
+
+### Session inputs and capabilities
+
+`SessionSpec` requires `harness`, `workdir` and explicit `backend: "rpc"`.
+Optional fields:
+
+| TypeScript field | semantics |
+|---|---|
+| `model` | trimmed native model selector; omission preserves upstream model/config choice, without one-shot model normalization |
+| `executable` | bare name or absolute path, default `pi`; no shell expansion |
+| `env` | caller-selected environment overlay; parent environment is inherited |
+| `permissionPolicy` | default `upstream`; `bypass` is explicitly unsupported |
+| `instructions` | existing owned `AGENTS.md` preparation; lease lasts until disposal |
+| `resume` | explicit `SessionReference`, never latest or a partial ID |
+| `timeoutSeconds` | per-turn wall deadline, default 1800; null disables it |
+| `requestTimeoutSeconds` | positive finite startup/command deadline, default 30 |
+| `maxBufferBytes` | nonnegative byte bound per pending event stream and stderr prefix; default 1048576 |
+
+`get_session_capabilities("pi")` / `getSessionCapabilities("pi")` reports
+`backend: "rpc"`, `events`, `interrupt`, `followUp`, `resume` true;
+`concurrentTurns` and `approval` false. It performs no local availability/auth
+probe. Existing `getCapabilities` describes one-shot execution and retains
+its CLI behavior. There is no generic raw-command, steering, queued follow-up,
+approval-response or arbitrary native-options channel.
+
+### Identity, turns and events
+
+`LiveSession.reference` is a native `SessionReference`:
+`sessionId`, `sessionFile` (absolute path or null), `workdir` (absolute).
+Native persistence may be lazy: a reported path is not proof the file exists.
+Resume requires an existing session file whose header identifies the exact
+requested native ID and workdir. The requested spawn workdir must identify that
+same directory; startup verifies the native state response again.
+The library never chooses the newest session, silently forks, or deletes
+upstream history. A missing/unusable reference is an error, not a fresh session.
+
+`session.startTurn(prompt)` synchronously reserves the active slot and returns
+a `SessionTurn`: unique string `id`, `events` async iterable, and `result`
+Promise (Python awaitable). Consume events while awaiting the result. The next
+`startTurn` after completion is a follow-up in the same native session.
+Concurrent turns are rejected with `unsupported-capability`, including while
+an interrupt acknowledgement is pending.
+
+Every `SessionEvent` carries `backend: "rpc"`, `harness: "pi"`, `sessionId`,
+`turnId` (null outside a turn), `requestId` (native ID or null), native `type`,
+and the complete JSON object in `raw`. `session.events` exposes idle/session
+events; `turn.events` exposes events and responses associated with the active
+turn. Both are single-consumer streams. Unknown event types stay visible.
+Native events have no common upstream turn ID; serial turn ownership provides
+the local correlation while retaining native request IDs verbatim.
+Stopping iteration does not discard queued events or disable the byte bound.
+Continue draining the acquired iterator or close the session; an unconsumed
+stream still fails loudly on overflow.
+
+Responses correlate by ID and command, not arrival order. A prompt response is
+only acknowledgement. Completion requires the valid prompt response plus
+`agent_settled`; intermediate `agent_end` events may be followed by retries or
+compaction. Native error responses settle rejected prompts without waiting
+for a completion event. Pi extension commands or input hooks can handle a
+prompt locally without an `agent_settled` event; this model-turn API does not
+fabricate their completion. Such operations can reach the configured deadline.
+Use the native extension API when local-command completion is required.
+
+### Results, interruption and disposal
+
+Each locally accepted turn has exactly one `SessionTurnResult`, including
+transport failure. Fields: `sessionId`, `turnId`, `status`, `raw`, `error`,
+`exitCode`, `signal`, `stderr`, `stderrBytes`, `stderrTruncated`,
+`eventsTruncated`. Unknown fields use null, not fabricated zero/empty usage.
+
+Statuses distinguish `completed`, `agent-error`, `interrupted`,
+`protocol-error`, `disconnected`, `timed-out`, `closed`, `exited`, `signaled`.
+`raw` retains the last `agent_end` payload or native rejection. Assistant
+`stopReason: "error"` / `"aborted"` distinguishes native failure/interruption
+from successful settlement; an earlier retry error does not override the final
+successful run. `exitCode` and `signal` retain observed process termination.
+Usage stays in native payloads: streaming usage is cumulative, `message_end`
+is authoritative, and repeated snapshots must not be summed. No billing tier,
+common pricing estimate, or fabricated usage total is added.
+
+`await session.interrupt()` sends native `abort`, waits for its acknowledgement
+and turn settlement, and preserves the session for follow-up. An ordinary
+completion racing interruption is not relabelled interrupted. Interrupting an
+idle session is unsupported. Request timeout or transport failure invalidates
+the handle and starts bounded owned teardown.
+
+`await session.close()` is idempotent and safe for concurrent callers. It
+settles an active turn as `closed`, closes stdin, terminates the owned process
+group (500 ms TERM grace, then KILL and bounded 1000 ms reap/pipe drain), and
+restores still-owned instructions. Descendants are stopped even when the
+leader already exited. Cleanup failure raises rather than implying disposal
+succeeded. Python task cancellation performs shielded cleanup before propagating
+`CancelledError`. Operations after disposal raise `session-closed`.
+
+### Framing, bounds and qualification
+
+Stdin stays open between JSONL commands; close supplies EOF. Stdout accepts
+strict UTF-8 JSON objects delimited by LF only (CRLF allowed). Unicode line
+separators inside strings are not delimiters. Invalid/missing-type/nonobject
+frames, oversized frames (1 MiB), partial final frames, invalid correlation and
+duplicate responses fail explicitly as `protocol-error`; they are not skipped.
+Stderr is a separate bounded prefix with byte count and visible truncation.
+
+Each event stream is byte-bounded. A stalled consumer cannot cause unlimited
+buffering: overflow fails the session and sets `eventsTruncated`, retaining
+already queued events. This deliberate fail-fast policy keeps command deadlines
+and disposal responsive rather than blocking the protocol reader behind event
+delivery. There is no callback API or inactivity watchdog; silence alone is
+not failure before a configured deadline.
+
+`tests/session_cases.json` and the synthetic `tests/helpers/rpc_agent.py` peer
+exercise the same outcomes in Python, Bun and packaged Node. These are offline
+protocol/conformance tests, not provider-success evidence. Native Pi 0.85.1
+startup, ID/state, out-of-order abort response and missing-auth prompt rejection
+were separately exercised on macOS/Node 26.6.0. Both language APIs also drove
+the real Pi runtime against a **local synthetic SSE provider**, verifying native
+streaming, successful settlement, follow-up, interruption and persisted native
+session resume. That is native-runtime qualification, not an LLM/provider smoke.
+The selected `openai-codex` provider reported credentials not configured;
+real-provider successful generation/interruption remains unverified.
+No credentials or private conversations are included in fixtures.
+
+Sources refreshed September 8:
+[Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md),
+[Pi session implementation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/agent-session.ts),
+[OMP RPC differences](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md).
+
 ## Backend and session implementation gates
 
-The following is the accepted contract for future implementations, **not
-exported session methods or enabled capabilities today**. It replaces the old
-SDK exclusion while keeping the common library small.
+These requirements govern the shipped Pi RPC session implementation above and
+future backends. They replace the old SDK exclusion while keeping the common
+library small; they do not enable SDKs or additional native protocols by themselves.
 
 - Backend selection is explicit and stable for a run/session. SDK dependencies
   are optional and lazy; importing or selecting CLI must not load/configure an
@@ -1068,8 +1215,9 @@ Not adopted: mandatory bypass, billing-tier inference from headless/live mode,
 historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
-now ships under the execution contract above; controlled sessions and SDKs remain
-implementation-gated, not hidden behind no-op methods. No package release is implied.
+now ships under the execution contract above; controlled Pi RPC sessions ship
+through their explicit API. Additional protocols and SDKs remain implementation-gated.
+No package release is implied.
 
 ---
 
@@ -1126,7 +1274,7 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.6` and TypeScript `0.2.10`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.7` and TypeScript `0.2.11`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

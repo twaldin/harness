@@ -71,8 +71,8 @@ Both languages expose session-path and parsing hooks for the same 12 adapters
 (every adapter except `aider`, `hermes`, `omp` and `copilot`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
-upstreams and tracked in TWA-96. These are caller-driven artifact helpers, not
-controlled sessions.
+upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
+separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 
 | adapter | TypeScript hooks | Python hooks | notes |
 |---|---|---|---|
@@ -95,15 +95,18 @@ controlled sessions.
 
 ## Backend and permission capabilities
 
-All sixteen currently implement `backend="cli"` only. `rpc` and `sdk` are
-explicitly unsupported, with no fallback. `get_capabilities` / `getCapabilities`
-reports implemented support without probing binaries or credentials. Streaming
-(raw subprocess chunks) and cancellation are true for every shipped CLI adapter
-under the shared execution engine; controlled sessions are false. Streaming is
-chunk delivery of whatever the CLI writes, not structured events.
+All sixteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
+streaming (raw subprocess chunks, not structured events) and cancellation true,
+controlled sessions false. The separate `get_session_capabilities("pi")` /
+`getSessionCapabilities("pi")` reports the Pi 0.85.1 RPC session contract.
+Its current official package is `@earendil-works/pi-coding-agent`; older Pi and
+OMP protocols are not assumed compatible. See
+[session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider` and `hermes` ship none.
 OMP and Copilot add install metadata but no pane or session-log heuristics.
+These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
 flags. This preserves the selected upstream's policy, not a guarantee of

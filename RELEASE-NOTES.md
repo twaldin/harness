@@ -30,9 +30,9 @@
   must explicitly select Python `permission_policy="bypass"`, TypeScript
   `permissionPolicy: 'bypass'`, or CLI `--permission-policy bypass`. Unmapped
   adapters reject bypass instead of silently ignoring it.
-- Added explicit backend selection and static capability queries. Only `cli`
-  executes; `rpc` and `sdk` fail with `unsupported-backend` before preparation
-  or process creation. This is not a live-session or SDK implementation.
+- Added explicit backend selection and static capability queries. The one-shot
+  API executes only `cli`; `rpc` and `sdk` fail before preparation or process
+  creation. Controlled Pi RPC now uses the separate session API.
 - Added typed Claude Code effort and Codex sandbox options, validated before
   file writes. Codex sandbox and bypass cannot be combined.
 - Aligned eager registry initialization, collision errors, model selection,

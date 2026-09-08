@@ -462,7 +462,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 ### Linux/container caveats (harness-bench)
 
 - Upstream CLI runtime requirements are independent of the Harness package: current OpenClaude requires Node >=22; verify each selected distribution/version in the [qualification ledger](ADAPTER-MATRIX.md#dated-qualification-ledger).
-- `kilo` and `crush` adapters force deterministic per-workdir sqlite locations (`<workdir>/.harness/...`) for container-safe metrics parsing.
+- `kilo` and `crush` default to per-workdir SQLite locations and preserve caller overrides. Database telemetry requires an observed native run ID; see [identity and accounting limits](ADAPTER-MATRIX.md#opencode). Reported zero is not a billing guarantee; Crush token counters are not run totals.
 - `kilo` and `crush` enforce strict same-model defaults (`model == small_model`) to avoid helper-model drift.
 - `openclaude` adapter does not set `--fallback-model`; single-model runs are default.
 - `factory-droid` adapter pins `--model` and `--spec-model` to the same value for fairness.

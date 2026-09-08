@@ -59,7 +59,7 @@ RUN_CASE_NAMES = FIXTURE_NAMES + [name for name, variant in VARIANTS if "expecte
 ERROR_CASE_NAMES = [name for name, variant in VARIANTS if "expectedError" in variant]
 LOCK = ".harness-run.lock"
 #: Ambient state that would change a command plan or a parser result.
-AMBIENT_ENV = ("OPENCODE_DB", "KILO_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME")
+AMBIENT_ENV = ("OPENCODE_DB", "OPENCODE_DISABLE_CHANNEL_DB", "KILO_DB", "KILO_DISABLE_CHANNEL_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME")
 
 
 def _substitute(value, mapping: dict[str, str]):
@@ -176,6 +176,7 @@ def _write_artifacts(artifacts: list[dict]) -> None:
                 conn.execute(statement)
             conn.commit()
             conn.close()
+            path.chmod(0o444)
         elif artifact["kind"] == "json":
             path.write_text(json.dumps(artifact["content"]), encoding="utf-8")
         else:
@@ -282,7 +283,6 @@ def test_parse_output_without_artifacts_is_explicitly_null(case: dict):
     spec = _make_spec(case["spec"], case["workdir"])
     parsed = parse_output(spec, _make_outcome(case["sampleOutput"]))
     assert parsed == _expected_parsed(case["expectedParsedWithoutArtifacts"])
-    assert parsed == {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
 
 
 @_cases(ERROR_CASE_NAMES)

@@ -287,3 +287,26 @@ test.each(['malformed', { input: {}, candidates: 7 }])('Gemini malformed usage i
   const telemetry = getAdapter('gemini').parseSessionLog!(log)
   expect([telemetry.tokensIn, telemetry.tokensOut, telemetry.costUsd]).toEqual([null, null, null])
 })
+
+test.each([[1, 1], [2, 1], [1, 2]])('Gemini aggregate safe integer boundary (%j, %j)', (extraIn, extraOut) => {
+  const maximum = Number.MAX_SAFE_INTEGER
+  const spec = specFor('gemini')
+  const blob = JSON.stringify({ stats: { models: {
+    'gemini-2.5-pro': { tokens: { input: maximum - 1, candidates: maximum - 1 } },
+    'gemini-2.5-flash': { tokens: { input: extraIn, candidates: extraOut } },
+  } } })
+  const parsed = parseOutput(spec, { stdout: blob, stderr: '', exitCode: 0, durationSeconds: 0, timedOut: false })
+  mkdirSync(spec.workdir, { recursive: true })
+  const log = join(spec.workdir, 'session.json')
+  writeFileSync(log, blob)
+  const telemetry = getAdapter('gemini').parseSessionLog!(log)
+  if (extraIn === 1 && extraOut === 1) {
+    expect([parsed.tokensIn, parsed.tokensOut]).toEqual([maximum, maximum])
+    expect([telemetry.tokensIn, telemetry.tokensOut]).toEqual([maximum, maximum])
+    expect(parsed.costUsd).not.toBeNull()
+    expect(telemetry.costUsd).toBe(parsed.costUsd)
+  } else {
+    expect([parsed.tokensIn, parsed.tokensOut, parsed.costUsd]).toEqual([null, null, null])
+    expect([telemetry.tokensIn, telemetry.tokensOut, telemetry.costUsd]).toEqual([null, null, null])
+  }
+})

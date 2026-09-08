@@ -42,6 +42,7 @@ function parseGeminiStatsBlob(blob: string): { tokensIn: number | null; tokensOu
     if (countIn === null || countOut === null) return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
     tokensIn += countIn
     tokensOut += countOut
+    if (!Number.isSafeInteger(tokensIn) || !Number.isSafeInteger(tokensOut)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
   }
   return {
     tokensIn,

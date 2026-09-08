@@ -94,6 +94,28 @@ def test_gemini_malformed_usage_is_unknown(tmp_path, tokens):
     assert (telemetry.tokens_in, telemetry.tokens_out, telemetry.cost_usd) == (None, None, None)
 
 
+@pytest.mark.parametrize("extra_in,extra_out", [(1, 1), (2, 1), (1, 2)])
+def test_gemini_aggregate_safe_integer_boundary(tmp_path, extra_in, extra_out):
+    maximum = 9007199254740991
+    blob = json.dumps({"stats": {"models": {
+        "gemini-2.5-pro": {"tokens": {"input": maximum - 1, "candidates": maximum - 1}},
+        "gemini-2.5-flash": {"tokens": {"input": extra_in, "candidates": extra_out}},
+    }}})
+    adapter = GeminiAdapter()
+    parsed = adapter.parse_output(RunSpec(harness="gemini", prompt="x", workdir=tmp_path), _stub(stdout=blob))
+    log = tmp_path / "session.json"
+    log.write_text(blob)
+    telemetry = adapter.parse_session_log(str(log))
+    if extra_in == extra_out == 1:
+        assert (parsed["tokens_in"], parsed["tokens_out"]) == (maximum, maximum)
+        assert (telemetry.tokens_in, telemetry.tokens_out) == (maximum, maximum)
+        assert parsed["cost_usd"] is not None
+        assert telemetry.cost_usd == parsed["cost_usd"]
+    else:
+        assert (parsed["tokens_in"], parsed["tokens_out"], parsed["cost_usd"]) == (None, None, None)
+        assert (telemetry.tokens_in, telemetry.tokens_out, telemetry.cost_usd) == (None, None, None)
+
+
 # --- aider ----------------------------------------------------------------
 
 

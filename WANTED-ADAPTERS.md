@@ -25,8 +25,8 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain twenty-two adapters, with shared fixture files:
-`aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
+After adapter initialization, both registries contain twenty-three adapters, with shared fixture files:
+`aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
 `gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
@@ -43,6 +43,8 @@ upstream compatibility.
   approve other forks.
 - `swe-agent` currently invokes a consumer-supplied mini-SWE Python wrapper, not
   a native SWE-agent CLI. The distinct native mini-SWE CLI is tracked below.
+- `auggie` shipped through [TWA-81](https://linear.app/twaldin/issue/TWA-81).
+  See [setup, JSON billing and account qualification](ADAPTER-MATRIX.md#auggie).
 - `hermes` now ships local quiet chat in both languages ([TWA-73](https://linear.app/twaldin/issue/TWA-73)).
   See its [qualification and smoke limits](ADAPTER-MATRIX.md#hermes); the gateway,
   controlled sessions and machine-readable usage are not part of this adapter.
@@ -111,17 +113,6 @@ path, with explicit tool trust and opaque JSONL events. It is the successor to
 Amazon Q CLI, not another alias for an existing Harness adapter. Preview V3,
 ACP sessions and aggregate usage/USD remain unqualified.
 See [setup, permissions and coverage](ADAPTER-MATRIX.md#kiro).
-
-### Auggie — [TWA-81](https://linear.app/twaldin/issue/TWA-81)
-
-- **Identity / maintenance:** [Augment CLI docs](https://docs.augmentcode.com/cli/overview),
-  current vendor documentation; exact release not pinned here.
-  `npm install -g @augmentcode/auggie` supplies `auggie` (Node 20+).
-- **Path:** [`auggie --print --output-format json "PROMPT"`](https://docs.augmentcode.com/cli/reference).
-- **Gate / validation:** Augment account/session auth; enterprise agreements can
-  disable noninteractive use. Keep model and tool permissions explicit. Verify
-  JSON schema and `--show-credits` semantics: Augment credits are not tokens or
-  billed USD. `auggie cloud`/Cosmos and Auggie SDKs are separate work.
 
 ### Native mini-SWE-agent — [TWA-82](https://linear.app/twaldin/issue/TWA-82)
 

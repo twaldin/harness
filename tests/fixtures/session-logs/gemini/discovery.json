@@ -1,0 +1,44 @@
+{
+  "$comment": "Shared by ts/tests/adapters/gemini-sessionlog.test.ts and tests/adapters/test_gemini_session_logs.py. Synthetic transcripts written from the pinned upstream source (no installed-binary capture). Files under chats/ and projects.json carry two placeholders the tests substitute: __WORKDIR__ (the project root as gemini-cli keys it: path.resolve(process.cwd()), i.e. the physical absolute path) and __PROJECT_HASH__ (sha256 hex of that exact string).",
+  "sourceQualification": {
+    "repository": "https://github.com/google-gemini/gemini-cli",
+    "revision": "85aca163f6c73ac6ce380b5447359146b8adcae4",
+    "homeEnv": "GEMINI_CLI_HOME",
+    "configDirDefault": ".gemini",
+    "registry": "projects.json",
+    "ownershipMarker": ".project_root",
+    "projectTempDir": "tmp/<slug | sha256(projectRoot)>",
+    "chatsSubdir": "chats",
+    "sessionFilePattern": "^session-.*\\.jsonl?$",
+    "projectHash": "sha256(projectRoot)",
+    "legacyLogsJson": "tmp/<project-id>/logs.json holds user prompt history only (no usage)"
+  },
+  "placeholders": ["__WORKDIR__", "__PROJECT_HASH__"],
+  "registry": "projects.json",
+  "registrySlug": "repo",
+  "sessions": {
+    "main": {
+      "file": "chats/session-2026-09-08T10-00-11111111.jsonl",
+      "$comment": "g1 is re-appended once tokens arrive (counted once), g2 is re-appended with updated toolCalls (counted once), g3 is removed by $rewindTo, output 0 on g2 is preserved as a real zero.",
+      "telemetry": { "tokensIn": 1500, "tokensOut": 100, "model": "gemini-2.5-pro", "costUsd": 0.002875 },
+      "messageIds": ["u1", "g1", "g2"],
+      "lastUpdated": "2026-09-08T10:00:06.000Z"
+    },
+    "unrelated": {
+      "file": "chats/session-2026-09-08T11-00-22222222.jsonl",
+      "$comment": "projectHash belongs to another project; must be rejected by discovery even when newest.",
+      "telemetry": { "tokensIn": 7777, "tokensOut": 7777, "model": "gemini-2.5-pro", "costUsd": 0.087491 }
+    },
+    "noUsage": {
+      "file": "chats/session-2026-09-08T09-00-33333333.jsonl",
+      "$comment": "gemini message recorded with tokens null: usage is unknown, not zero.",
+      "telemetry": { "tokensIn": null, "tokensOut": null, "model": "gemini-2.5-pro", "costUsd": null },
+      "sessionId": "33333333-aaaa-4bbb-8ccc-000000000003"
+    }
+  },
+  "legacyLayout": {
+    "$comment": "The pre-TWA-96 helper looked for ~/.gemini/tmp/<basename(workdir)>/logs.json. That file is prompt history without usage and must not be reported as a session.",
+    "file": "legacy/logs.json",
+    "relativePath": "tmp/<basename>/logs.json"
+  }
+}

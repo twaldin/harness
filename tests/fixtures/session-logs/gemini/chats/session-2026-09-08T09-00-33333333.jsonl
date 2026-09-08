@@ -1,0 +1,3 @@
+{"sessionId":"33333333-aaaa-4bbb-8ccc-000000000003","projectHash":"__PROJECT_HASH__","startTime":"2026-09-08T09:00:00.000Z","lastUpdated":"2026-09-08T09:00:00.000Z","kind":"main"}
+{"id":"u1","timestamp":"2026-09-08T09:00:01.000Z","type":"user","content":[{"text":"hello"}]}
+{"id":"g1","timestamp":"2026-09-08T09:00:02.000Z","type":"gemini","content":[{"text":"hi"}],"thoughts":[],"tokens":null,"model":"gemini-2.5-pro"}

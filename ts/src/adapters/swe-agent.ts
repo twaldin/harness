@@ -2,7 +2,7 @@ import { register } from '../registry.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
 import { HarnessError, finalizeCommand, validateRunSpec } from '../base.js'
 import { homedir } from 'os'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, statSync } from 'fs'
 import { resolve, join } from 'path'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
@@ -58,9 +58,13 @@ function readSweTrajectory(trajFile: string): { tokensIn: number | null; tokensO
     }
   }
 
-  if (!model && modelStats) {
-    const modelKeys = Object.keys(modelStats).filter((k) => k !== 'instance_cost')
-    model = modelKeys.length > 0 ? modelKeys[0]! : null
+  if (!model) {
+    const config = info?.['config']
+    const modelConfig = config && typeof config === 'object' && !Array.isArray(config)
+      ? (config as Record<string, unknown>)['model'] : null
+    const configuredModel = modelConfig && typeof modelConfig === 'object' && !Array.isArray(modelConfig)
+      ? (modelConfig as Record<string, unknown>)['model_name'] : null
+    if (typeof configuredModel === 'string' && configuredModel) model = configuredModel
   }
 
   return {
@@ -129,23 +133,19 @@ sweAgentAdapter.detectStatus = function (pane: string) {
   return 'unknown'
 }
 
-// mini-swe-agent interactive writes the most recent run's trajectory to
-//   ~/Library/Application Support/mini-swe-agent/last_mini_run.traj.json (macOS)
-//   ~/.local/share/mini-swe-agent/last_mini_run.traj.json (linux, XDG)
-// Headless flt runs (with --output) drop the per-task trajectory at
-// <workdir>/.harness/swe-traj.json — prefer that when present.
-sweAgentAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
-  const home = process.env.HOME ?? ''
-  const platform = process.platform
-  const appSupport = platform === 'darwin'
-    ? join(home, 'Library', 'Application Support', 'mini-swe-agent')
-    : join(home, '.local', 'share', 'mini-swe-agent')
+// Wrapper artifacts are workdir-local. The global last_mini_run trajectory
+// cannot identify this workdir and must not fill missing local telemetry.
+sweAgentAdapter.sessionLogPath = function (workdir: string, since?: number): string | null {
   const candidates = [
     join(workdir, '.harness', 'swe-traj.json'),
     join(workdir, 'mini-traj.json'),
-    join(appSupport, 'last_mini_run.traj.json'),
   ]
-  for (const c of candidates) if (existsSync(c)) return c
+  for (const c of candidates) {
+    try {
+      const stat = statSync(c)
+      if (stat.isFile() && (since === undefined || stat.mtimeMs >= since)) return c
+    } catch { /* Missing or unreadable artifact. */ }
+  }
   return null
 }
 

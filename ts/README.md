@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, or hermes as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, or copilot as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -41,9 +41,29 @@ Permission policy defaults to upstream behavior; Harness no longer injects
 approval/bypass flags automatically. Unattended callers intentionally requiring
 the former behavior must set `permissionPolicy: 'bypass'`. Codex bypass also
 disables sandboxing. Unsupported bypass fails rather than being ignored.
-Backend selection defaults to `cli`; selecting `rpc` or `sdk` currently throws
-`HarnessError` with `code === 'unsupported-backend'`, without CLI fallback.
-See the [shared migration and examples](../SPEC.md#permission-policy-and-migration).
+One-shot backend selection defaults to `cli`; selecting `rpc` or `sdk` through
+`RunSpec` throws `unsupported-backend`, without CLI fallback. Controlled Pi RPC
+uses `openSession` below. See the [shared migration](../SPEC.md#permission-policy-and-migration).
+
+## Controlled RPC sessions
+
+`openSession({ harness: 'pi', backend: 'rpc', workdir, model? })` opens a native
+Pi 0.85.1 RPC subprocess. `getSessionCapabilities('pi')` reports session
+operations independently of one-shot capabilities. Install/select the official
+`@earendil-works/pi-coding-agent` executable and configure its provider first;
+the library does neither and does not fall back to OMP or another backend.
+
+`session.startTurn(prompt)` returns `{ id, events, result }`: consume the bounded
+async `events` iterable, then await the terminal `result`. A subsequent turn
+reuses the native session; overlapping turns are rejected. `interrupt()` stops
+the active turn, and `close()` disposes owned resources without deleting history.
+Always close in `finally`. Explicit resume supplies `session.reference` through
+`resume`; the file must exist and match its native ID/workdir.
+
+See the [paired runnable usage](../README.md#controlled-pi-rpc-sessions) and
+[full session contract](../SPEC.md#controlled-rpc-sessions) for typed events,
+errors, bounded output, deadlines, local-only extension limitations, and the
+separate offline/native/provider qualification evidence.
 
 ## API reference
 
@@ -120,15 +140,15 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'claude-code', 'cline', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
 Reports implemented support without loading optional SDKs or probing local
-installation/auth. All current adapters use CLI and support cancellation and
+installation/auth. All one-shot adapters use CLI and support cancellation and
 chunk streaming (raw subprocess output, not structured events). Controlled
-sessions remain unsupported; pure pane/session-log helpers are not controlled
-sessions. Native options are typed per agent:
+Pi RPC uses `getSessionCapabilities` instead; pure pane/session-log helpers are
+not controlled sessions. Native CLI options are typed per agent:
 
 ```typescript
 buildCommand({
@@ -159,7 +179,7 @@ interface RunSpec {
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
   permissionPolicy?: 'upstream' | 'bypass' // default upstream
-  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions
+  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
   executable?: string       // bare name or absolute path
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file
@@ -196,6 +216,11 @@ interface RunResult {
 ```
 
 Headless `parseOutput` returns null cost for codex, aider and qwen, and null cost and tokens for hermes (its stdout is preserved verbatim and never parsed; `raw` only carries a `session_id` read from stderr). Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Other adapters read reported cost from stdout, trajectory files or session databases where available. Session-log helpers may also derive estimates and need not match headless parsing. See [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) for details.
+
+Copilot also reports null token/USD totals, retaining its native JSONL events in
+`raw`. It uses `@github/copilot`, not `gh copilot`, and exposes explicit
+`{kind: 'copilot', allowTools: ['shell(git status)'], denyTools: ['write']}`.
+See [setup and coverage](../ADAPTER-MATRIX.md#copilot).
 
 ### Streaming and bounded capture
 

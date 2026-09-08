@@ -56,6 +56,7 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   omp: ['--auto-approve'],
   'continue-cli': ['--auto'],
   cline: ['--auto-approve', 'true'],
+  copilot: ['--allow-all'],
 }
 
 const NO_BYPASS = ['opencode', 'pi', 'crush', 'swe-agent']
@@ -209,6 +210,11 @@ describe('native options', () => {
     expectCode(() => buildCommand(bad({ kind: 'claude-code', effort: 'extreme' })), 'invalid-options')
     expectCode(() => buildCommand(bad({ kind: 'codex', sandbox: 'none' }, 'codex')), 'invalid-options')
   })
+
+  test('copilot rejects sparse rule arrays instead of granting an undefined rule', () => {
+    const allowTools = new Array<string>(1)
+    expectCode(() => buildCommand(specFor('copilot', { nativeOptions: { kind: 'copilot', allowTools } })), 'invalid-options')
+  })
 })
 
 describe('getCapabilities', () => {
@@ -235,6 +241,7 @@ describe('getCapabilities', () => {
       'continue-cli': [null, '--config'],
       omp: ['PI_CODING_AGENT_DIR', '--config'],
       cline: ['CLINE_DIR', null],
+      copilot: ['COPILOT_HOME', null],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)
@@ -249,7 +256,8 @@ describe('getCapabilities', () => {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS)
-      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline') expect(caps.nativeOptions).toBeNull()
+      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot') expect(caps.nativeOptions).toBeNull()
+      else expect(caps.nativeOptions).toBe(name)
       expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)
       expect(caps.sessions).toBe(false)

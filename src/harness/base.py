@@ -37,8 +37,11 @@ ErrorCode = Literal[
     "unsupported-capability",
     "invalid-options",
     "instruction-conflict",
+    "launch-failed",
+    "protocol-error",
+    "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "cline"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 #: Signal the runner sends the owned process group once before escalating to
@@ -103,7 +106,25 @@ class ClineOptions:
     auto_approve: bool | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions
+@dataclass(frozen=True)
+class CopilotOptions:
+    """Typed `copilot` CLI tool-permission rules.
+
+    Each `allow_tools` entry is emitted as `--allow-tool=<rule>` and each
+    `deny_tools` entry as `--deny-tool=<rule>`, allows first, in the given
+    order. Rules are passed through verbatim (upstream grammar such as
+    `shell(git:*)`); members must be non-blank strings without NUL bytes.
+    Lists are accepted alongside tuples for decoded-JSON parity. `deny_tools`
+    may accompany `permission_policy="bypass"`: upstream applies deny rules
+    over `--allow-all`.
+    """
+
+    kind: Literal["copilot"] = field(default="copilot", init=False)
+    allow_tools: tuple[str, ...] | list[str] | None = None
+    deny_tools: tuple[str, ...] | list[str] | None = None
+
+
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
 
 
 @dataclass
@@ -137,7 +158,7 @@ class RunSpec:
                       rejected with `unsupported-capability` when the adapter
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
-                      `CodexOptions`, `ClineOptions`). The kind must match `harness`.
+                      `CodexOptions`, `ClineOptions`, `CopilotOptions`). The kind must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -376,6 +397,18 @@ def _absolute_option(name: str, value: object) -> Path:
     return path
 
 
+def _validate_tool_rules(name: str, rules: object) -> None:
+    """`CopilotOptions.allow_tools` / `deny_tools`: None, or a tuple/list of
+    non-blank, NUL-free strings (empty collections are valid)."""
+    if rules is None:
+        return
+    if not isinstance(rules, (tuple, list)):
+        raise HarnessError(f"copilot {name} must be a tuple or list of strings, got {type(rules).__name__}", code="invalid-options")
+    for rule in rules:
+        if not isinstance(rule, str) or not rule.strip() or "\0" in rule:
+            raise HarnessError(f"copilot {name} entries must be non-blank strings without NUL bytes, got {rule!r}", code="invalid-options")
+
+
 def snapshot_run_spec(spec: RunSpec) -> RunSpec:
     """Copy `spec` with its own `env` dict so later caller mutation cannot leak
     into an in-flight run."""
@@ -538,9 +571,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions or ClineOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions or CopilotOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -554,6 +587,9 @@ class Adapter(ABC):
                     f"invalid claude-code effort {native.effort!r}; expected one of {', '.join(_CLAUDE_CODE_EFFORTS)}",
                     code="invalid-options",
                 )
+        elif isinstance(native, CopilotOptions):
+            _validate_tool_rules("allow_tools", native.allow_tools)
+            _validate_tool_rules("deny_tools", native.deny_tools)
         elif isinstance(native, CodexOptions):
             if native.sandbox is not None and native.sandbox not in _CODEX_SANDBOXES:
                 raise HarnessError(
@@ -602,6 +638,11 @@ class Adapter(ABC):
                 native_args += ("--provider", native.provider)
             if native.auto_approve is not None:
                 native_args += ("--auto-approve", "true" if native.auto_approve else "false")
+        elif isinstance(native, CopilotOptions):
+            native_args = (
+                *(f"--allow-tool={rule}" for rule in native.allow_tools or ()),
+                *(f"--deny-tool={rule}" for rule in native.deny_tools or ()),
+            )
         config_args: tuple[str, ...] = ()
         if spec.config_file is not None:
             config_args = (self.config_file_flag, str(Path(spec.config_file)))  # type: ignore[assignment]

@@ -2,6 +2,11 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added `copilot` in Python and TypeScript for the current official GitHub Copilot
+  CLI, with JSONL native events, explicit `CopilotOptions` tool allow/deny rules,
+  opt-in bypass and `COPILOT_HOME` selection through the shared subprocess lifecycle.
+  Token/USD totals stay null; premium requests and AI credits remain native data.
+  See [setup and dated provider/cancellation coverage](ADAPTER-MATRIX.md#copilot).
 - **Instruction lifecycle migration:** command builders are now side-effect-free.
   `run` / `runAsync` prepare and restore instructions automatically. External
   drivers must pair `prepare_command` / `prepareCommand` with
@@ -25,9 +30,9 @@
   must explicitly select Python `permission_policy="bypass"`, TypeScript
   `permissionPolicy: 'bypass'`, or CLI `--permission-policy bypass`. Unmapped
   adapters reject bypass instead of silently ignoring it.
-- Added explicit backend selection and static capability queries. Only `cli`
-  executes; `rpc` and `sdk` fail with `unsupported-backend` before preparation
-  or process creation. This is not a live-session or SDK implementation.
+- Added explicit backend selection and static capability queries. The one-shot
+  API executes only `cli`; `rpc` and `sdk` fail before preparation or process
+  creation. Controlled Pi RPC now uses the separate session API.
 - Added typed Claude Code effort and Codex sandbox options, validated before
   file writes. Codex sandbox and bypass cannot be combined.
 - Aligned eager registry initialization, collision errors, model selection,

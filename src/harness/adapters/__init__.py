@@ -3,6 +3,7 @@ from harness.adapters.aider import AiderAdapter
 from harness.adapters.claude_code import ClaudeCodeAdapter
 from harness.adapters.cline import ClineAdapter
 from harness.adapters.codex import CodexAdapter
+from harness.adapters.copilot import CopilotAdapter
 from harness.adapters.continue_cli import ContinueCliAdapter
 from harness.adapters.crush import CrushAdapter
 from harness.adapters.factory_droid import FactoryDroidAdapter
@@ -31,6 +32,7 @@ register("openclaude", OpenClaudeAdapter)
 register("crush", CrushAdapter)
 register("kilo", KiloAdapter)
 register("hermes", HermesAdapter)
+register("copilot", CopilotAdapter)
 register("omp", OmpAdapter)
 register("cline", ClineAdapter)
 
@@ -40,6 +42,7 @@ __all__ = [
     "ClineAdapter",
     "CodexAdapter",
     "ContinueCliAdapter",
+    "CopilotAdapter",
     "CrushAdapter",
     "FactoryDroidAdapter",
     "GeminiAdapter",

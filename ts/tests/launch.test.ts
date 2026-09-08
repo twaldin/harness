@@ -418,12 +418,12 @@ test('failed process teardown retains instructions and recovery backup', () => {
       const workdir = ${JSON.stringify(workdir)};
       writeFileSync(workdir + '/AGENTS.md', 'original');
       const failure = Object.assign(new Error('synthetic process-group denial'), { code: 'EPERM' });
-      mock.module(${JSON.stringify(join(import.meta.dir, '../src/lifecycle.ts'))}, () => ({
-        prepareLaunch: (cmd, opts) => ({ cmd, cwd: opts.cwd, env: {}, timeoutMs: null, inactivityMs: null, maxOutputBytes: 0, stdin: null, gracefulSignal: 'SIGTERM' }),
+      const lifecyclePath = ${JSON.stringify(join(import.meta.dir, '../src/lifecycle.ts'))};
+      const lifecycle = await import(lifecyclePath);
+      mock.module(lifecyclePath, () => ({
+        ...lifecycle,
         runLifecycle: async () => { throw failure; },
         runLifecycleSync: () => { throw failure; },
-        cancelledBeforeLaunch: () => { throw failure; },
-        describeError: String,
       }));
       // Import after fault injection; static imports would bind before the mock.
       const harness = await import(${JSON.stringify(join(import.meta.dir, '../src/index.ts'))});

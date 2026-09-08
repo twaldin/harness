@@ -25,8 +25,8 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain sixteen adapters, with shared fixture files:
-`aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `crush`, `factory-droid`,
+After adapter initialization, both registries contain seventeen adapters, with shared fixture files:
+`aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `factory-droid`,
 `gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
@@ -59,6 +59,9 @@ upstream compatibility.
   See [setup, local ownership and qualification limits](ADAPTER-MATRIX.md#cline).
   It uses standalone foreground JSON and SIGINT teardown; controlled sessions,
   detached hub execution and optional SDK qualification (TWA-86) remain separate.
+- GitHub Copilot CLI now ships in both languages through [TWA-76](https://linear.app/twaldin/issue/TWA-76).
+  See [setup, native permissions and dated coverage](ADAPTER-MATRIX.md#copilot);
+  this is the current `@github/copilot` agent, not the old `gh copilot` helper.
 
 ## Source-qualified: existing implementation backlog
 
@@ -94,20 +97,7 @@ specific checks supplement the [common validation scope](#validation-and-mainten
   versus stream-json completion events, absent pricing and accumulation; do not
   assume session export is JSONL or that an estimate proves billed spend.
 
-### GitHub Copilot CLI — [TWA-76](https://linear.app/twaldin/issue/TWA-76)
 
-- **Identity / maintenance:** [GitHub CLI installation](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli),
-  npm `@github/copilot` supplies `copilot`; package 1.0.83 observed.
-  This is the coding-agent CLI, not the older `gh copilot` command helper.
-- **Path:** [`copilot -p "PROMPT"`](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference)
-  with explicit tool allow/deny policy and model. `-s` suppresses stats/decorations.
-- **Gate / validation:** GitHub-hosted models use Copilot entitlement and selected
-  account auth. **The former “no BYOK” exclusion is obsolete:**
-  [official BYOK docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models)
-  support OpenAI-compatible, Azure and Anthropic endpoints, including local models;
-  tool calling and streaming are required. Preserve provider env/model and optional
-  offline mode explicitly. Verify denied tools, terminal output and any usage
-  source; no JSON or USD schema is established by this catalog.
 
 ### Cursor CLI — [TWA-77](https://linear.app/twaldin/issue/TWA-77)
 

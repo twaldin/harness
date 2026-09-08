@@ -33,6 +33,7 @@ from harness import (
     ClaudeCodeOptions,
     ClineOptions,
     CodexOptions,
+    CopilotOptions,
     HarnessError,
     RunSpec,
     SubprocOutcome,
@@ -62,8 +63,8 @@ LOCK = ".harness-run.lock"
 AMBIENT_ENV = ("OPENCODE_DB", "KILO_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME", "CLINE_TOOL_APPROVAL_MODE")
 #: Spec fields where JSON `null` is a real value rather than "not provided".
 NULLABLE_SPEC_FIELDS = {"timeoutSeconds", "inactivityTimeoutSeconds", "stdin"}
-NATIVE_OPTION_TYPES = {"claude-code": ClaudeCodeOptions, "codex": CodexOptions, "cline": ClineOptions}
-NATIVE_OPTION_NAMES = {"autoApprove": "auto_approve"}
+NATIVE_OPTION_TYPES = {"claude-code": ClaudeCodeOptions, "codex": CodexOptions, "cline": ClineOptions, "copilot": CopilotOptions}
+NATIVE_OPTION_NAMES = {"autoApprove": "auto_approve", "allowTools": "allow_tools", "denyTools": "deny_tools"}
 
 
 def _substitute(value, mapping: dict[str, str]):
@@ -96,10 +97,18 @@ def _load_fixture(case_id: str, root: Path, workdir: Path) -> dict:
     return _substitute(fixture, {"<workdir>": str(workdir), "<root>": str(root)})
 
 
-def _native_options(raw: dict) -> object:
-    """Fixture `nativeOptions` object → the typed dataclass its `kind` names."""
+def _native_options(raw: object):
+    """Fixture `nativeOptions` → the typed dataclass for its `kind`. Values pass
+    through untouched so the adapter's validator sees exactly the fixture's
+    collection and member types; an unknown key is `invalid-options`, as a
+    caller constructing the dataclass would find out."""
+    if not isinstance(raw, dict) or raw.get("kind") not in NATIVE_OPTION_TYPES:
+        return raw
     fields = {NATIVE_OPTION_NAMES.get(key, key): value for key, value in raw.items() if key != "kind"}
-    return NATIVE_OPTION_TYPES[raw["kind"]](**fields)
+    try:
+        return NATIVE_OPTION_TYPES[raw["kind"]](**fields)
+    except TypeError as exc:
+        raise HarnessError(f"nativeOptions {raw!r}: {exc}", code="invalid-options") from None
 
 
 def _make_spec(raw: dict, workdir: Path, **overrides) -> RunSpec:
@@ -111,7 +120,7 @@ def _make_spec(raw: dict, workdir: Path, **overrides) -> RunSpec:
     # A variant can only override base keys, so `null` stands in for "not
     # provided" except where the contract gives null a meaning of its own.
     fields = {names.get(key, key): value for key, value in raw.items() if value is not None or key in NULLABLE_SPEC_FIELDS}
-    if isinstance(fields.get("native_options"), dict):
+    if "native_options" in fields:
         fields["native_options"] = _native_options(fields["native_options"])
     fields["workdir"] = workdir
     fields["env"] = dict(raw.get("env", {}))
@@ -252,7 +261,7 @@ def test_capabilities_match_fixture(case: dict, tmp_path: Path):
     else:
         rejects("unsupported-capability", config_file=config_file)
 
-    for options in (ClaudeCodeOptions(), CodexOptions(), ClineOptions()):
+    for options in (ClaudeCodeOptions(), CodexOptions(), ClineOptions(), CopilotOptions()):
         if options.kind != caps["nativeOptions"]:
             rejects("invalid-options", native_options=options)
 

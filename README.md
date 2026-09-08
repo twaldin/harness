@@ -2,7 +2,7 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `copilot` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -48,11 +48,12 @@ or `harness run --permission-policy bypass` only when that authority is intended
 Codex bypass also disables sandboxing. Unsupported bypass requests fail; no
 tool is silently escalated. Existing upstream config and environment still apply.
 
-The execution backend defaults to `"cli"`. Selecting `"rpc"` or `"sdk"` is an
-explicit unsupported-backend error today, never a fallback to another path.
-`get_capabilities("codex")` / `getCapabilities('codex')` reports support without
-probing installation or auth. Typed native options cover Claude Code effort
-and Codex sandbox selection:
+The one-shot execution backend defaults to `"cli"`. Selecting `"rpc"` or `"sdk"`
+in `RunSpec` is an explicit unsupported-backend error, never a fallback.
+Controlled Pi RPC uses the separate [session API](#controlled-pi-rpc-sessions).
+`get_capabilities("codex")` / `getCapabilities('codex')` reports one-shot support
+without probing installation or auth. Typed native options cover Claude Code
+effort and Codex sandbox selection:
 
 ```python
 from harness import CodexOptions, RunSpec, build_command
@@ -74,7 +75,7 @@ const command = buildCommand({
 
 Combining a selected Codex sandbox with bypass is an error. See
 [SPEC](SPEC.md#permission-policy-and-migration) for migration, supported mappings,
-ownership, errors, telemetry and future SDK/session requirements. These APIs
+ownership, errors, telemetry and session/backend requirements. These APIs
 describe the source tree; published packages are not updated by a documentation
 or implementation merge.
 
@@ -108,6 +109,64 @@ See [streaming, stdin and output limits](SPEC.md#streaming-stdin-and-output-limi
 for capture controls, callback restrictions, interrupted delivery and migration.
 The [ownership contract](SPEC.md#ownership-and-execution) defines cleanup and OS support.
 
+### Controlled Pi RPC sessions
+
+The asynchronous session API supports the Pi 0.85.1 RPC protocol in both
+languages. Select an installed `@earendil-works/pi-coding-agent` executable and
+your native model/config explicitly. It does not install tools or authenticate
+providers. OMP RPC and other adapters are not silently treated as Pi.
+
+```python
+import asyncio
+from harness import SessionSpec, open_session
+
+async def main():
+    session = await open_session(SessionSpec(
+        harness="pi", backend="rpc", workdir="/tmp/scratch",
+        model="openai-codex/gpt-5.4",
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            print(event.type, event.raw)
+        result = await turn.result
+        print(result.status, session.reference.session_id)
+        # Another start_turn after completion is a follow-up in this session.
+    finally:
+        await session.close()
+
+asyncio.run(main())
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+const session = await openSession({
+  harness: 'pi', backend: 'rpc', workdir: '/tmp/scratch',
+  model: 'openai-codex/gpt-5.4',
+})
+try {
+  const turn = session.startTurn('Review this repository without editing files.')
+  for await (const event of turn.events) console.log(event.type, event.raw)
+  const result = await turn.result
+  console.log(result.status, session.reference.sessionId)
+} finally {
+  await session.close()
+}
+```
+
+`interrupt()` aborts the active native turn without deleting the session.
+Resume passes an explicit `session.reference` to `SessionSpec.resume`; its
+native session file must exist and match both ID and workdir. Overlapping
+turns, queued steering and approval responses are unsupported. Native permission
+defaults remain authoritative; the example prompt is not a sandbox.
+
+Events are bounded and must be consumed; overflow fails explicitly rather than
+silently dropping events. Acknowledgement and intermediate `agent_end` events
+are not completion. See [the session contract](SPEC.md#controlled-rpc-sessions)
+for terminal statuses, deadlines, local-only extension limitations, ownership,
+and the distinction between offline conformance and native/provider smoke.
+
 ---
 
 ## Who should use this
@@ -134,7 +193,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all sixteen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all seventeen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 
@@ -360,7 +419,7 @@ Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md
 
 ## Status
 
-Sixteen adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
+Seventeen adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `copilot`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
 ### host Node version
 
@@ -409,6 +468,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 - `factory-droid` adapter pins `--model` and `--spec-model` to the same value for fairness.
 - `hermes` is a Python CLI (`hermes chat --cli --quiet --query=<prompt>`, upstream Python `>=3.11,<3.14`) installed by the [official installer](https://hermes-agent.nousresearch.com/docs/getting-started/installation/); it reports null tokens/cost, preserves stdout verbatim and exposes only `raw.session_id` from stderr. The library has no default model for it: omit `model` to use the upstream `config.yaml` selection, and pass `configHome` to select an existing `HERMES_HOME`. Optional Docker/SSH/Modal terminal backends are configured upstream by the caller.
 - `cline` uses the standalone npm `cline` CLI, not the VS Code extension or background hub. It selects the local runtime and SIGINT teardown, uses caller-selected provider/model settings, and parses terminal JSON usage. Upstream defaults to auto-approval; `ClineOptions(auto_approve=False)` / `{ kind: 'cline', autoApprove: false }` explicitly requires approval, which is denied with stdin closed. See [setup, capabilities and qualification limits](ADAPTER-MATRIX.md#cline).
+- `copilot` uses the current official `@github/copilot` CLI, not `gh copilot`. It preserves native model/auth selection and JSONL events, supports explicit `CopilotOptions` tool allow/deny rules, and leaves token/USD totals null. See [setup, subscription requirements and qualification limits](ADAPTER-MATRIX.md#copilot).
 
 Pending:
 - Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).

@@ -7,27 +7,52 @@ Alibaba Cloud does not embed pricing in the response.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec, SessionTelemetry
-from harness.model_normalization import normalize_model_for_harness
+from harness._subproc import SubprocOutcome, write_instructions
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    SessionTelemetry,
+)
 from harness.pricing import derive_cost
+from harness.util import last_non_empty_join
+
+_AUTH_RE = re.compile(r"Qwen OAuth|API Key", re.IGNORECASE)
+_AUTH_ACTION_RE = re.compile(r"Discontinued|switch", re.IGNORECASE)
+_PROMPT_RE = re.compile(r"Type your message|>\s*$|❯\s*$", re.IGNORECASE | re.MULTILINE)
+_RATE_LIMIT_RE = re.compile(r"rate.?limit|quota", re.IGNORECASE)
+_SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_WORKING_RE = re.compile(r"thinking|working", re.IGNORECASE)
 
 
 class QwenAdapter(Adapter):
     name = "qwen"
     instructions_filename = "QWEN.md"
+    permission_bypass_args = ("-y",)
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "@qwen-code/qwen-code"),
+        update_command=("npm", "install", "-g", "@qwen-code/qwen-code@latest"),
+        version_command=("qwen", "--version"),
+    )
 
     DEFAULT_MODEL = "qwen3-coder"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
-        args = ["-p", spec.prompt, "-y", "-m", model, "--output-format", "json"]
+        args = ["-p", spec.prompt, *resolved.permission_args, "-m", resolved.model, "--output-format", "json"]
         return BuildCommand(cmd="qwen", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, raw = _parse_qwen_stats(outcome.stdout)
         return {
             "cost_usd": None,
@@ -35,6 +60,31 @@ class QwenAdapter(Adapter):
             "tokens_out": tokens_out if raw is not None else None,
             "raw": raw,
         }
+
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        last30 = last_non_empty_join(pane, 30)
+        # Auth dialog (OAuth discontinued / API key prompt)
+        if _AUTH_RE.search(last30) and _AUTH_ACTION_RE.search(last30):
+            return "dialog"
+        if _PROMPT_RE.search(last30):
+            return "ready"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        # Auth dialog needs the user — None so the consumer surfaces it.
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        last10 = last_non_empty_join(pane, 10)
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _SPINNER_RE.search(last10) or _WORKING_RE.search(last10):
+            return "running"
+        if _PROMPT_RE.search(last10):
+            return "idle"
+        return "unknown"
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
         base = workdir.name
@@ -72,29 +122,6 @@ class QwenAdapter(Adapter):
         except json.JSONDecodeError:
             return SessionTelemetry(path, None, None, None, None, None)
 
-    def run(self, spec: RunSpec) -> RunResult:
-        bc = self.build_command(spec)
-        outcome = run_subprocess(
-            [bc.cmd] + bc.args,
-            cwd=bc.cwd,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env={**bc.env, **spec.env},
-        )
-        parsed = self.parse_output(spec, outcome)
-        return RunResult(
-            harness=self.name,
-            model=spec.model or self.DEFAULT_MODEL,
-            exit_code=outcome.exit_code,
-            duration_seconds=outcome.duration_seconds,
-            stdout=outcome.stdout,
-            stderr=outcome.stderr,
-            timed_out=outcome.timed_out,
-            cost_usd=parsed.get("cost_usd"),
-            tokens_in=parsed.get("tokens_in"),
-            tokens_out=parsed.get("tokens_out"),
-            raw=parsed.get("raw"),
-        )
-
 
 def _parse_qwen_stats_blob(blob: str) -> dict:
     """Extract token/cost/model from a qwen stats envelope (`stats.models[*]`).
@@ -107,7 +134,10 @@ def _parse_qwen_stats_blob(blob: str) -> dict:
         parsed = json.loads(blob)
     except json.JSONDecodeError:
         return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": None}
+    return _stats_from_parsed(parsed)
 
+
+def _stats_from_parsed(parsed: object) -> dict:
     if not isinstance(parsed, dict):
         return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": parsed}
 
@@ -170,14 +200,9 @@ def _parse_qwen_stats(stdout: str) -> tuple[int, int, list | dict | None]:
             continue
 
         if isinstance(parsed, dict):
-            models = (parsed.get("stats") or {}).get("models")
-            if not isinstance(models, dict):
+            stats = _stats_from_parsed(parsed)
+            if stats["tokens_in"] is None:
                 continue
-            tokens_in = tokens_out = 0
-            for stats in models.values():
-                t = (stats or {}).get("tokens") or {}
-                tokens_in += int(t.get("input") or 0)
-                tokens_out += int(t.get("candidates") or 0)
-            return tokens_in, tokens_out, parsed
+            return stats["tokens_in"], stats["tokens_out"], parsed
 
     return 0, 0, None

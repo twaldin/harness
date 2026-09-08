@@ -8,17 +8,25 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from harness import RunSpec, list_adapters, run
+from harness import HarnessError, RunSpec, list_adapters, run
+from harness.base import BACKENDS, PERMISSION_POLICIES
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="Invoke AI coding-agent CLIs uniformly.")
 console = Console(stderr=True)
 
 
+def _one_of(allowed: tuple[str, ...]):
+    def check(value: str) -> str:
+        if value not in allowed:
+            raise typer.BadParameter(f"expected one of: {', '.join(allowed)}")
+        return value
+
+    return check
+
+
 @app.command("list")
 def list_cmd() -> None:
     """List registered harness adapters."""
-    import harness.adapters  # noqa: F401 — side-effect import populates registry
-
     for name in list_adapters():
         typer.echo(name)
 
@@ -37,6 +45,18 @@ def run_cmd(
     ),
     timeout: int = typer.Option(1800, "--timeout", "-t", help="Wall-clock timeout in seconds."),
     model_no_resolve: bool = typer.Option(False, "--model-no-resolve", help="Pass --model through exactly as given; skip harness-specific normalization."),
+    backend: str = typer.Option(
+        "cli",
+        "--backend",
+        callback=_one_of(BACKENDS),
+        help="Execution backend. Only 'cli' is implemented; 'rpc'/'sdk' are rejected before anything runs.",
+    ),
+    permission_policy: str = typer.Option(
+        "upstream",
+        "--permission-policy",
+        callback=_one_of(PERMISSION_POLICIES),
+        help="'upstream' keeps the CLI's own permission prompts; 'bypass' injects the adapter's skip-permissions flag.",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit RunResult as JSON to stdout instead of human text."),
 ) -> None:
     """Invoke a harness on PROMPT and report the result."""
@@ -55,11 +75,17 @@ def run_cmd(
         instructions=instructions,
         timeout_seconds=timeout,
         model_no_resolve=model_no_resolve,
+        backend=backend,  # type: ignore[arg-type]  # validated by callback
+        permission_policy=permission_policy,  # type: ignore[arg-type]
     )
 
     resolve_mode = "raw" if model_no_resolve else "resolved"
-    console.print(f"[dim]running {harness} (model={model or 'default'}, {resolve_mode}) in {workdir} ...[/dim]")
-    result = run(spec)
+    console.print(f"[dim]running {harness} (model={model or 'default'}, {resolve_mode}, {backend}, permissions={permission_policy}) in {workdir} ...[/dim]")
+    try:
+        result = run(spec)
+    except HarnessError as exc:
+        console.print(f"[red]{exc.code}:[/red] {exc}")
+        raise typer.Exit(2) from exc
 
     if json_out:
         payload = {

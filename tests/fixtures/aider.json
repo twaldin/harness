@@ -21,7 +21,6 @@
       "openrouter/anthropic/claude-sonnet-4.6",
       "--message",
       "add type hints to utils.py",
-      "--yes-always",
       "--no-auto-commits",
       "--no-analytics",
       "--no-show-model-warnings"

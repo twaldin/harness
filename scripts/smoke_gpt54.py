@@ -9,7 +9,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from harness import RunSpec, run
+from harness import PermissionPolicy, RunSpec, run
 
 
 def _augment_path_with_nvm() -> None:
@@ -77,6 +77,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--keep-workdirs", action="store_true")
     p.add_argument("--json", action="store_true")
     p.add_argument("--model-no-resolve", action="store_true")
+    p.add_argument("--permission-policy", choices=["upstream", "bypass"], default="upstream",
+                   help="Preserve upstream defaults, or explicitly request the adapter's bypass flag")
     p.add_argument("--retries", type=int, default=1, help="Additional retries per harness for flaky provider/proxy errors")
     return p.parse_args()
 
@@ -98,7 +100,7 @@ def _binary_issue(harness: str) -> str | None:
     return None
 
 
-def _run_once(harness: str, model: str, timeout: int, keep_workdirs: bool, model_no_resolve: bool) -> dict:
+def _run_once(harness: str, model: str, timeout: int, keep_workdirs: bool, model_no_resolve: bool, permission_policy: PermissionPolicy = "upstream") -> dict:
     binary_issue = _binary_issue(harness)
     if binary_issue:
         return {
@@ -124,6 +126,7 @@ def _run_once(harness: str, model: str, timeout: int, keep_workdirs: bool, model
                 workdir=workdir,
                 timeout_seconds=timeout,
                 model_no_resolve=model_no_resolve,
+                permission_policy=permission_policy,
                 env=env,
             )
         )
@@ -152,10 +155,10 @@ def _run_once(harness: str, model: str, timeout: int, keep_workdirs: bool, model
     return payload
 
 
-def _run_one(harness: str, model: str, timeout: int, keep_workdirs: bool, model_no_resolve: bool, retries: int) -> dict:
+def _run_one(harness: str, model: str, timeout: int, keep_workdirs: bool, model_no_resolve: bool, retries: int, permission_policy: PermissionPolicy = "upstream") -> dict:
     last = None
     for attempt in range(retries + 1):
-        last = _run_once(harness, model, timeout, keep_workdirs, model_no_resolve)
+        last = _run_once(harness, model, timeout, keep_workdirs, model_no_resolve, permission_policy)
         if last["ok"]:
             return last
         if attempt < retries:
@@ -167,7 +170,7 @@ def _run_one(harness: str, model: str, timeout: int, keep_workdirs: bool, model_
 def main() -> None:
     args = _parse_args()
     harnesses = args.harnesses or DEFAULT_HARNESSES
-    rows = [_run_one(h, args.model, args.timeout, args.keep_workdirs, args.model_no_resolve, args.retries) for h in harnesses]
+    rows = [_run_one(h, args.model, args.timeout, args.keep_workdirs, args.model_no_resolve, args.retries, args.permission_policy) for h in harnesses]
 
     if args.json:
         print(json.dumps(rows, indent=2))

@@ -7,27 +7,34 @@
 - send keys to approve dialogs / submit prompts
 - persist session state across reboots
 
-## Why flt does NOT use harness directly
+## Current integration boundary
 
-`harness` is a one-shot model: spawn → wait → capture output → exit. flt's agents stay alive across many user interactions. The per-CLI knowledge in flt is mostly tmux + interactive-session lifecycle, not subprocess invocation.
+Harness's shipped execution API is one-shot: spawn → wait → capture output →
+exit. flt owns persistent tmux sessions and their lifecycle. Harness also
+exposes optional per-adapter pane classifiers, submit/launch metadata, and
+session-log readers; these helpers do not own a process or form a live session.
 
-Forcing flt onto `harness` would either:
+The [shared contract](../../SPEC.md) defines gates for future controlled CLI,
+RPC, or SDK sessions. Those implementations are not shipped here. Fleet
+scheduling, UI, persistence, and migration of flt remain consumer work.
 
-1. bloat harness with interactive-session support (mission creep, blurs the abstraction), or
-2. create a leaky abstraction where flt ignores most of harness's API.
+## What flt can reuse now
 
-Better to keep them as siblings sharing knowledge informally.
+- **Output parsers** — Python `parse_output` or TypeScript `parseOutput` for
+  captured one-shot output; optional adapter-specific readers for native logs.
+- **Pane knowledge** — optional `classify_pane` / `classifyPane` and launch
+  metadata, while flt retains tmux/process ownership.
+- **Adapter discovery** — `harness list` enumerates registered CLI adapters.
+  `get_capabilities` / `getCapabilities` reports implemented policy, not whether
+  a binary is installed or authenticated.
 
-## What flt CAN reuse
-
-- **Per-harness env setup** (Vertex tokens, GCloud, OpenAI proxy) — same logic, can be a shared `harness.env` helper imported by both Python (harness) and shelled out from TS (flt).
-- **Output parsers** — when flt eventually wants to surface tokens/cost in its TUI, it can call `harness run --json` for a one-shot version detection / quick-test, or shell out to a `harness parse-output` CLI per-harness.
-- **Adapter discovery** — `harness list` enumerates supported CLIs; flt's `--cli` flag could validate against this.
+One-shot probes can consume provider quota and inherit upstream permission
+policy. They are not installation-only checks.
 
 ## Sketch: flt shelling out for one-shot tests
 
 ```typescript
-// src/cli/test-adapter.ts — verify a CLI is installed before spawning persistent agent
+// src/cli/test-adapter.ts — one-shot provider probe, not a binary-only check
 import { execaSync } from 'execa'
 
 export function quickTestAdapter(harness: string, model: string): boolean {
@@ -51,4 +58,5 @@ export function quickTestAdapter(harness: string, model: string): boolean {
 
 ## Status
 
-flt continues to maintain its own TS adapters. harness consultations are for one-shot operations only.
+This remains a consumer-integration sketch, not evidence of a completed flt
+migration. No flt worktree or lifecycle code changes as part of this contract.

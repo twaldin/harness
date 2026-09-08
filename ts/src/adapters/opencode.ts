@@ -5,7 +5,7 @@ import { homedir } from 'os'
 import { existsSync } from 'fs'
 import { resolve, basename } from 'path'
 import { createRequire } from 'module'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 
@@ -117,7 +117,7 @@ const openCodeAdapter: Adapter = {
   scrollOwnership: 'app',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     return {
       cmd: 'opencode',

@@ -7,21 +7,54 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec, ScrollKeys, SessionTelemetry
-from harness.model_normalization import normalize_model_for_harness
+from harness._subproc import SubprocOutcome, write_instructions
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    ScrollKeys,
+    SessionTelemetry,
+)
 from harness.pricing import derive_cost
+from harness.util import last_non_empty_join, strip_ansi
 
 
 _CLAUDE_CODE_FULLSCREEN_SCROLL_KEYS = ScrollKeys(line_down="C-M-e", line_up="C-M-y", page_down="NPage", page_up="PPage")
+
+_PROMPT_LINE_RE = re.compile(r"^\s*[>❯]\s*$")
+_BYPASS_RE = re.compile(r"bypass.?permissions", re.IGNORECASE)
+_ACCEPT_RE = re.compile(r"Yes, I accept", re.IGNORECASE)
+_TRUST_RE = re.compile(r"trust this folder|Do you trust the files", re.IGNORECASE)
+_UPDATE_RE = re.compile(r"Update available", re.IGNORECASE)
+_RATE_LIMIT_RE = re.compile(r"rate.?limit|hit your limit", re.IGNORECASE)
+_TIMER_RE = re.compile(r"\((?:\d+m\s+)?\d+s[\s·)]")
+_STATUS_BAR_RE = re.compile(r"bypass permissions|Claude Code", re.IGNORECASE)
+
+
+def _has_prompt_line(pane: str) -> bool:
+    return any(_PROMPT_LINE_RE.match(line.strip()) for line in strip_ansi(pane).split("\n"))
 
 
 class ClaudeCodeAdapter(Adapter):
     name = "claude-code"
     instructions_filename = "CLAUDE.md"
     scroll_ownership = "fullscreen-aware"
+    permission_bypass_args = ("--dangerously-skip-permissions",)
+    native_options_kind = "claude-code"
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "@anthropic-ai/claude-code"),
+        update_command=("npm", "install", "-g", "@anthropic-ai/claude-code@latest"),
+        version_command=("claude", "--version"),
+    )
 
     DEFAULT_MODEL = "sonnet"
 
@@ -35,19 +68,22 @@ class ClaudeCodeAdapter(Adapter):
         return _CLAUDE_CODE_FULLSCREEN_SCROLL_KEYS if _read_claude_code_tui_mode() == "fullscreen" else None
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = [
             "-p", spec.prompt,
-            "--model", model,
+            "--model", resolved.model,
+            *resolved.native_args,
             "--output-format", "json",
-            "--dangerously-skip-permissions",
+            *resolved.permission_args,
         ]
+        # -p mode does not auto-walk workdir for CLAUDE.md; inject explicitly so
+        # the instructions are always visible to the model.
         if spec.instructions:
             args += ["--append-system-prompt", spec.instructions]
         return BuildCommand(cmd="claude", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw: dict | None = None
         if outcome.stdout.strip():
             try:
@@ -64,6 +100,47 @@ class ClaudeCodeAdapter(Adapter):
 
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": raw}
 
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        last20 = last_non_empty_join(pane, 20)
+        if _has_prompt_line(pane) and _STATUS_BAR_RE.search(strip_ansi(pane)):
+            return "ready"
+        if _BYPASS_RE.search(last20) and _ACCEPT_RE.search(last20):
+            return "dialog"
+        if _TRUST_RE.search(last20):
+            return "dialog"
+        if _UPDATE_RE.search(last20) and "?" in last20:
+            return "dialog"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        text = strip_ansi(pane)
+        if _BYPASS_RE.search(text) and _ACCEPT_RE.search(text):
+            return ["2", "Enter"]
+        if _TRUST_RE.search(text):
+            return ["Enter"]
+        # Decline updates mid-run; an explicit update command is the install path.
+        if _UPDATE_RE.search(text):
+            return ["Escape"]
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        last10 = last_non_empty_join(pane, 10)
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _UPDATE_RE.search(last10) and "?" in last10:
+            return "dialog"
+        # claude-code shows "(Xs · ↑M ↓N)" or "·X tokens·" while running
+        if _TIMER_RE.search(last10):
+            return "running"
+        # Idle: prompt visible without timer
+        if _has_prompt_line(pane):
+            return "idle"
+        return "unknown"
+
+    # ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+    # Encoding: realpath(workdir) → replace both '/' and '_' with '-'.
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
         home = Path.home()
         try:
@@ -114,6 +191,8 @@ class ClaudeCodeAdapter(Adapter):
                 if isinstance(event_cost, (int, float)):
                     saw_cost = True
                     cost_usd += float(event_cost)
+                # Skip claude-code's "<synthetic>" placeholder — an autoresponder /
+                # interrupt turn, not a real model invocation.
                 if model_name is None and isinstance(msg.get("model"), str) and msg.get("model") != "<synthetic>":
                     model_name = msg.get("model")
         except OSError:
@@ -123,29 +202,6 @@ class ClaudeCodeAdapter(Adapter):
         final_out = tokens_out if saw_usage else None
         final_cost = cost_usd if saw_cost else derive_cost(model_name, final_in, final_out)
         return SessionTelemetry(path, final_in, final_out, final_cost, model_name, None)
-
-    def run(self, spec: RunSpec) -> RunResult:
-        bc = self.build_command(spec)
-        outcome = run_subprocess(
-            [bc.cmd] + bc.args,
-            cwd=bc.cwd,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env={**bc.env, **spec.env},
-        )
-        parsed = self.parse_output(spec, outcome)
-        return RunResult(
-            harness=self.name,
-            model=spec.model or self.DEFAULT_MODEL,
-            exit_code=outcome.exit_code,
-            duration_seconds=outcome.duration_seconds,
-            stdout=outcome.stdout,
-            stderr=outcome.stderr,
-            timed_out=outcome.timed_out,
-            cost_usd=parsed.get("cost_usd"),
-            tokens_in=parsed.get("tokens_in"),
-            tokens_out=parsed.get("tokens_out"),
-            raw=parsed.get("raw"),
-        )
 
 
 def _read_claude_code_tui_mode() -> str | None:

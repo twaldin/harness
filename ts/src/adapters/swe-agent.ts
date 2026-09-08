@@ -1,10 +1,9 @@
 import { register } from '../registry.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
-import { HarnessError } from '../base.js'
+import { HarnessError, validateRunSpec } from '../base.js'
 import { homedir } from 'os'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { resolve, join } from 'path'
-import { normalizeModelForHarness } from '../model-normalization.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 
@@ -79,7 +78,7 @@ const sweAgentAdapter: Adapter = {
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model } = validateRunSpec(this, spec)
     const wrapper = resolveWrapper(spec.env)
 
     const trajDir = `${spec.workdir}/.harness`

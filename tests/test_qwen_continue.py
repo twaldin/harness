@@ -26,7 +26,7 @@ def test_qwen_build_command(tmp_path):
     spec = RunSpec(harness="qwen", prompt="refactor this", workdir=tmp_path, model="qwen3-coder")
     bc = QwenAdapter().build_command(spec)
     assert bc.cmd == "qwen"
-    assert bc.args == ["-p", "refactor this", "-y", "-m", "qwen3-coder", "--output-format", "json"]
+    assert bc.args == ["-p", "refactor this", "-m", "qwen3-coder", "--output-format", "json"]
     assert bc.env == {}
 
 
@@ -38,7 +38,7 @@ def test_qwen_build_command_default_model(tmp_path):
 
 
 def test_qwen_writes_instructions_file(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness.adapters.qwen.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     spec = RunSpec(harness="qwen", prompt="x", workdir=tmp_path, instructions="be terse")
     QwenAdapter().run(spec)
     assert (tmp_path / "QWEN.md").read_text() == "be terse"
@@ -49,7 +49,7 @@ def test_qwen_parses_result_array(tmp_path, monkeypatch):
         {"type": "assistant", "content": "ok"},
         {"type": "result", "usage": {"input_tokens": 500, "output_tokens": 120}},
     ]
-    monkeypatch.setattr("harness.adapters.qwen.run_subprocess", lambda *a, **kw: _stub(stdout=json.dumps(payload)))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=json.dumps(payload)))
     result = QwenAdapter().run(RunSpec(harness="qwen", prompt="x", workdir=tmp_path))
     assert result.tokens_in == 500
     assert result.tokens_out == 120
@@ -60,7 +60,7 @@ def test_qwen_parses_result_array(tmp_path, monkeypatch):
 def test_qwen_falls_back_to_per_line_json(tmp_path, monkeypatch):
     embedded = json.dumps([{"type": "result", "usage": {"input_tokens": 30, "output_tokens": 10}}])
     stdout = f"preamble\n{embedded}\ntrailing"
-    monkeypatch.setattr("harness.adapters.qwen.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
     result = QwenAdapter().run(RunSpec(harness="qwen", prompt="x", workdir=tmp_path))
     assert result.tokens_in == 30
     assert result.tokens_out == 10
@@ -68,7 +68,7 @@ def test_qwen_falls_back_to_per_line_json(tmp_path, monkeypatch):
 
 def test_qwen_no_stats_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "harness.adapters.qwen.run_subprocess", lambda *a, **kw: _stub(stdout='{"response":"hi"}')
+        "harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout='{"response":"hi"}')
     )
     result = QwenAdapter().run(RunSpec(harness="qwen", prompt="x", workdir=tmp_path))
     assert result.tokens_in is None
@@ -77,7 +77,7 @@ def test_qwen_no_stats_returns_none(tmp_path, monkeypatch):
 
 
 def test_qwen_propagates_exit_code(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness.adapters.qwen.run_subprocess", lambda *a, **kw: _stub(exit_code=1, stderr="err"))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(exit_code=1, stderr="err"))
     result = QwenAdapter().run(RunSpec(harness="qwen", prompt="x", workdir=tmp_path))
     assert not result.ok
     assert result.exit_code == 1
@@ -102,7 +102,7 @@ def test_continue_build_command_default_model(tmp_path):
 
 
 def test_continue_writes_instructions_file(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness.adapters.continue_cli.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path, instructions="keep it brief")
     ContinueCliAdapter().run(spec)
     assert (tmp_path / "CONTINUE.md").read_text() == "keep it brief"
@@ -116,7 +116,7 @@ def test_continue_parses_json_envelope(tmp_path, monkeypatch):
         "total_cost_usd": 0.0187,
     }
     monkeypatch.setattr(
-        "harness.adapters.continue_cli.run_subprocess",
+        "harness._subproc.run_subprocess",
         lambda *a, **kw: _stub(stdout=json.dumps(envelope)),
     )
     result = ContinueCliAdapter().run(RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path))
@@ -128,7 +128,7 @@ def test_continue_parses_json_envelope(tmp_path, monkeypatch):
 
 def test_continue_handles_garbage_stdout(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "harness.adapters.continue_cli.run_subprocess", lambda *a, **kw: _stub(stdout="not json")
+        "harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout="not json")
     )
     result = ContinueCliAdapter().run(RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path))
     assert result.raw is None
@@ -138,7 +138,7 @@ def test_continue_handles_garbage_stdout(tmp_path, monkeypatch):
 
 def test_continue_propagates_exit_code(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "harness.adapters.continue_cli.run_subprocess", lambda *a, **kw: _stub(exit_code=2, stderr="boom")
+        "harness._subproc.run_subprocess", lambda *a, **kw: _stub(exit_code=2, stderr="boom")
     )
     result = ContinueCliAdapter().run(RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path))
     assert not result.ok

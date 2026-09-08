@@ -2,7 +2,7 @@
 
 Per-CLI reference for current command construction, instruction files and token/cost parsing. [SPEC.md](SPEC.md) defines the shared contract; [fixture coverage notes](SPEC.md#json-fixture-driven-verification) describe what the two suites actually assert.
 
-Audited against the Python and TypeScript source on 2026-09-06. Sources: `src/harness/adapters/*.py` and `ts/src/adapters/*.ts`.
+The command/policy contract below is source-derived; the explicit native option flags were also checked against installed Claude Code 2.1.220 and Codex 0.153.4 help. This is not a full current-upstream qualification or provider smoke.
 
 ## Shipped versus planned
 
@@ -11,9 +11,8 @@ shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `crush`,
 `factory-droid`, `gemini`, `kilo`, `openclaude`, `opencode`, `pi`, `qwen`,
 `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
-Python registration requires importing `harness.adapters` (also done by
-build/parse/run dispatch); `import harness` alone leaves `list_adapters()` empty.
-TypeScript's package root imports its adapter modules.
+Both package roots initialize the built-in registry on import, so listing
+adapters no longer depends on a prior Python build/parse/run call.
 
 [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md) is the dated upstream candidate catalog:
 installation identities, headless feasibility, exclusions and deduplicated
@@ -28,24 +27,24 @@ The broader capability/API guide belongs to
 [TWA-88](https://linear.app/twaldin/issue/TWA-88); installed-package and
 real-provider validation belongs to
 [TWA-89](https://linear.app/twaldin/issue/TWA-89).
-Until those changes land, the source-derived commands and known language skew
-below describe the implementation, not promised upstream behavior.
+Until those changes land, the source-derived commands below describe the
+implementation, not promised upstream behavior.
 
 ## Session telemetry coverage
 
-TypeScript wires session-path and parsing hooks for 12 of 13 adapters; Python
-overrides both base methods for 7 of 13. "Wired" means the hooks exist, not
-that every log contains usage. Python's unwired adapters return base-class
-null results. This is current implementation skew, not a parity exemption.
+Both languages expose session-path and parsing hooks for the same 12 non-aider
+adapters. "Wired" means the hooks exist, not that every log contains usage or
+that discovery identifies a unique live session. No controlled-session backend
+is shipped; these are caller-driven artifact helpers.
 
 | adapter | TypeScript hooks | Python hooks | notes |
 |---|---|---|---|
 | claude-code | wired | wired | JSONL under `~/.claude/projects/<encoded>/` |
-| codex | wired | unwired | JSONL path + parser |
-| gemini | wired | unwired | `logs.json` path; interactive logs without usage return null metrics; stats blobs can supply usage |
-| opencode | wired | unwired | SQLite selector path |
-| swe-agent | wired | unwired | trajectory JSON |
-| pi | wired | unwired | JSONL event stream |
+| codex | wired | wired | JSONL path + parser |
+| gemini | wired | wired | `logs.json` path; interactive logs without usage return null metrics; stats blobs can supply usage |
+| opencode | wired | wired | SQLite selector path |
+| swe-agent | wired | wired | trajectory JSON |
+| pi | wired | wired | JSONL event stream |
 | continue-cli | wired | wired | probes `~/.continue/...` + `CONTINUE_SESSION_DIR` override |
 | crush | wired | wired | SQLite selector path |
 | factory-droid | wired | wired | probes `FACTORY_HOME` / `~/.factory/...` |
@@ -53,6 +52,36 @@ null results. This is current implementation skew, not a parity exemption.
 | qwen | wired | wired | `~/.qwen/tmp/<basename>/logs.json` (fallback `.gemini`); stats blobs can supply usage, other logs return null metrics |
 | kilo | wired | wired | SQLite selector path |
 | aider | unwired | unwired | no session-log hooks |
+
+## Backend and permission capabilities
+
+All thirteen currently implement `backend="cli"` only. `rpc` and `sdk` are
+explicitly unsupported, with no fallback. `get_capabilities` / `getCapabilities`
+reports implemented support without probing binaries or credentials. Streaming,
+cancellation and controlled sessions are false for the shipped CLI backend.
+Pure pane/install helpers exist for the same twelve non-aider adapters.
+
+The default permission policy is `upstream`: commands below omit approval/bypass
+flags. This preserves the selected upstream's policy, not a guarantee of
+sandboxing or an interactive approval channel. To intentionally regain the old
+auto-approval behavior, use `permission_policy="bypass"` /
+`permissionPolicy: "bypass"`. The mapping is:
+
+| adapters | explicit bypass addition |
+|---|---|
+| claude-code, openclaude | `--dangerously-skip-permissions` |
+| codex | `--dangerously-bypass-approvals-and-sandbox` |
+| factory-droid | `--skip-permissions-unsafe` |
+| gemini, qwen | `-y` |
+| aider | `--yes-always` |
+| kilo | `--auto` |
+| continue-cli, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
+
+Only Claude Code and Codex currently have typed native options:
+`ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
+`CodexOptions.sandbox` / `{kind: 'codex', sandbox}` adds `--sandbox`.
+Sandbox plus bypass is a conflict, not a precedence rule. See
+[SPEC permission migration](SPEC.md#permission-policy-and-migration).
 
 ---
 
@@ -104,7 +133,7 @@ Headless cost is null for codex, aider and qwen. Gemini estimates cost from toke
 - **CLI**: `claude`
 - **Instructions file**: `CLAUDE.md`
 - **Default model**: `sonnet`
-- **Command**: `claude -p <prompt> --model <model> --output-format json --dangerously-skip-permissions`; appends `--append-system-prompt <instructions>` when instructions are non-empty.
+- **Command**: `claude -p <prompt> --model <model> --output-format json`; appends `--append-system-prompt <instructions>` when instructions are non-empty.
 - **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
 - **Cost source**: JSON envelope → `total_cost_usd`
 - **Env**: none required
@@ -121,7 +150,7 @@ Headless cost is null for codex, aider and qwen. Gemini estimates cost from toke
 - **CLI**: `openclaude`
 - **Instructions file**: `CLAUDE.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `openclaude -p <prompt> --output-format json --dangerously-skip-permissions`; appends `--append-system-prompt <instructions>` when non-empty, then `--model <model>` unless OpenAI-compatible mode is selected.
+- **Command**: `openclaude -p <prompt> --output-format json`; appends `--append-system-prompt <instructions>` when non-empty, then `--model <model>` unless OpenAI-compatible mode is selected.
 - **OpenAI-compatible mode**: when `RunSpec.env` contains a non-empty `OPENAI_API_KEY` or `OPENAI_BASE_URL`, harness sets `CLAUDE_CODE_USE_OPENAI=1`, omits `--model`, and sets `OPENAI_MODEL=<model>` unless already in `RunSpec.env`. It does not add a `--provider` flag. Process environment alone does not select this branch.
 - **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
 - **Cost source**: JSON envelope → `total_cost_usd`
@@ -139,7 +168,7 @@ Headless cost is null for codex, aider and qwen. Gemini estimates cost from toke
 - **CLI**: `droid`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `droid exec --output-format json --skip-permissions-unsafe --model <model> --spec-model <model> <prompt>`; normalization turns the default into `custom:gpt-5.4`.
+- **Command**: `droid exec --output-format json --model <model> --spec-model <model> <prompt>`; normalization turns the default into `custom:gpt-5.4`.
 - **Token source**: JSON envelope on stdout → `usage.{input_tokens,output_tokens}` (fallbacks: `usage.{input,output}`)
 - **Cost source**: JSON envelope → `total_cost_usd` (fallbacks to `usage.cost[.total]`)
 - **Fairness**: harness pins `--model` and `--spec-model` to the same normalized model
@@ -151,7 +180,7 @@ Headless cost is null for codex, aider and qwen. Gemini estimates cost from toke
 - **CLI**: `codex`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.3-codex`
-- **Command**: `codex exec -m <model> --dangerously-bypass-approvals-and-sandbox --json -C <workdir> <prompt>`
+- **Command**: `codex exec -m <model> --json -C <workdir> <prompt>`
 - **Token source**: JSONL on stdout; sum `usage.{input_tokens, output_tokens}` across every `turn.completed` event
 - **Cost source**: not reported — always `null`
 - **Env**: none required
@@ -171,7 +200,7 @@ Headless cost is null for codex, aider and qwen. Gemini estimates cost from toke
 - **CLI**: `gemini`
 - **Instructions file**: `GEMINI.md`
 - **Default model**: `gemini-2.5-pro`
-- **Command**: `gemini -p <prompt> -y -m <model> --output-format json`
+- **Command**: `gemini -p <prompt> -m <model> --output-format json`
 - **Token source**: JSON envelope → iterate `stats.models[*].tokens.{input, candidates}` and sum
 - **Cost source**: estimated from token totals and the first model in `stats.models` using built-in pricing; null if pricing is unavailable.
 - **Env**: `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT` (consumer sets for free $300 credits; harness doesn't require them)
@@ -227,7 +256,7 @@ The parameter is `%<resolved-workdir-basename>%`. No matching message rows retur
 - **CLI**: `aider`
 - **Instructions file**: `.aider.conf.yml` (treated as YAML config, not free-form prompt — consumers who want system instructions should fold into `prompt`)
 - **Default model**: `openrouter/anthropic/claude-sonnet-4.6`
-- **Command**: `aider --config <workdir>/.agentelo-aider.yml --no-restore-chat-history --chat-history-file <workdir>/.agentelo-aider-chat.history.md --input-history-file <workdir>/.agentelo-aider-input.history --model <model> --message <prompt> --yes-always --no-auto-commits --no-analytics --no-show-model-warnings`
+- **Command**: `aider --config <workdir>/.agentelo-aider.yml --no-restore-chat-history --chat-history-file <workdir>/.agentelo-aider-chat.history.md --input-history-file <workdir>/.agentelo-aider-input.history --model <model> --message <prompt> --no-auto-commits --no-analytics --no-show-model-warnings`
 - **Side effect**: writes `<workdir>/.agentelo-aider.yml` with content `{}\n` before exec (empty config → pure CLI flags)
 - **Token source**: regex on combined stdout+stderr: `/Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i` — numeric `k` suffix → ×1000
 - **Cost source**: not reported by aider — always `null`
@@ -269,7 +298,7 @@ Tokens: 12.3k sent, 2,145 received
 - **CLI**: `qwen`
 - **Instructions file**: `QWEN.md`
 - **Default model**: `qwen3-coder`
-- **Command**: `qwen -p <prompt> -y -m <model> --output-format json`
+- **Command**: `qwen -p <prompt> -m <model> --output-format json`
 - **Token source**: JSON array on stdout → find last item with `type:'result'`, read `usage.{input_tokens, output_tokens}`
 - **Cost source**: not reported — always `null` (Alibaba Cloud pricing tracked externally via API key account)
 - **Env**: `QWEN_API_KEY` (consumer sets; harness does not require or inject it)
@@ -358,7 +387,7 @@ LIMIT 1
 - **CLI**: `kilo`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `kilo run --auto --format json --dir <workdir> --model <provider/model> <prompt>`
+- **Command**: `kilo run --format json --dir <workdir> --model <provider/model> <prompt>`
 - **Env defaults set by adapter**:
   - `KILO_DB=<workdir>/.harness/kilo/kilo.db`
   - `KILO_CONFIG_CONTENT={"model":"<provider/model>","small_model":"<provider/model>","default_agent":"build"}`

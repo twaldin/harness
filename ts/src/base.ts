@@ -1,3 +1,33 @@
+import { normalizeModelForHarness } from './model-normalization.js'
+
+/** Execution backend. Only `cli` is implemented; `rpc`/`sdk` are reserved and always rejected. */
+export type Backend = 'cli' | 'rpc' | 'sdk'
+
+/**
+ * `upstream` (default): inject no permission-bypass or auto-approve flags; the
+ * CLI's own defaults and user config decide. `bypass`: restore the adapter's
+ * documented bypass flag; adapters without one reject the request.
+ */
+export type PermissionPolicy = 'upstream' | 'bypass'
+
+export type ClaudeCodeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type CodexSandbox = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+export interface ClaudeCodeOptions {
+  kind: 'claude-code'
+  /** Emitted as `--effort <value>`. */
+  effort?: ClaudeCodeEffort
+}
+
+export interface CodexOptions {
+  kind: 'codex'
+  /** Emitted as `--sandbox <value>`. Conflicts with `permissionPolicy: 'bypass'`. */
+  sandbox?: CodexSandbox
+}
+
+/** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
+export type NativeOptions = ClaudeCodeOptions | CodexOptions
+
 export interface RunSpec {
   harness: string
   prompt: string
@@ -11,6 +41,11 @@ export interface RunSpec {
    * normalization. Escape hatch for odd provider/model combinations.
    */
   modelNoResolve?: boolean
+  /** Defaults to `cli`. */
+  backend?: Backend
+  /** Defaults to `upstream`. */
+  permissionPolicy?: PermissionPolicy
+  nativeOptions?: NativeOptions
 }
 
 export interface BuildCommand {
@@ -100,6 +135,18 @@ export interface Adapter {
   buildCommand(spec: RunSpec): BuildCommand
   parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutput
 
+  // ---- shared-contract capability declarations (optional) ----
+
+  /**
+   * argv the adapter injects when `spec.permissionPolicy === 'bypass'`.
+   * Absent means the CLI has no documented bypass mapping and an explicit
+   * `bypass` request is rejected with `unsupported-capability`.
+   */
+  permissionBypassArgs?: readonly string[]
+
+  /** Which `NativeOptions.kind` this adapter accepts. Absent means none. */
+  nativeOptionsKind?: NativeOptions['kind']
+
   // ---- session-aware (optional; fall back to flt's local impl when missing) ----
 
   /** Keystrokes to submit a message in this CLI's TUI. e.g. ['Enter'] or ['Escape','Enter']. */
@@ -151,9 +198,131 @@ export interface Adapter {
   installMeta?: InstallMeta
 }
 
+export type ErrorCode =
+  | 'adapter-error'
+  | 'unknown-harness'
+  | 'duplicate-adapter'
+  | 'unsupported-backend'
+  | 'unsupported-capability'
+  | 'invalid-options'
+
 export class HarnessError extends Error {
-  constructor(message: string) {
+  readonly code: ErrorCode
+
+  constructor(message: string, code: ErrorCode = 'adapter-error') {
     super(message)
     this.name = 'HarnessError'
+    this.code = code
   }
+}
+
+/** What a harness actually supports on a backend. Static; never probes installs or credentials. */
+export interface Capabilities {
+  backend: Backend
+  permissionPolicies: readonly PermissionPolicy[]
+  nativeOptions: NativeOptions['kind'] | null
+  streaming: boolean
+  cancellation: boolean
+  sessions: boolean
+}
+
+/** `RunSpec` after defaults and validation; what `buildCommand` consumes. */
+export interface ValidatedRunSpec {
+  backend: Backend
+  model: string
+  permissionPolicy: PermissionPolicy
+  /** argv to splice in at the adapter's bypass slot; empty under `upstream`. */
+  permissionArgs: readonly string[]
+  nativeOptions: NativeOptions | null
+}
+
+const KNOWN_BACKENDS: Readonly<Record<Backend, true>> = { cli: true, rpc: true, sdk: true }
+const KNOWN_PERMISSION_POLICIES: Readonly<Record<PermissionPolicy, true>> = { upstream: true, bypass: true }
+/** Per native-options kind: field name → allowed enum values. */
+const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Record<string, readonly string[]>>>> = {
+  'claude-code': { effort: ['low', 'medium', 'high', 'xhigh', 'max'] satisfies readonly ClaudeCodeEffort[] },
+  codex: { sandbox: ['read-only', 'workspace-write', 'danger-full-access'] satisfies readonly CodexSandbox[] },
+}
+
+/** Rejects every backend except the shipped `cli`. Shared by the validator and `getCapabilities`. */
+export function resolveBackend(backend: unknown): Backend {
+  if (backend === undefined) return 'cli'
+  if (typeof backend !== 'string' || !Object.hasOwn(KNOWN_BACKENDS, backend)) {
+    throw new HarnessError(`Unknown backend: ${JSON.stringify(backend)}. Expected one of: cli, rpc, sdk`, 'invalid-options')
+  }
+  if (backend !== 'cli') {
+    throw new HarnessError(`Backend "${backend}" is not implemented; only "cli" is available`, 'unsupported-backend')
+  }
+  return 'cli'
+}
+
+function resolveNativeOptions(adapter: Adapter, spec: RunSpec): NativeOptions | null {
+  // Runtime shape check: specs routinely arrive from JSON/JS callers.
+  const raw: unknown = spec.nativeOptions
+  if (raw === undefined) return null
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw) || !('kind' in raw) || typeof raw.kind !== 'string' || !Object.hasOwn(NATIVE_OPTION_FIELDS, raw.kind)) {
+    throw new HarnessError('nativeOptions must be an object with kind "claude-code" or "codex"', 'invalid-options')
+  }
+  const kind = raw.kind as NativeOptions['kind']
+  if (kind !== spec.harness || adapter.nativeOptionsKind !== kind) {
+    throw new HarnessError(`Harness "${adapter.name}" does not accept nativeOptions of kind "${kind}"`, 'invalid-options')
+  }
+  const fields = NATIVE_OPTION_FIELDS[kind]
+  for (const key of Object.keys(raw)) {
+    if (key !== 'kind' && !Object.hasOwn(fields, key)) {
+      throw new HarnessError(`Unknown nativeOptions field "${key}" for kind "${kind}"`, 'invalid-options')
+    }
+  }
+  for (const [key, allowed] of Object.entries(fields)) {
+    const value: unknown = Reflect.get(raw, key)
+    if (value === undefined) continue
+    if (typeof value !== 'string' || !allowed.includes(value)) {
+      throw new HarnessError(
+        `Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected one of: ${allowed.join(', ')}`,
+        'invalid-options',
+      )
+    }
+  }
+  return raw as NativeOptions
+}
+
+/**
+ * Apply defaults and validate a `RunSpec` against an adapter. Pure: no
+ * filesystem or process side effects, so callers can reject bad specs before
+ * writing instructions or config. Every shipped adapter calls this first
+ * thing in `buildCommand`; custom adapters called directly must do the same.
+ * Public registry entry points validate before dispatching to any adapter.
+ *
+ * Check order: backend, permission policy, native options, model.
+ */
+export function validateRunSpec(adapter: Adapter, spec: RunSpec): ValidatedRunSpec {
+  const backend = resolveBackend(spec.backend)
+
+  const policyRaw: unknown = spec.permissionPolicy
+  if (policyRaw !== undefined && (typeof policyRaw !== 'string' || !Object.hasOwn(KNOWN_PERMISSION_POLICIES, policyRaw))) {
+    throw new HarnessError(`Unknown permissionPolicy: ${JSON.stringify(policyRaw)}. Expected "upstream" or "bypass"`, 'invalid-options')
+  }
+  const permissionPolicy: PermissionPolicy = policyRaw === undefined ? 'upstream' : (policyRaw as PermissionPolicy)
+  let permissionArgs: readonly string[] = []
+  if (permissionPolicy === 'bypass') {
+    if (!adapter.permissionBypassArgs) {
+      throw new HarnessError(`Harness "${adapter.name}" has no permission bypass mapping`, 'unsupported-capability')
+    }
+    permissionArgs = adapter.permissionBypassArgs
+  }
+
+  const nativeOptions = resolveNativeOptions(adapter, spec)
+  if (nativeOptions?.kind === 'codex' && nativeOptions.sandbox !== undefined && permissionPolicy === 'bypass') {
+    throw new HarnessError(
+      'nativeOptions.sandbox conflicts with permissionPolicy "bypass" (codex bypass disables the sandbox); choose one',
+      'invalid-options',
+    )
+  }
+
+  // Empty string falls back to the default like undefined; whitespace is
+  // trimmed after selection by the normalizer (matches Python).
+  const model = normalizeModelForHarness(adapter.name, spec.model || adapter.defaultModel, { resolve: !spec.modelNoResolve })
+    ?? adapter.defaultModel
+
+  return { backend, model, permissionPolicy, permissionArgs, nativeOptions }
 }

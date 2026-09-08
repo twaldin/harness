@@ -1,5 +1,25 @@
 # Release notes
 
+## Unreleased — shared Python/TypeScript contract
+
+- **Intentional compatibility change:** omitted permission policy now preserves
+  upstream defaults. Callers that require the former automatic-approval flags
+  must explicitly select Python `permission_policy="bypass"`, TypeScript
+  `permissionPolicy: 'bypass'`, or CLI `--permission-policy bypass`. Unmapped
+  adapters reject bypass instead of silently ignoring it.
+- Added explicit backend selection and static capability queries. Only `cli`
+  executes; `rpc` and `sdk` fail with `unsupported-backend` before preparation
+  or process creation. This is not a live-session or SDK implementation.
+- Added typed Claude Code effort and Codex sandbox options, validated before
+  file writes. Codex sandbox and bypass cannot be combined.
+- Aligned eager registry initialization, collision errors, model selection,
+  root helper exports, and Python's optional pane/session-log helpers with
+  TypeScript. Removed duplicated Python one-shot execution methods.
+- Expanded [SPEC](SPEC.md) with ownership, future backend/session gates,
+  telemetry limits, and paired migration examples. Existing results remain
+  compatible; versions are unchanged and these source changes are not yet a
+  package release.
+
 ## 2026-05-06 (later)
 
 - Added per-adapter `getCurrentScrollKeys(): ScrollKeys | null` (TS) / `get_current_scroll_keys()` (Python). Returns the four chord keys (`lineDown`/`lineUp`/`pageDown`/`pageUp`) the consumer should forward right now, or `null` to fall through to tmux scrollback. Lets mode-aware CLIs surface the active routing instead of consumers sniffing tmux state.

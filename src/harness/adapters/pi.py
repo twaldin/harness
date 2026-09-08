@@ -18,50 +18,157 @@ https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/json.md
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
-from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec
-from harness.model_normalization import normalize_model_for_harness
+from harness._subproc import SubprocOutcome, write_instructions
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    SessionTelemetry,
+)
+from harness.pricing import derive_cost
+from harness.util import last_non_empty_join, strip_ansi
+
+# pi's idle prompt has a footer line with cost/token stats:
+# "↑39k ↓6.4k R84k $0.428 (sub) 14.7%/272k (auto)". The "(sub)" + cost
+# pattern is reliable and only renders when pi is at a usable prompt.
+_PI_IDLE_FOOTER_RE = re.compile(r"\$\d+\.\d+\s+\(sub\)")
+_SLASH_COMMAND_RE = re.compile(r"/[a-z][a-z0-9_-]*", re.IGNORECASE)
+_PI_WORDS_RE = re.compile(r"pi|model|provider", re.IGNORECASE)
+_PROMPT_LINE_RE = re.compile(r"^\s*[>❯]\s*$")
+_LOGIN_RE = re.compile(r"chatgpt plus|login|oauth|select a provider", re.IGNORECASE)
+_UPDATE_RE = re.compile(r"Update Available", re.IGNORECASE)
+_RATE_LIMIT_RE = re.compile(r"^.*rate.?limit", re.IGNORECASE | re.MULTILINE)
+_RETRY_RE = re.compile(r"retry|wait|seconds", re.IGNORECASE)
+_WORKING_RE = re.compile(r"[⠁-⣿]\s*Working\.\.\.", re.IGNORECASE)
 
 
 class PiAdapter(Adapter):
     name = "pi"
     instructions_filename = "AGENTS.md"
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "@mariozechner/pi-coding-agent"),
+        update_command=("npm", "install", "-g", "@mariozechner/pi-coding-agent@latest"),
+        version_command=("pi", "--version"),
+    )
 
     DEFAULT_MODEL = "sonnet"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
-        args = ["--mode", "json", "--no-session", "--model", model, spec.prompt]
+        args = ["--mode", "json", "--no-session", "--model", resolved.model, spec.prompt]
         return BuildCommand(cmd="pi", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, raw = _parse_pi_events(outcome.stdout)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": raw}
 
-    def run(self, spec: RunSpec) -> RunResult:
-        bc = self.build_command(spec)
-        outcome = run_subprocess(
-            [bc.cmd] + bc.args,
-            cwd=bc.cwd,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env={**bc.env, **spec.env},
-        )
-        parsed = self.parse_output(spec, outcome)
-        return RunResult(
-            harness=self.name,
-            model=spec.model or self.DEFAULT_MODEL,
-            exit_code=outcome.exit_code,
-            duration_seconds=outcome.duration_seconds,
-            stdout=outcome.stdout,
-            stderr=outcome.stderr,
-            timed_out=outcome.timed_out,
-            cost_usd=parsed.get("cost_usd"),
-            tokens_in=parsed.get("tokens_in"),
-            tokens_out=parsed.get("tokens_out"),
-            raw=parsed.get("raw"),
-        )
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        stripped = strip_ansi(pane)
+        last20 = last_non_empty_join(pane, 20)
+        # Idle-prompt footer is authoritative — present means pi is ready, regardless
+        # of whether an "Update Available" banner is also showing above it.
+        if _PI_IDLE_FOOTER_RE.search(stripped):
+            return "ready"
+        if _SLASH_COMMAND_RE.search(last20) and _PI_WORDS_RE.search(last20):
+            return "ready"
+        if any(_PROMPT_LINE_RE.match(line.strip()) for line in stripped.split("\n")):
+            return "ready"
+        if _LOGIN_RE.search(last20):
+            return "ready"
+        # Banner check is a last-resort fallback — only fires if no prompt is visible
+        # yet. handle_dialog returns None since the banner isn't dismissable.
+        if _UPDATE_RE.search(last20):
+            return "dialog"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        # pi's "Update Available" is a banner, not a blocking modal — no key
+        # dismisses it; the prompt is still usable below the banner.
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        # pi's UI is binary: when a model turn is in flight, the working banner
+        # contains a braille spinner glyph followed by 'Working...'. Pi prints
+        # model OUTPUT (test failures, error messages, stack traces) into the
+        # pane — those words MUST NOT influence status. Only the spinner counts.
+        last10 = last_non_empty_join(pane, 10)
+        # Rate-limit overlay is a specific status-bar message (not free-form text).
+        if _RATE_LIMIT_RE.search(last10) and _RETRY_RE.search(last10):
+            return "rate-limited"
+        if _WORKING_RE.search(last10):
+            return "running"
+        return "idle"
+
+    # ~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<sid>.jsonl
+    # Encoding: '-' + realpath(workdir).replace('/', '-') + '--'
+    # (TWO leading dashes, TWO trailing dashes; underscores preserved).
+    def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
+        try:
+            real = workdir.resolve()
+        except OSError:
+            real = workdir
+        encoded = "-" + str(real).replace("/", "-") + "--"
+        d = Path.home() / ".pi" / "agent" / "sessions" / encoded
+        if not d.exists() or not d.is_dir():
+            return None
+        try:
+            files = sorted((p for p in d.glob("*.jsonl") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            return None
+        return str(files[0]) if files else None
+
+    def parse_session_log(self, path: str) -> SessionTelemetry:
+        p = Path(path)
+        if not p.exists():
+            return SessionTelemetry(path, None, None, None, None, None)
+        tokens_in = tokens_out = 0
+        cost_usd = 0.0
+        model_name: str | None = None
+        saw_usage = saw_cost = False
+        try:
+            for line in p.read_text(encoding="utf-8").splitlines():
+                t = line.strip()
+                if not t.startswith("{"):
+                    continue
+                try:
+                    event = json.loads(t)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("type") == "model_change":
+                    m = event.get("modelId")
+                    if isinstance(m, str) and model_name is None:
+                        model_name = m
+                message = event.get("message") if isinstance(event.get("message"), dict) else {}
+                usage = message.get("usage")
+                if isinstance(usage, dict):
+                    saw_usage = True
+                    tokens_in += int(usage.get("input") or 0)
+                    tokens_out += int(usage.get("output") or 0)
+                    cost_obj = usage.get("cost")
+                    c = cost_obj.get("total") if isinstance(cost_obj, dict) else None
+                    if isinstance(c, (int, float)) and not isinstance(c, bool):
+                        saw_cost = True
+                        cost_usd += float(c)
+        except OSError:
+            return SessionTelemetry(path, None, None, None, None, None)
+        ti = tokens_in if saw_usage else None
+        to = tokens_out if saw_usage else None
+        cost = cost_usd if saw_cost else derive_cost(model_name, ti, to)
+        return SessionTelemetry(path, ti, to, cost, model_name, None)
 
 
 def _parse_pi_events(stdout: str) -> tuple[int | None, int | None, float | None, list | None]:

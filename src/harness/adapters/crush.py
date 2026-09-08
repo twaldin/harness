@@ -2,23 +2,51 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, write_instructions
-from harness.base import Adapter, BuildCommand, RunSpec, SessionTelemetry
-from harness.model_normalization import normalize_model_for_harness
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    SessionTelemetry,
+)
 from harness.pricing import derive_cost
+from harness.util import last_non_empty_join, strip_ansi
+
+_MODEL_PICKER_RE = re.compile(r"choose.*confirm", re.IGNORECASE)
+_ARROWS_RE = re.compile(r"↑/↓")
+_BRAND_RE = re.compile(r"Ready|Charm|Crush", re.IGNORECASE)
+_PROMPT_MARKER_RE = re.compile(r"\$|>|▎|❯")
+_RATE_LIMIT_RE = re.compile(r"rate.?limit", re.IGNORECASE)
+_SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_WORKING_RE = re.compile(r"thinking|working", re.IGNORECASE)
+_IDLE_RE = re.compile(r"Ready|>\s*$|❯\s*$")
 
 
 class CrushAdapter(Adapter):
     name = "crush"
     instructions_filename = "AGENTS.md"
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="brew",
+        install_command=("brew", "install", "charmbracelet/tap/crush"),
+        update_command=("brew", "upgrade", "crush"),
+        version_command=("crush", "--version"),
+        platforms=("darwin", "linux"),
+    )
 
     DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
+        model = resolved.model
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         data_dir = _crush_data_dir(Path(spec.workdir), spec.env)
@@ -37,9 +65,36 @@ class CrushAdapter(Adapter):
         ]
         return BuildCommand(cmd="crush", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, _model = _read_crush_session_totals(Path(spec.workdir), spec.env)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
+
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        last30 = last_non_empty_join(pane, 30)
+        # First-time setup: model picker shown
+        if _MODEL_PICKER_RE.search(last30) and _ARROWS_RE.search(last30):
+            return "dialog"
+        # Ready: prompt visible (crush uses ▎ or > marker) + model status bar
+        if _BRAND_RE.search(last30) and _PROMPT_MARKER_RE.search(last30):
+            return "ready"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        if _MODEL_PICKER_RE.search(strip_ansi(pane)):
+            return ["Enter"]  # accept the highlighted (default) model
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        last10 = last_non_empty_join(pane, 10)
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _SPINNER_RE.search(last10) or _WORKING_RE.search(last10):
+            return "running"
+        if _IDLE_RE.search(last10):
+            return "idle"
+        return "unknown"
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
         db_path = _crush_db_path(workdir, None)

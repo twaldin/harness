@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
 import { buildCommand, parseOutput } from '../src/registry.js'
 import '../src/adapters/index.js'
-import type { RunSpec, SubprocOutcome } from '../src/base.js'
+import type { Backend, NativeOptions, PermissionPolicy, RunSpec, SubprocOutcome } from '../src/base.js'
 
 const FIXTURES_DIR = join(import.meta.dir, '../../tests/fixtures')
 
@@ -15,6 +15,10 @@ interface FixtureSpec {
   instructions?: string
   timeoutSeconds?: number
   env?: Record<string, string>
+  modelNoResolve?: boolean
+  backend?: Backend
+  permissionPolicy?: PermissionPolicy
+  nativeOptions?: NativeOptions
 }
 
 interface FixtureExpectedCommand {
@@ -66,6 +70,10 @@ function fixtureSpecToRunSpec(f: FixtureSpec): RunSpec {
     instructions: f.instructions,
     timeoutSeconds: f.timeoutSeconds,
     env: f.env,
+    modelNoResolve: f.modelNoResolve,
+    backend: f.backend,
+    permissionPolicy: f.permissionPolicy,
+    nativeOptions: f.nativeOptions,
   }
 }
 

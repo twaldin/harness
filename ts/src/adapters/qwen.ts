@@ -1,7 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -48,13 +48,14 @@ const qwenAdapter: Adapter = {
   name: 'qwen',
   instructionsFilename: 'QWEN.md',
   defaultModel: 'qwen3-coder',
+  permissionBypassArgs: ['-y'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model, permissionArgs } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
     return {
       cmd: 'qwen',
-      args: ['-p', spec.prompt, '-y', '-m', model, '--output-format', 'json'],
+      args: ['-p', spec.prompt, ...permissionArgs, '-m', model, '--output-format', 'json'],
       cwd: spec.workdir,
       env: {},
       instructionsFile,

@@ -27,7 +27,7 @@ def test_claude_code_parses_json_envelope(tmp_path, monkeypatch):
         "total_cost_usd": 0.0123,
     }
     monkeypatch.setattr(
-        "harness.adapters.claude_code.run_subprocess",
+        "harness._subproc.run_subprocess",
         lambda *a, **kw: _stub_outcome(stdout=json.dumps(envelope)),
     )
     spec = RunSpec(harness="claude-code", prompt="fix", workdir=tmp_path, instructions="be terse")
@@ -42,7 +42,7 @@ def test_claude_code_parses_json_envelope(tmp_path, monkeypatch):
 
 def test_claude_code_handles_garbage_stdout(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "harness.adapters.claude_code.run_subprocess",
+        "harness._subproc.run_subprocess",
         lambda *a, **kw: _stub_outcome(stdout="not json"),
     )
     spec = RunSpec(harness="claude-code", prompt="x", workdir=tmp_path)
@@ -56,7 +56,7 @@ def test_claude_code_handles_garbage_stdout(tmp_path, monkeypatch):
 
 def test_claude_code_propagates_exit_code(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "harness.adapters.claude_code.run_subprocess",
+        "harness._subproc.run_subprocess",
         lambda *a, **kw: _stub_outcome(stderr="boom", exit_code=2),
     )
     spec = RunSpec(harness="claude-code", prompt="x", workdir=tmp_path)
@@ -68,7 +68,7 @@ def test_claude_code_propagates_exit_code(tmp_path, monkeypatch):
 def test_opencode_writes_instructions(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "no-such-db"))  # bypass DB query
     monkeypatch.setattr(
-        "harness.adapters.opencode.run_subprocess",
+        "harness._subproc.run_subprocess",
         lambda *a, **kw: _stub_outcome(),
     )
     spec = RunSpec(harness="opencode", prompt="x", workdir=tmp_path, instructions="rules")

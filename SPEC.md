@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). Consumers (hone, agentelo, flt) depend on cross-language parity. Current implementation differences are noted below and in [CLAUDE.md](CLAUDE.md#dual-language-parity-contract); the contract remains the parity target.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). The current implementation provides CLI command construction, one-shot execution, output parsing and optional externally hosted session helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) specify requirements for future RPC/SDK support; they are not shipped APIs.
 
 **Repo layout (monorepo):**
 ```
@@ -27,7 +27,7 @@ Version lockstep is the documented release requirement (see [Versioning](#versio
 
 ## Public API
 
-The core headless API is described here. The packages also expose instruction-projection, pricing and session helpers; their complete export surfaces differ. See `src/harness/__init__.py` and `ts/src/index.ts`.
+The core headless API is described here. Both package roots also expose adapters, subprocess outcomes, instruction-projection, pricing and optional pane/session helpers. Python uses snake_case and dataclasses/typed dictionaries; TypeScript uses camelCase and interfaces. Python's `RunResult.ok` convenience and keyword arguments for instruction projection remain language-specific conveniences, not different execution semantics.
 
 ### Types
 
@@ -41,7 +41,10 @@ interface RunSpec {
   instructions?: string            // content written to per-harness instructions file
   timeoutSeconds?: number          // default 1800
   env?: Record<string, string>     // extra env vars merged onto process.env
-  modelNoResolve?: boolean         // optional escape hatch: pass model through exactly as provided
+  modelNoResolve?: boolean         // skip harness-specific rewriting; whitespace is still trimmed
+  backend?: Backend               // default 'cli'; 'rpc' and 'sdk' explicitly unsupported today
+  permissionPolicy?: PermissionPolicy // default 'upstream'; never inject bypass by default
+  nativeOptions?: NativeOptions   // typed, agent-specific CLI options; mismatches are errors
 }
 
 // BuildCommand — what to invoke, without invoking it (for interactive consumers like flt)
@@ -71,11 +74,46 @@ interface RunResult {
 
 (Python equivalents are dataclasses with snake_case fields, such as `exit_code` and `cost_usd`; the TypeScript examples below use camelCase. The Python CLI's JSON output uses snake_case and omits `raw`.)
 
+```ts
+type Backend = 'cli' | 'rpc' | 'sdk'
+type PermissionPolicy = 'upstream' | 'bypass'
+interface ClaudeCodeOptions {
+  kind: 'claude-code'
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+}
+interface CodexOptions {
+  kind: 'codex'
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'
+}
+type NativeOptions = ClaudeCodeOptions | CodexOptions
+interface Capabilities {
+  backend: Backend
+  permissionPolicies: readonly PermissionPolicy[]
+  nativeOptions: 'claude-code' | 'codex' | null
+  streaming: boolean
+  cancellation: boolean
+  sessions: boolean
+}
+```
+
+Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
+`ClaudeCodeOptions` and `CodexOptions` with equivalent values. Construct native
+options as `ClaudeCodeOptions(effort="high")` or
+`CodexOptions(sandbox="read-only")`; their `kind` is fixed by the dataclass.
+Native options are a discriminated union, not an untyped bag passed to an
+arbitrary upstream. New variants land with a real implementation in both languages.
+
 ### Functions
 
 ```ts
 // List all registered adapter names.
 listAdapters(): string[]
+
+// Resolve an adapter without spawning or probing installed tools.
+getAdapter(name: string): Adapter
+
+// Report implemented support for the selected backend, not local availability.
+getCapabilities(name: string, backend?: Backend): Capabilities
 
 // Build the command WITHOUT executing. Writes the instructions file to workdir
 // as a side effect (consumers expect this — it's part of the "prepare workdir" step).
@@ -104,16 +142,131 @@ runAsync(spec: RunSpec): Promise<RunResult>  // py: async def run_async(spec) ->
 
 ### Errors
 
-Both raise `HarnessError` (py) / throw `HarnessError` (ts) on:
-- unknown harness name
-- adapter prerequisites missing (e.g. swe-agent wrapper not on disk)
+Both languages expose `HarnessError.code` (`ErrorCode`) independently of message
+wording:
 
-**Current registration skew:**
-- TypeScript throws `HarnessError` for any duplicate name.
-- Python raises `HarnessError` only when a different class uses an existing
-  name; registering the same class again is idempotent.
+| code | condition |
+|---|---|
+| `unknown-harness` | case-sensitive adapter lookup failed |
+| `duplicate-adapter` | a different implementation already owns that registry name |
+| `unsupported-backend` | a recognized backend is not implemented for the adapter |
+| `unsupported-capability` | the adapter cannot honor the requested capability, such as bypass |
+| `invalid-options` | invalid backend/policy/native options, mismatched native kind, or conflicting choices |
+| `adapter-error` | other adapter prerequisite error, including a missing swe-agent wrapper |
 
-Subprocess failures (non-zero exit, timeout) do NOT throw — they're reflected in RunResult.
+Selector/permission/native-option rejection happens before command construction
+writes instructions or config, and before any subprocess starts. A caller can
+catch `HarnessError` without parsing its message. Existing message-only
+construction retains `adapter-error`.
+
+Non-zero subprocess exit and timeout are represented in `RunResult`, not
+`HarnessError`. This is not a promise that every runtime failure is normalized:
+current spawn-error and cancellation limitations are described under
+[ownership and execution](#ownership-and-execution).
+
+### Backend selection and capabilities
+
+`harness` identifies the agent; `backend` identifies its execution integration.
+Omitted backend means CLI for existing callers. No preference order, dependency
+probe or failure path may silently change CLI into SDK/RPC, or vice versa.
+Selecting `rpc` or `sdk` currently raises `unsupported-backend` in both languages;
+importing Harness loads no optional SDK and does not initialize upstream settings.
+
+`getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
+native option kind `"codex"`, and `false` for streaming, cancellation and sessions.
+All thirteen CLI adapters report those three booleans as false. They describe
+Harness-controlled operations, not whether the underlying tool supports a
+protocol or writes session logs. Optional pane/log helper availability is
+separate from a controllable live session. Capability queries perform no
+installation/authentication/version checks; see the adapter matrix for evidence.
+
+### Permission policy and migration
+
+Omitted policy and `"upstream"` mean Harness adds no approval/bypass flag.
+Upstream policy still depends on the selected tool, its headless mode, caller
+environment and existing configuration. This does **not** promise a sandbox,
+an interactive approval channel, or denial of every tool call. An upstream
+may reject an operation when stdin is closed. Harness never responds to an
+approval request by silently escalating.
+
+`"bypass"` is an explicit request to use the adapter's documented bypass mapping:
+
+| adapter | explicit bypass flag |
+|---|---|
+| claude-code, openclaude | `--dangerously-skip-permissions` |
+| codex | `--dangerously-bypass-approvals-and-sandbox` (also disables sandboxing) |
+| factory-droid | `--skip-permissions-unsafe` |
+| gemini, qwen | `-y` |
+| aider | `--yes-always` |
+| kilo | `--auto` |
+
+The other five adapters reject `"bypass"` as unsupported; a missing mapping is
+not evidence that upstream has no permissions. Unsupported choices are never
+silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
+`--sandbox`, and cannot be combined with `"bypass"` because that would override
+the selected sandbox. Claude Code `effort` emits `--effort`; it is not a common
+model/effort policy for every tool.
+
+**Compatibility change:** older command builders inserted the eight mappings
+above unconditionally. Existing unattended callers that intentionally require
+that authority must set `permission_policy="bypass"` (Python) or
+`permissionPolicy: "bypass"` (TypeScript). Otherwise upstream defaults apply.
+The existing RunSpec/RunResult fields and entry points are retained; this is an
+intentional behavior change, not a claim of fully unchanged compatibility.
+Review the upstream risk before opting in, especially Codex's disabled sandbox.
+
+### Acceptance examples
+
+These build commands without a provider request. `/tmp/owned-checkout` denotes
+a caller-owned working directory. No instructions are supplied, so these two
+adapters do not write an instruction file.
+
+```python
+from pathlib import Path
+from harness import (
+    RunSpec, CodexOptions, HarnessError, build_command, get_capabilities,
+)
+
+spec = RunSpec(
+    harness="codex", prompt="Review this code", workdir=Path("/tmp/owned-checkout"),
+    backend="cli", native_options=CodexOptions(sandbox="read-only"),
+)
+command = build_command(spec)  # --sandbox read-only; no bypass flag
+assert "--dangerously-bypass-approvals-and-sandbox" not in command.args
+assert get_capabilities("codex").sessions is False
+try:
+    build_command(RunSpec(
+        harness="codex", prompt="Review", workdir=spec.workdir, backend="sdk",
+    ))
+except HarnessError as error:
+    assert error.code == "unsupported-backend"  # no CLI fallback or writes
+```
+
+```ts
+import { buildCommand, getCapabilities, HarnessError } from '@twaldin/harness-ts'
+
+const spec = {
+  harness: 'codex', prompt: 'Review this code', workdir: '/tmp/owned-checkout',
+  backend: 'cli' as const,
+  nativeOptions: { kind: 'codex' as const, sandbox: 'read-only' as const },
+}
+const command = buildCommand(spec) // --sandbox read-only; no bypass flag
+if (command.args.includes('--dangerously-bypass-approvals-and-sandbox')) {
+  throw new Error('unexpected bypass')
+}
+if (getCapabilities('codex').sessions) throw new Error('unexpected session support')
+try {
+  buildCommand({ ...spec, backend: 'sdk', nativeOptions: undefined })
+} catch (error) {
+  if (!(error instanceof HarnessError) || error.code !== 'unsupported-backend') throw error
+}
+```
+
+For intentional bypass, omit the conflicting sandbox options and set the
+permission policy explicitly. A native option kind for another adapter, invalid
+enum value, or unsupported bypass must fail before instruction-file side effects.
+Deterministic tests exercise those cases in both languages. They do not establish
+provider authentication, current upstream flag compatibility or successful model use.
 
 ---
 
@@ -340,7 +493,7 @@ Every adapter has a matching fixture at `tests/fixtures/<name>.json`:
   },
   "expectedCommand": {
     "cmd": "claude",
-    "args": ["-p", "fix the bug in main.py", "--model", "sonnet", "--output-format", "json", "--dangerously-skip-permissions", "--append-system-prompt", "You are a careful engineer.\n"],
+    "args": ["-p", "fix the bug in main.py", "--model", "sonnet", "--output-format", "json", "--append-system-prompt", "You are a careful engineer.\n"],
     "instructionsFile": "/tmp/harness-fixture/CLAUDE.md"
   },
   "sampleOutput": {
@@ -366,23 +519,189 @@ Fixtures support drift prevention for the cases actually asserted; they do not p
 
 ## Environment handling
 
-Adapters MAY set env vars (for example `OPENCODE_DB`, `KILO_DB`, `KILO_CONFIG_CONTENT`, `CLAUDE_CODE_USE_OPENAI`; `swe-agent` also reads `SWE_WRAPPER`). These go in `BuildCommand.env`. The caller merges `env` onto `process.env` at exec time.
+Adapters MAY set env vars (for example `KILO_DB`, `KILO_CONFIG_CONTENT`, `CLAUDE_CODE_USE_OPENAI`; `swe-agent` also reads `SWE_WRAPPER`). Execution merges process environment, then `BuildCommand.env`, then `RunSpec.env`: the caller's explicit values win. `buildCommand` returns adapter additions, not a full copy of the effective process environment.
 
-Adapters MUST NOT read env vars for USER secrets (API keys). Those are user-env responsibility. If an adapter needs an API key, it expects the caller to have set it (e.g. `ANTHROPIC_API_KEY`, `GOOGLE_CLOUD_PROJECT`).
+Credentials and account selection belong to the caller. Harness must not
+discover, copy or log secrets from unrelated configuration. Explicit `RunSpec.env`
+values pass to the child unchanged. Existing openclaude/continue-cli adapters
+also inspect caller-supplied OpenAI-compatible settings; continue-cli can write
+an API key into its generated workdir config. Treat that artifact as sensitive.
+This historical behavior is not a credential-isolation guarantee or permission
+to harvest credentials; full config/instruction isolation remains separately
+implementation-gated.
 
-Exception: `extraEnv` from RunSpec.env is always passed through unchanged.
+---
+
+## Ownership and execution
+
+A **run** is one prompt invocation ending in a `RunResult`. `run`/`runAsync`
+own the subprocess they start and collect its terminal output. `buildCommand`
+only prepares argv/env/cwd; its caller owns execution, timeout and teardown.
+`parseOutput` parses a caller-supplied outcome and may read upstream artifacts;
+it does not acquire process ownership.
+
+An upstream **session** is persistent conversation state, not a process ID,
+working directory or latest log file. Existing `sessionLogPath` and
+`parseSessionLog` helpers locate/read artifacts; they do not open, own, resume
+or cancel a session. Python `session_started_after` is Unix seconds and
+TypeScript `sessionStartedAfter` is Unix milliseconds, preserving their native
+time conventions. Pass the same instant after converting units. Not every
+adapter honors the cutoff; newest-file and basename-based database selectors
+are discovery heuristics, not proof of session ownership. Do not use them to
+attribute concurrent runs without an upstream session ID.
+
+Current execution behavior and limits:
+
+| concern | shipped behavior |
+|---|---|
+| sync execution | Python blocks; TypeScript `run()` returns a Promise but uses blocking `spawnSync` |
+| async execution | Python coroutine / TypeScript Promise; independent calls can run concurrently |
+| stdin | closed by the headless entry points; there is no prompt/approval input channel |
+| output | stdout/stderr captured separately until exit; no output callback or backpressure API |
+| timeout | default 1800 seconds; `exitCode=-1`, `timedOut=true`; partial output may be available |
+| process cleanup | Python and TS sync terminate the direct child; TS async kills its owned process group with SIGKILL |
+| cancellation | no supported cross-language cancellation handle; cancelling a Python task is not a process-cleanup guarantee |
+| launch failure | Python may raise an OS exception; TS sync may return `-1`; TS async lacks a spawn-error listener |
+| signal reporting | not normalized separately; TS sync can misclassify SIGTERM as timeout |
+| memory/decoding | TS sync has a 100 MiB buffer limit; async capture is unbounded and TS decodes per chunk |
+
+These are known limitations, not desired lifecycle guarantees. Lifecycle,
+streaming and conformance changes must land in both implementations before
+their capabilities become true. A timeout does not prove grandchildren died,
+a cancelled coroutine does not prove teardown, and a missing metric is not
+proof of a successful parse.
+
+The consumer owns workdir/worktree isolation, host drivers, auth selection and
+approval decisions. No code may change process-global cwd/env, discover or copy
+credentials, or install an SDK implicitly. Existing instruction writes overwrite
+the selected file; `run` does not automatically restore it. Projection helpers
+offer explicit backup/restore, not concurrency-safe ownership. Existing
+adapter-specific workdir config generation is documented in the matrix; it is
+not a guarantee of isolation from user config. Use caller-owned working
+directories and do not expose generated config, raw output or logs publicly.
+
+## Optional pane and telemetry helpers
+
+`getAdapter` exposes optional `submitKeys`, `flattenOnPaste`, `scrollOwnership`,
+`getCurrentScrollKeys`, `detectReady`, `detectStatus`, `handleDialog`,
+`sessionLogPath`, `parseSessionLog` and `installMeta` (snake_case in Python).
+These remain optional so a minimal third-party headless adapter need not pretend
+to implement live behavior. Check for a callable/non-null helper before use.
+Unsupported metadata is absent/`None`; it is not a fabricated ready state.
+Installation metadata only describes argv; Harness never runs it on import.
+
+`detectReady` returns `loading | dialog | ready`; `detectStatus` returns
+`running | idle | error | rate-limited | unknown | exited | dialog`.
+Pane matching is heuristic over caller-captured text, not authoritative
+protocol state. `handleDialog` returns suggested keystrokes or null; some
+suggestions approve permissions/trust. It never sends them. The caller must
+apply its permission policy rather than automatically sending every suggestion.
+
+`SessionTelemetry` contains `sessionLogPath`, `tokensIn`, `tokensOut`, `costUsd`,
+`model` and `raw`. Preserve these and the flat `RunResult` fields; do not add
+a redundant nested telemetry copy merely for symmetry. `RunResult.model`
+is the requested/default model, not proof of which model executed; normalization
+occurs in argv. An omitted or empty model selects the adapter default in both
+languages; whitespace is trimmed after default selection. Explicit
+`modelNoResolve` skips rewriting, not trimming.
+
+Null means unknown/unavailable, not zero. Zero is a legitimate reported value.
+Cost may be reported or estimated according to the adapter matrix; it is not
+necessarily the amount billed. CLI versus SDK, or headless versus interactive,
+does not identify a subscription/billing tier. Cache tokens and pricing need
+upstream-specific semantics; never apply historical multipliers universally.
+Raw payloads retain upstream details but are untrusted and may contain prompts,
+paths or secrets. No telemetry is transmitted by Harness. Upstream tools may
+have their own telemetry settings, which remain caller-controlled.
+
+## Backend and session implementation gates
+
+The following is the accepted contract for future implementations, **not
+exported session methods or enabled capabilities today**. It replaces the old
+SDK exclusion while keeping the common library small.
+
+- Backend selection is explicit and stable for a run/session. SDK dependencies
+  are optional and lazy; importing or selecting CLI must not load/configure an
+  SDK. A missing SDK/runtime is a prerequisite error, never CLI fallback.
+  A Python bridge must be named and qualified as a bridge, not represented as a
+  native Python SDK. Capability support must agree across languages or return
+  an explicit unsupported error.
+- A session handle owns only resources it created. Connecting to a caller-owned
+  server does not authorize killing it. Closing an owned transport cleans up
+  owned subscriptions/processes; it does not delete persisted upstream history.
+  Preserve native session identity, backend identity and working-directory
+  association. Resume requires an explicit native ID; “latest” is not resume.
+- Keep operations to starting a turn, observing events and its terminal result,
+  interrupting that turn, and closing the handle. Follow-up reuses the same
+  upstream session only when supported. Concurrent turns on one session must
+  either be explicitly supported with correlation or rejected, never mixed.
+  Request acknowledgements are not completed turns.
+- Events preserve order within their upstream stream and carry turn/request
+  correlation. Exactly one terminal outcome follows each accepted turn;
+  protocol failure, disconnect, cancellation, timeout, signal exit and non-zero
+  agent result are distinguishable. Unknown upstream event payloads stay
+  available through a typed backend-specific route, not silently discarded.
+- Interrupt stops the active turn without silently deleting the session;
+  close disposes owned transport resources. Cancellation/timeout must initiate
+  bounded graceful termination, escalate if necessary, drain or close pipes,
+  reap owned children and leave unrelated processes/servers untouched.
+  Callback failure follows the same cleanup path and retains its cause.
+- Streaming must define stdin EOF, stdout versus stderr, incremental UTF-8 and
+  JSONL decoding, backpressure and bounded capture with visible truncation.
+  Silence alone is not failure; an inactivity watchdog is opt-in.
+- Permissions preserve upstream defaults unless explicitly selected. An approval
+  channel is a separate capability from bypass/sandbox options; a transport
+  without one must not simulate approval or silently broaden authority.
+- Usage events declare whether counts are deltas or totals and how native IDs
+  prevent double counting. Reported cost, estimates and unavailable pricing
+  remain distinguishable; subscription billing cannot be inferred from backend.
+  Preserve upstream-specific options/events as typed variants alongside the
+  common contract, not an ever-growing universal option object.
+
+Acceptance for a backend includes matching deterministic Python/TypeScript
+scenarios for native identity, follow-up/resume, interrupt/dispose, protocol
+errors, partial output and unsupported operations. Actual provider smoke
+evidence is separate and records exact installed/runtime versions, auth
+prerequisites and unavailable cases. Fixture success alone is not support
+qualification. Fixtures/logs must be synthetic or redacted; no private prompts
+or credentials enter the public suite.
+
+Primary sources refreshed for this contract:
+[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview),
+[Claude CLI](https://code.claude.com/docs/en/cli-reference),
+[Codex SDK](https://developers.openai.com/codex/sdk),
+[Codex app-server](https://developers.openai.com/codex/app-server),
+[OpenCode SDK](https://opencode.ai/docs/sdk/),
+[OpenCode server](https://opencode.ai/docs/server/), and
+[Pi RPC](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md).
+Installed help was inspected for Claude Code 2.1.220 and Codex 0.153.4,
+including effort, sandbox and bypass options; this was not a provider smoke.
+
+### Reconciliation of the live-session proposals
+
+The three local May 13 `harness-live-{design,dogfood,use-cases-audit}.md`
+documents were proposals, not shipped contracts. Their originals are preserved.
+Retained decisions: one library across languages; per-agent command/pane/log
+knowledge; consumer-owned host/fleet/worktree lifecycle; explicit execution
+selection; existing RunSpec/RunResult callers; behavioral replay plus separate
+live evidence. Existing language skew is repaired before adding backends.
+
+Not adopted: mandatory bypass, billing-tier inference from headless/live mode,
+historical hard-coded cache prices, a mandatory thin Session facade, automatic
+OAuth proxy configuration, consumer/fleet migrations, staged single-language
+API PRs or source-text/member-count tests as parity proof. Streaming, controlled
+sessions and SDKs remain implementation-gated above, not hidden as shipped
+features behind no-op methods. No package release is implied by this contract.
 
 ---
 
 ## Registry behavior
 
-The registry contract is import-time registration of all shipped adapters, with the sorted list below. TypeScript implements it at the package entrypoint.
-
-**Current Python skew:** importing `harness` alone does not populate its registry.
-Import `harness.adapters` before calling `list_adapters()` or
-`harness.registry.get_adapter()` in a fresh process. The command-build, parse
-and run entrypoints import adapters lazily; TypeScript's package entrypoint
-registers them immediately.
+Both package roots register all shipped adapters on import. `import harness;
+harness.list_adapters()` and `import { listAdapters } from '@twaldin/harness-ts'`
+therefore expose the same built-ins without a prior run/build call.
+Registering the same class (Python) or object (TypeScript) again is idempotent;
+a different implementation under that name raises `duplicate-adapter`.
 
 ```
 ["aider", "claude-code", "codex", "continue-cli", "crush", "factory-droid", "gemini", "kilo", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
@@ -398,7 +717,7 @@ Adapter lookup is case-sensitive. `"Claude-Code"` → `HarnessError`.
 
 Explicit non-goals, to keep the library narrow:
 
-- tmux lifecycle, pane capture and polling — **the consumer's job**; TypeScript adapters expose optional pure pane-status/dialog helpers, but the consumer drives capture and sends any returned keystrokes
+- tmux lifecycle, pane capture and polling — **the consumer's job**; both languages expose optional pure pane-status/dialog helpers, but the consumer drives capture and decides whether to send any returned keystrokes
 - challenge seeding, grading, ELO — **agentelo's job**
 - prompt mutation, GEPA, training loops — **hone's job**
 - Vertex/OAuth proxy shims, regional routing — **agentelo's job** (context-specific, varies by billing arrangement)
@@ -406,11 +725,17 @@ Explicit non-goals, to keep the library narrow:
 
 Harness provides CLI command construction, output parsing and headless execution, plus instruction-projection, pricing and session helpers. It does not own the consumer's terminal lifecycle.
 
+Optional agent SDK/protocol integrations are now in scope for the library.
+This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
+consumer-owned host/fleet boundary. There is no SDK backend implemented yet;
+its dependency and behavior requirements are defined in the implementation gates above. A raw model API,
+fleet manager, Linear engine or application is not an agent backend.
+
 ---
 
 ## Compatibility guarantees
 
-- Field names in RunSpec/RunResult are STABLE. Adding fields is non-breaking; renaming/removing is a major version bump.
+- Field names in RunSpec/RunResult are STABLE. Optional field additions preserve call shape; they do not automatically preserve behavior. The explicit [permission migration](#permission-policy-and-migration) is an approved compatibility change. Renaming/removing fields requires a major version bump.
 - Adapter registration is STABLE — the shipped adapters always exist with the listed names.
 - Default models MAY change across minor versions. Consumers that pin should specify `spec.model` explicitly.
 - Command flag construction MAY change within a major version if the upstream CLI changes flags. Fixture updates go in the same PR.
@@ -425,3 +750,7 @@ Harness provides CLI command construction, output parsing and headless execution
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
 Current manifests record Python `0.3.4` and TypeScript `0.2.8`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+
+This source-tree contract change does not publish a package, create a release tag
+or change those versions. A separately authorized coordinated release must account
+for the permission-default compatibility change and existing version skew.

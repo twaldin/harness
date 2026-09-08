@@ -66,7 +66,7 @@ def test_opencode_sums_session_messages(tmp_path, monkeypatch, fake_opencode_db)
         ],
     )
 
-    monkeypatch.setattr("harness.adapters.opencode.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     result = OpenCodeAdapter().run(RunSpec(harness="opencode", prompt="x", workdir=workdir))
     assert result.tokens_in == 1500
     assert result.tokens_out == 450
@@ -82,7 +82,7 @@ def test_opencode_picks_most_recent_session_when_multiple_match(tmp_path, monkey
     _add_session(fake_opencode_db, "new", str(workdir), time_updated=200,
                  messages=['{"tokens":{"input":42,"output":7},"cost":0.001}'])
 
-    monkeypatch.setattr("harness.adapters.opencode.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     result = OpenCodeAdapter().run(RunSpec(harness="opencode", prompt="x", workdir=workdir))
     assert result.tokens_in == 42
     assert result.tokens_out == 7
@@ -92,7 +92,7 @@ def test_opencode_returns_none_when_no_matching_session(tmp_path, monkeypatch, f
     workdir = tmp_path / "no-such-dir"
     workdir.mkdir()
 
-    monkeypatch.setattr("harness.adapters.opencode.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     result = OpenCodeAdapter().run(RunSpec(harness="opencode", prompt="x", workdir=workdir))
     assert result.tokens_in is None
     assert result.cost_usd is None
@@ -100,6 +100,6 @@ def test_opencode_returns_none_when_no_matching_session(tmp_path, monkeypatch, f
 
 def test_opencode_returns_none_when_db_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "does-not-exist.db"))
-    monkeypatch.setattr("harness.adapters.opencode.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     result = OpenCodeAdapter().run(RunSpec(harness="opencode", prompt="x", workdir=tmp_path))
     assert result.tokens_in is None

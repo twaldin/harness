@@ -37,6 +37,14 @@ console.log(r.stdout.slice(0, 200))
 
 See [`examples/hello-world.ts`](examples/hello-world.ts) for a runnable file.
 
+Permission policy defaults to upstream behavior; Harness no longer injects
+approval/bypass flags automatically. Unattended callers intentionally requiring
+the former behavior must set `permissionPolicy: 'bypass'`. Codex bypass also
+disables sandboxing. Unsupported bypass fails rather than being ignored.
+Backend selection defaults to `cli`; selecting `rpc` or `sdk` currently throws
+`HarnessError` with `code === 'unsupported-backend'`, without CLI fallback.
+See the [shared migration and examples](../SPEC.md#permission-policy-and-migration).
+
 ## API reference
 
 ### `run(spec: RunSpec): Promise<RunResult>`
@@ -99,6 +107,23 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'kilo', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
+### `getCapabilities(name: string, backend?: Backend): Capabilities`
+
+Reports implemented support without loading optional SDKs or probing local
+installation/auth. All current adapters use CLI and report streaming,
+cancellation and controlled sessions as unsupported. Pure pane/session-log
+helpers are not controlled sessions. Native options are typed per agent:
+
+```typescript
+buildCommand({
+  harness: 'codex', prompt: 'Review the changes', workdir: '/tmp/repo',
+  nativeOptions: { kind: 'codex', sandbox: 'read-only' },
+})
+```
+
+Codex sandbox and bypass conflict. `ClaudeCodeOptions` instead exposes `effort`;
+a mismatched native option kind is an error, not a dropped option.
+
 ---
 
 ## Types
@@ -113,6 +138,9 @@ interface RunSpec {
   timeoutSeconds?: number    // default 1800
   env?: Record<string, string>
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
+  backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
+  permissionPolicy?: 'upstream' | 'bypass' // default upstream
+  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions
 }
 
 interface RunResult {
@@ -136,11 +164,14 @@ Headless `parseOutput` returns null cost for codex, aider and qwen. Gemini estim
 
 ## Errors
 
-`HarnessError` is thrown (not rejected via a failed RunResult) on:
-- Unknown harness name
-- Duplicate adapter registration
+`HarnessError` exposes a stable `code` for unknown adapters, conflicting
+registration, invalid options, unsupported backends/capabilities and adapter
+prerequisites. Re-registering the same adapter object is idempotent.
+See [SPEC errors](../SPEC.md#errors) for the exact codes.
 
-Subprocess failures (non-zero exit, timeout) are surfaced in RunResult, not as thrown errors.
+Non-zero exit and timeout are surfaced in `RunResult`. Launch errors and
+cancellation are not yet normalized across runtimes; see
+[execution limitations](../SPEC.md#ownership-and-execution).
 
 ---
 

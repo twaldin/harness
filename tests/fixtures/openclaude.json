@@ -18,7 +18,6 @@
       "write a one-line changelog entry",
       "--output-format",
       "json",
-      "--dangerously-skip-permissions",
       "--append-system-prompt",
       "Output exactly one sentence.\n"
     ],

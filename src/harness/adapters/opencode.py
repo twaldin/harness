@@ -10,59 +10,121 @@ Mirror of agentelo/bin/agentelo's opencode parsing path (line ~1491).
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec, ScrollKeys
-from harness.model_normalization import normalize_model_for_harness
+from harness._subproc import SubprocOutcome, write_instructions
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    ScrollKeys,
+    SessionTelemetry,
+)
+from harness.pricing import derive_cost
+from harness.util import last_non_empty_join, strip_ansi
 
 
 _OPENCODE_SCROLL_KEYS = ScrollKeys(line_down="C-M-e", line_up="C-M-y", page_down="NPage", page_up="PPage")
+
+_UPDATE_RE = re.compile(r"update available|a new version of opencode|upgrade now", re.IGNORECASE)
+_ASK_ANYTHING_RE = re.compile(r"Ask anything", re.IGNORECASE)
+_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+_RATE_LIMIT_RE = re.compile(r"rate.?limit|try again later", re.IGNORECASE)
+_SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_WORKING_RE = re.compile(r"thinking|running", re.IGNORECASE)
 
 
 class OpenCodeAdapter(Adapter):
     name = "opencode"
     instructions_filename = "AGENTS.md"
     scroll_ownership = "app"
+    submit_keys = ("Enter",)
+    flatten_on_paste = True
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "opencode-ai"),
+        update_command=("npm", "install", "-g", "opencode-ai@latest"),
+        version_command=("opencode", "--version"),
+    )
 
     DEFAULT_MODEL = "gpt-5.4"
 
     def get_current_scroll_keys(self) -> ScrollKeys | None:
+        # opencode always renders into its own virtualized scrollback — return
+        # the fixed chord map regardless of any external mode.
         return _OPENCODE_SCROLL_KEYS
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
-        args = ["run", "--dir", str(spec.workdir), "--model", model, spec.prompt]
+        args = ["run", "--dir", str(spec.workdir), "--model", resolved.model, spec.prompt]
         return BuildCommand(cmd="opencode", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, _model = _read_opencode_session_totals(Path(spec.workdir), spec.env)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
 
-    def run(self, spec: RunSpec) -> RunResult:
-        bc = self.build_command(spec)
-        outcome = run_subprocess(
-            [bc.cmd] + bc.args,
-            cwd=bc.cwd,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env={**bc.env, **spec.env},
-        )
-        parsed = self.parse_output(spec, outcome)
-        return RunResult(
-            harness=self.name,
-            model=spec.model or self.DEFAULT_MODEL,
-            exit_code=outcome.exit_code,
-            duration_seconds=outcome.duration_seconds,
-            stdout=outcome.stdout,
-            stderr=outcome.stderr,
-            timed_out=outcome.timed_out,
-            cost_usd=parsed.get("cost_usd"),
-            tokens_in=parsed.get("tokens_in"),
-            tokens_out=parsed.get("tokens_out"),
-            raw=parsed.get("raw"),
-        )
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        full = strip_ansi(pane)
+        last5 = last_non_empty_join(pane, 5)
+        if _UPDATE_RE.search(full):
+            return "dialog"
+        if _ASK_ANYTHING_RE.search(full) and _VERSION_RE.search(last5):
+            return "ready"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        if _UPDATE_RE.search(strip_ansi(pane)):
+            return ["Escape"]
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        last10 = last_non_empty_join(pane, 10)
+        full = strip_ansi(pane)
+        if _UPDATE_RE.search(full):
+            return "dialog"
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _SPINNER_RE.search(last10) or _WORKING_RE.search(last10):
+            return "running"
+        if _ASK_ANYTHING_RE.search(full):
+            return "idle"
+        return "unknown"
+
+    # opencode telemetry already lives in SQLite; the "path" is the DB plus a
+    # session hint so consumers know where to look.
+    def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
+        db_path = _opencode_db_path(None)
+        if not db_path.exists():
+            return None
+        try:
+            base = workdir.resolve().name
+        except OSError:
+            base = workdir.name
+        return f"{db_path}#session({base})"
+
+    def parse_session_log(self, path: str) -> SessionTelemetry:
+        db_raw = path.split("#", 1)[0]
+        hint = ""
+        if "session(" in path and path.endswith(")"):
+            hint = path.split("session(", 1)[1][:-1]
+        db_path = Path(db_raw)
+        if not db_path.exists():
+            return SessionTelemetry(path, None, None, None, None, None)
+        tokens_in, tokens_out, cost, model = _read_opencode_session_totals(Path(hint or "/"), None, db_path=db_path)
+        # SQLite cost can be 0 when opencode used a custom provider (no upstream
+        # pricing): fall back to derive_cost from tokens if we have any.
+        if (cost is None or cost == 0) and tokens_in is not None and (tokens_in > 0 or (tokens_out or 0) > 0):
+            cost = derive_cost("gpt-5.4", tokens_in, tokens_out) or cost
+        return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
 def _opencode_db_path(extra_env: dict[str, str] | None = None) -> Path:
@@ -76,13 +138,15 @@ def _opencode_db_path(extra_env: dict[str, str] | None = None) -> Path:
 def _read_opencode_session_totals(
     workdir: Path,
     extra_env: dict[str, str] | None = None,
+    db_path: Path | None = None,
 ) -> tuple[int | None, int | None, float | None, str | None]:
     """Query opencode's sqlite for the session that ran in `workdir`.
 
     Returns (tokens_in, tokens_out, cost_usd, model). All None if DB
     unavailable or no matching session.
     """
-    db_path = _opencode_db_path(extra_env)
+    if db_path is None:
+        db_path = _opencode_db_path(extra_env)
     if not db_path.exists():
         return None, None, None, None
 

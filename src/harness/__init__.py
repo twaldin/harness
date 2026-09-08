@@ -24,6 +24,7 @@ from harness.base import (
     RunSpec,
     ScrollKeys,
     SessionTelemetry,
+    Termination,
 )
 from harness.pricing import ModelPricing, derive_cost, lookup_pricing
 from harness.registry import (
@@ -68,6 +69,7 @@ __all__ = [
     "RunSpec",
     "ScrollKeys",
     "SessionTelemetry",
+    "Termination",
     "SubprocOutcome",
     "InstructionProjection",
     "build_command",

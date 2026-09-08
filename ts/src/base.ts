@@ -46,6 +46,8 @@ export interface RunSpec {
   /** Defaults to `upstream`. */
   permissionPolicy?: PermissionPolicy
   nativeOptions?: NativeOptions
+  /** Abort to tear down the run's process group; the result reports `termination: 'cancelled'`. */
+  cancel?: AbortSignal
 }
 
 export interface BuildCommand {
@@ -56,12 +58,29 @@ export interface BuildCommand {
   instructionsFile: string | null
 }
 
+/**
+ * Why a run reached its terminal state.
+ * - exited: leader returned an exit code (`exitCode` is that code)
+ * - signaled: leader was killed by a signal outside harness teardown
+ *   (`signal` names it; `exitCode` is the negated signal number, e.g. -15)
+ * - timed-out: `timeoutSeconds` elapsed; `exitCode: -1`, `timedOut: true`
+ * - cancelled: the `cancel` signal aborted; `exitCode: -1`
+ * - launch-failed: the leader never started; `launchError` is the OS code (`ENOENT`, `EACCES`, ...)
+ */
+export type Termination = 'exited' | 'signaled' | 'timed-out' | 'cancelled' | 'launch-failed'
+
 export interface SubprocOutcome {
   exitCode: number
   durationSeconds: number
   stdout: string
   stderr: string
   timedOut: boolean
+  /** Always set by harness execution; optional only for caller-constructed outcomes. */
+  termination?: Termination | null
+  /** Signal that ended the leader (also on timed-out/cancelled teardown), else null. */
+  signal?: string | null
+  /** OS error code when `termination === 'launch-failed'`, else null. */
+  launchError?: string | null
 }
 
 export interface RunResult {
@@ -72,6 +91,9 @@ export interface RunResult {
   stdout: string
   stderr: string
   timedOut: boolean
+  termination?: Termination | null
+  signal?: string | null
+  launchError?: string | null
   costUsd: number | null
   tokensIn: number | null
   tokensOut: number | null

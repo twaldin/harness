@@ -1,0 +1,40 @@
+name: subprocess lifecycle
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev
+      - run: PYTHONPATH=src uv run pytest tests/
+      - run: bun install --frozen-lockfile
+        working-directory: ts
+      - run: bun test
+        working-directory: ts
+      - run: bun run build
+        working-directory: ts
+      - run: node tests/node-lifecycle.mjs
+        working-directory: ts

@@ -4,6 +4,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING, Literal, TypedDict, get_args
 
 from harness.model_normalization import normalize_model_for_harness
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 
 Backend = Literal["cli", "rpc", "sdk"]
 PermissionPolicy = Literal["upstream", "bypass"]
+Termination = Literal["exited", "signaled", "timed-out", "cancelled", "launch-failed"]
 ErrorCode = Literal[
     "adapter-error",
     "unknown-harness",
@@ -103,12 +105,13 @@ class RunSpec:
     workdir: Path
     model: str | None = None
     instructions: str | None = None
-    timeout_seconds: int = 1800
+    timeout_seconds: float = 1800
     env: dict[str, str] = field(default_factory=dict)
     model_no_resolve: bool = False
     backend: Backend = "cli"
     permission_policy: PermissionPolicy = "upstream"
     native_options: NativeOptions | None = None
+    cancel: Event | None = None
 
 
 @dataclass
@@ -213,6 +216,9 @@ class RunResult:
     tokens_in: int | None = None
     tokens_out: int | None = None
     raw: dict | list | None = None  # adapter-specific structured payload (parsed JSON, session info)
+    termination: Termination | None = None
+    signal: str | None = None
+    launch_error: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -402,6 +408,7 @@ class Adapter(ABC):
             cwd=bc.cwd,
             timeout_seconds=spec.timeout_seconds,
             extra_env={**bc.env, **spec.env},
+            cancel=spec.cancel,
         )
         return self._run_result(spec, outcome)
 
@@ -415,6 +422,7 @@ class Adapter(ABC):
             cwd=bc.cwd,
             timeout_seconds=spec.timeout_seconds,
             extra_env={**bc.env, **spec.env},
+            cancel=spec.cancel,
         )
         return self._run_result(spec, outcome)
 
@@ -428,6 +436,9 @@ class Adapter(ABC):
             stdout=outcome.stdout,
             stderr=outcome.stderr,
             timed_out=outcome.timed_out,
+            termination=outcome.termination,
+            signal=outcome.signal,
+            launch_error=outcome.launch_error,
             cost_usd=parsed.get("cost_usd"),
             tokens_in=parsed.get("tokens_in"),
             tokens_out=parsed.get("tokens_out"),

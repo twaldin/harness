@@ -214,7 +214,7 @@ describe('getCapabilities', () => {
       permissionPolicies: ['upstream', 'bypass'],
       nativeOptions: 'claude-code',
       streaming: false,
-      cancellation: false,
+      cancellation: true,
       sessions: false,
     })
     expect(getCapabilities('codex', 'cli').nativeOptions).toBe('codex')
@@ -227,7 +227,7 @@ describe('getCapabilities', () => {
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS)
       if (name !== 'claude-code' && name !== 'codex') expect(caps.nativeOptions).toBeNull()
       expect(caps.streaming).toBe(false)
-      expect(caps.cancellation).toBe(false)
+      expect(caps.cancellation).toBe(true)
       expect(caps.sessions).toBe(false)
     }
   })

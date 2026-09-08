@@ -70,7 +70,7 @@ Permission policy defaults to upstream behavior; bypass is explicit opt-in.
 Reject unsupported backends, capabilities and conflicting native options
 before command-build side effects. CLI is the only implemented backend;
 RPC/SDK selection must not silently fall back. See SPEC for exact error codes,
-capabilities, migration and the remaining subprocess lifecycle limitations.
+capabilities, migration, process-group ownership and lifecycle limits.
 
 Field naming differs (`cost_usd` ↔ `costUsd`, `tokens_in` ↔ `tokensIn`,
 `timed_out` ↔ `timedOut`). The Python CLI's `harness run --json` emits
@@ -145,7 +145,8 @@ Keep the library narrow while qualifying optional agent SDK/protocol backends:
 - Prompt mutation, GEPA, training loops — `hone`'s job.
 - Vertex / OAuth proxy shims — context-specific, lives in the consumer.
 - Streaming subprocess output callbacks — not implemented. Python `run()` and
-  TypeScript `run()` block; `run_async()` / `runAsync()` provide async execution.
+  the low-level synchronous subprocess helpers block. Python `run_async()` and
+  TypeScript `run()` / `runAsync()` provide cancellable async execution.
 - Optional SDK/RPC backends are authorized scope but not implemented. They must
   satisfy SPEC ownership, permission, capability and compatibility requirements
   without importing SDKs for CLI callers or becoming a fleet/application layer.

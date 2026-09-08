@@ -63,7 +63,7 @@ def get_capabilities(name: str, backend: Backend = "cli") -> Capabilities:
         permission_policies=policies,
         native_options=adapter_cls.native_options_kind,
         streaming=False,
-        cancellation=False,
+        cancellation=True,
         sessions=False,
     )
 

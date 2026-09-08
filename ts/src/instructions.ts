@@ -493,8 +493,8 @@ export function restoreProjectedInstructions(projection: InstructionProjection):
  * lease released.
  */
 export function prepareCommand(command: BuildCommand): PreparedCommand {
+  const canonical = canonicalWorkdir(command.cwd)
   const cwd = resolve(command.cwd)
-  const canonical = canonicalWorkdir(cwd)
   const content = command.instructionContent
   let filename: string | null = null
   if (content !== undefined) {

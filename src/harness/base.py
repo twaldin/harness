@@ -261,6 +261,11 @@ class ResolvedSpec:
 def absolute_workdir(workdir: Path | str) -> Path:
     """`workdir` as an absolute path against the current process cwd, without
     resolving symlinks or changing the global cwd."""
+    if not isinstance(workdir, (str, os.PathLike)):
+        raise HarnessError("workdir must be a path", code="invalid-options")
+    text = os.fspath(workdir)
+    if not isinstance(text, str) or not text or "\0" in text:
+        raise HarnessError("workdir must be a non-empty path without NUL bytes", code="invalid-options")
     return Path(workdir).absolute()
 
 
@@ -362,7 +367,7 @@ class Adapter(ABC):
         subprocess side effects. Raises `HarnessError` with a stable `code`.
 
         Order: backend, permission policy, native options, executable,
-        config_home, config_file.
+        config_home, config_file, workdir.
         """
         validate_backend(spec.backend)
 
@@ -414,6 +419,7 @@ class Adapter(ABC):
                     code="unsupported-capability",
                 )
             _absolute_option("config_file", spec.config_file)
+        absolute_workdir(spec.workdir)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
         if type(native) not in (ClaudeCodeOptions, CodexOptions):

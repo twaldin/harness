@@ -21,7 +21,7 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 
-from harness.base import BuildCommand, HarnessError
+from harness.base import BuildCommand, HarnessError, absolute_workdir
 
 LOCK_DIRNAME = ".harness-run.lock"
 _MODES = ("replace", "prepend")
@@ -52,7 +52,7 @@ def _conflict(message: str) -> HarnessError:
 
 
 def _canonical_workdir(workdir: Path | str) -> Path:
-    path = Path(workdir)
+    path = absolute_workdir(workdir)
     if not path.is_dir():
         raise HarnessError(f"workdir does not exist or is not a directory: {path}", code="invalid-options")
     return Path(os.path.realpath(path))
@@ -380,12 +380,12 @@ def _restore(owned: _Owned) -> None:
         _verify_owned_file(owned.backup, owned.orig_id, owned.orig_mode, owned.orig_digest, "backup")
         if owned.new_id is None and _lstat(owned.target) is not None:
             raise _conflict(f"{owned.target} appeared during preparation; preserving it and the original backup")
-    if owned.new_id is not None:
-        os.unlink(owned.target)
-        owned.new_id = None
     if owned.renamed:
-        os.rename(owned.backup, owned.target)
+        os.replace(owned.backup, owned.target)
         owned.renamed = False
+    elif owned.new_id is not None:
+        os.unlink(owned.target)
+    owned.new_id = None
     _prune_created(owned.dirs)
     owned.restored = True
 

@@ -12,12 +12,14 @@ harness/
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
 │   ├── adapters/*.py       (13 adapters)
-│   └── _subproc.py         (shared helpers)
+│   ├── _instructions.py    (owned projection lifecycle)
+│   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
     ├── package.json        (@twaldin/harness-ts)
     ├── src/base.ts
     ├── src/registry.ts
     ├── src/adapters/*.ts
+    ├── src/instructions.ts
     └── src/subproc.ts
 ```
 

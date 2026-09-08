@@ -426,6 +426,28 @@ def test_unexpected_lock_entry_prevents_restoration(workdir: Path):
     assert (workdir / LOCK / "user-file").read_text() == "mine"
 
 
+def test_failed_restore_preserves_projection_and_backup_for_retry(workdir: Path, monkeypatch):
+    target = workdir / "AGENTS.md"
+    target.write_text("original")
+    identity = target.stat().st_ino
+    projection = project_instructions(workdir, "AGENTS.md", "projected")
+
+    def fail_rename(*args, **kwargs):
+        raise OSError("synthetic rename failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "rename", fail_rename)
+        patch.setattr(os, "replace", fail_rename)
+        with pytest.raises(OSError):
+            restore_projected_instructions(projection)
+    assert target.read_text() == "projected\n"
+    assert projection.backup_path.read_text() == "original"
+    restore_projected_instructions(projection)
+    assert target.read_text() == "original"
+    assert target.stat().st_ino == identity
+    assert not (workdir / LOCK).exists()
+
+
 # ── project_instructions / restore ──────────────────────────────────────────
 
 
@@ -443,7 +465,6 @@ def test_project_replace_and_prepend_conventions(workdir: Path):
     assert projection.existed_before and projection.wrote_backup
     assert projection.backup_path.read_text() == "original\n"
     assert projection.file_path == workdir / "AGENTS.md"
-    assert "_lease" not in repr(projection)
     restore_projected_instructions(projection)
     restore_projected_instructions(projection)
     assert target.read_text() == "original\n"

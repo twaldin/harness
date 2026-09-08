@@ -26,7 +26,8 @@ harness/
 │   ├── cli.py                   Typer CLI entrypoint (harness.cli:app)
 │   ├── model_normalization.py   per-harness canonical model resolution
 │   ├── pricing.py               cost derivation from token counts
-│   ├── _subproc.py              subprocess runner + instructions writer
+│   ├── _subproc.py              subprocess runner
+│   ├── _instructions.py         owned instruction projection lifecycle
 │   └── adapters/                13 adapter modules, one per CLI
 ├── ts/                          TypeScript implementation (see ts/CLAUDE.md)
 │   ├── package.json             @twaldin/harness-ts (Bun build + test)
@@ -35,6 +36,7 @@ harness/
 │   ├── src/model-normalization.ts
 │   ├── src/pricing.ts
 │   ├── src/subproc.ts
+│   ├── src/instructions.ts      owned instruction projection lifecycle
 │   ├── src/util.ts
 │   └── src/adapters/            13 adapter modules, one per CLI
 ├── tests/                       pytest suite (Python)

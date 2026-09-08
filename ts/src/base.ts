@@ -443,7 +443,7 @@ export function finalizeCommand(adapter: Adapter, spec: RunSpec, validated: Vali
     cwd: validated.workdir,
     env,
     instructionsFile: project ? join(validated.workdir, adapter.instructionsFilename) : null,
-    directories: planned.directories ?? [],
+    directories: planned.directories?.map((directory) => resolve(validated.workdir, directory)) ?? [],
     model: planned.model === undefined ? spec.model || adapter.defaultModel : planned.model,
   }
   if (project) built.instructionContent = spec.instructions

@@ -14,6 +14,7 @@ from harness.adapters.gemini import GeminiAdapter
 from harness.adapters.goose import GooseAdapter
 from harness.adapters.hermes import HermesAdapter
 from harness.adapters.kilo import KiloAdapter
+from harness.adapters.kiro import KiroAdapter
 from harness.adapters.mini_swe_agent import MiniSweAgentAdapter
 from harness.adapters.mistral_vibe import MistralVibeAdapter
 from harness.adapters.omp import OmpAdapter
@@ -45,6 +46,7 @@ register("goose", GooseAdapter)
 register("amp", AmpAdapter)
 register("mistral-vibe", MistralVibeAdapter)
 register("cursor", CursorAdapter)
+register("kiro", KiroAdapter)
 register("mini-swe-agent", MiniSweAgentAdapter)
 register("auggie", AuggieAdapter)
 
@@ -64,6 +66,7 @@ __all__ = [
     "GooseAdapter",
     "HermesAdapter",
     "KiloAdapter",
+    "KiroAdapter",
     "MiniSweAgentAdapter",
     "MistralVibeAdapter",
     "OmpAdapter",

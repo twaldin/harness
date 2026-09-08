@@ -11,9 +11,9 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The twenty-three adapters below are registered in **both** implementations and have
+The twenty-four adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
-`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
+`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
@@ -66,6 +66,7 @@ versions below are dated observations, not a supported version range.
 | goose | [`aaif-goose/goose` release binary](https://github.com/aaif-goose/goose/releases/tag/v1.49.0); [CLI reference](https://goose-docs.ai/docs/guides/goose-cli-commands) | isolated Darwin arm64 v1.49.0; not installed on PATH | Help/source-checked; bounded real CLI probes with synthetic localhost provider. No authenticated provider coverage. macOS stdio MCP children can escape group teardown; see below. |
 | cursor | [official binary installer](https://cursor.com/install); [headless reference](https://cursor.com/docs/cli/headless) | 2026.09.02-c22c1a3, isolated Darwin arm64 archive | Help/source-checked; bounded native auth-failure smoke in both languages. No credentialed provider/edit/tool-cleanup coverage. See [limits](#cursor). |
 | mini-swe-agent | [`mini-swe-agent` 2.4.6](https://pypi.org/project/mini-swe-agent/2.4.6/); [official CLI](https://mini-swe-agent.com/latest/usage/mini/) | isolated Python 3.11.15 install, `mini --help` and metadata version checked | Native deterministic-model completion checked on macOS arm64; no external-provider qualification. Local shell actions detach from the CLI group. See [limits](#mini-swe-agent). |
+| kiro | [official installer](https://cli.kiro.dev/install); [headless reference](https://kiro.dev/docs/cli/headless.md) | checksum-verified stable 2.21.1 macOS universal DMG, run on arm64 | Version/help and bounded native missing-auth path checked; no provider success. Stable help names `--agent-engine`, while docs use `--engine`. See [limits](#kiro). |
 
 Off-PATH probes used absolute executables; Harness does not add them to PATH.
 No tools were upgraded, credentials switched, global configuration rewritten or
@@ -75,7 +76,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `amp`, `auggie`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `mini-swe-agent`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `amp`, `auggie`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `kiro`, `mini-swe-agent`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. The seven file-based helpers qualified below use current
 source-shaped fixtures; they remain caller-driven artifact helpers, separate
@@ -105,6 +106,7 @@ from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | mistral-vibe | unwired | unwired | completed history entries on stdout; no latest-session discovery |
 | cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
 | mini-swe-agent | unwired | unwired | confirmed one-shot trajectory only; no latest-run discovery |
+| kiro | unwired | unwired | native ACP JSONL objects only; no discovery or continuation |
 
 ### Artifact qualification — 2026-09-08
 
@@ -213,6 +215,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | copilot | `--allow-all` |
 | mistral-vibe | `--auto-approve` |
 | cursor | `--force`; native explicit denies and team policy still apply |
+| kiro | `--trust-all-tools`; conflicts with explicit native `trustTools` |
 | amp, auggie, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
 Amp, Claude Code, Codex, Cline and Copilot have typed native options:
@@ -332,6 +335,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | amp          | **null**          | optional result totals / observed assistant sums | top-level JSONL usage; cache fields remain raw |
 | mistral-vibe | **null** | **null** | JSONL completed history entries retained; no terminal usage totals |
 | cursor       | **null**          | optional uncached input / output | last JSONL `result.usage`; absent/invalid counts remain null |
+| kiro         | **null**          | **null** | native ACP JSONL objects retained; accounting schema unqualified |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
@@ -1091,6 +1095,96 @@ no credential stores were searched. Shared fixtures separately cover
 command/capability parity, stale/missing artifacts, native limits, partial/failure
 output and telemetry boundaries. External providers, Linux native execution,
 custom/container environments and arbitrary detached descendants remain unqualified.
+
+## kiro
+
+- **Distribution / identity:** official native `kiro-cli`, installed through
+  [`https://cli.kiro.dev/install`](https://cli.kiro.dev/install). This is the
+  successor to Amazon Q CLI; the official installer can upgrade an existing
+  `q` installation. Harness registers only `kiro`, with no duplicate Q adapter.
+  It is not Kiro IDE, Crew, an npm package or a supported Homebrew formula.
+  Install/update metadata is caller-driven; Harness never runs it automatically.
+- **Platforms:** upstream documents macOS, Linux and Windows 11. The official
+  Unix installer supports x86_64/aarch64, selects GNU or musl Linux archives,
+  and checks SHA-256. Its current GNU thresholds are glibc 2.34 on x86_64 and
+  2.39 on aarch64. Harness lifecycle support remains macOS/Linux only; upstream
+  Windows availability does not imply Harness Windows support.
+- **Command:** `kiro-cli chat --no-interactive --agent-engine v2
+  --output-format stream-json [--model=MODEL] [--trust-all-tools]
+  [--trust-tools=TOOLS] [--require-mcp-startup] -- PROMPT`. Empty prompts
+  reject; leading hyphens remain positional. The selected stable V2 engine
+  avoids inheriting legacy V1 or preview V3. No preview-engine fallback,
+  remote/cloud execution or shared daemon management is added.
+- **Model / configuration:** no Harness model default or provider rewriting.
+  Explicit IDs are trimmed for argv; reported model is the requested label,
+  or null when omitted/empty. Native config and model access remain upstream
+  concerns. `configHome` and `configFile` have no qualified mapping and reject.
+  Caller environment is inherited/overlaid normally, not a sandbox.
+- **Instructions:** shared preparation temporarily projects workdir `AGENTS.md`.
+  [Kiro steering](https://kiro.dev/docs/steering.md) documents automatic
+  workspace discovery. Custom native agent resource configuration can change
+  what is loaded; Harness does not rewrite that configuration. Native
+  instruction ingestion has not been provider-tested.
+- **Permissions:** omission adds no trust flags and preserves upstream policy.
+  `KiroOptions(trust_tools="read,grep")` /
+  `{kind: 'kiro', trustTools: 'read,grep'}` emits that exact comma-separated
+  tool set. **Empty string explicitly trusts no tools** (`--trust-tools=`).
+  Nonempty whitespace-only values and NUL bytes reject. `bypass` alone adds
+  `--trust-all-tools`; combining it with any explicit trust set, including
+  empty, rejects rather than broadening the requested permissions.
+  Names/categories and approval outcomes are resolved upstream; the stable
+  help uses `fs_read,fs_write` examples while current docs use `read,grep`.
+- **MCP startup:** `require_mcp_startup=True` / `requireMcpStartup: true` adds
+  `--require-mcp-startup`; false/omitted adds nothing. Upstream documents exit 3
+  when an enabled MCP server cannot start; without this flag startup failures
+  can be warnings. Harness neither starts nor stops unrelated MCP services.
+- **Output / metrics:** stable help describes stream-json as native **ACP
+  events**, each a self-describing JSON object line. Harness preserves every
+  complete object in `raw`, including unknown events, errors and partial-run
+  events. Malformed/nonobject lines and incomplete tails remain in stdout but
+  are excluded from `raw`; no complete objects means null. All token/USD
+  metrics are null because no aggregate accounting schema is qualified.
+  Process exit, native event status and Harness termination remain distinct.
+- **Authentication:** follow [official setup](https://kiro.dev/docs/getting-started/authentication.md).
+  Headless docs prescribe `KIRO_API_KEY` for eligible paid subscriptions
+  (Pro/Pro+/Pro Max/Power), potentially requiring administrator enablement.
+  Authentication docs give an existing browser session precedence over the
+  environment key; use native `kiro-cli whoami` to check the selected identity.
+  Harness does not authenticate, switch accounts or inspect credential stores.
+  **Without credentials, 2.21.1 attempts browser onboarding even in headless
+  mode. Keep a finite Harness deadline; do not assume a prompt-free auth error.**
+- **Capabilities / exclusions:** shared CLI lifecycle, finite stdin, raw chunk
+  callbacks, bounded capture, deadlines and cancellation; explicit bypass and
+  the two typed Kiro options above. No V1/V3 selection, agent/effort switching,
+  resume, controlled ACP/RPC sessions, SDK, cloud sessions, pane helpers or
+  session-log discovery. Unsupported native fields/backend/config choices reject.
+
+### Qualification — 2026-09-08
+
+The [stable release manifest](https://prod.download.cli.kiro.dev/stable/latest/manifest.json)
+advertised **2.21.1**. Its universal macOS DMG was downloaded, checksum-verified
+and mounted read-only outside the repository; no global installer, login,
+configuration change or account switch was performed. `kiro-cli --version`,
+`chat --help`, `update --help` and isolated `whoami` were checked. Current
+[3.0 docs](https://kiro.dev/docs/cli/v3.md) describe an opt-in early release,
+not the stable distribution selected here.
+
+Python `run` and the built TypeScript package's Node `run` each used an isolated
+workdir and explicit trust-none. With no `KIRO_API_KEY` and isolated `whoami`
+reporting not logged in, the CLI attempted browser onboarding rather than
+emitting JSONL. Both preserved streamed output and returned `timed-out` at their
+30-second deadlines (Python 30.005s, Node 30.022s), released the workdir leases
+and left no matching native process. No authentication flow was completed.
+
+Shared fixtures use **synthetic framing events**, not captured provider
+conversations or a claim to reproduce a stable ACP event schema. Both fixture
+loaders exercise exact argv, tool trust/denial selection, rejected options,
+success/failure/partial JSONL parsing and real substitute-executable lifecycle.
+No real provider succeeded. Provider event schema/accounting, model access,
+actual tool approval/denial, instructions reaching the model, native MCP/tool
+descendants, background/remote tools, Linux native runtime and preview V3 remain
+untested. Cancellation owns the foreground process group, not arbitrary detached
+or remote processes; no global shutdown command is used.
 
 ---
 

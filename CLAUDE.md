@@ -1,8 +1,8 @@
 # harness
 
-`harness` is a dual-language (Python + TypeScript) adapter library that wraps twenty-three
+`harness` is a dual-language (Python + TypeScript) adapter library that wraps twenty-four
 AI coding-agent CLIs — `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`,
-`aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `cline`, `copilot`, `cursor`, `mistral-vibe` —
+`aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `cline`, `copilot`, `cursor`, `mistral-vibe`, `kiro` —
 behind a shared `RunSpec → RunResult` contract. Both implementations sit in
 this monorepo. [SPEC.md](SPEC.md) defines the shared contract and distinguishes
 shipped CLI behavior from future RPC/SDK implementation requirements.
@@ -57,8 +57,8 @@ Both implementations provide the core headless API described in
 - Functions: `listAdapters()`, `getAdapter()`, `getCapabilities()`,
   `buildCommand(spec)`, `parseOutput(spec, outcome)`, `run(spec)`,
   `runAsync(spec)` (Python uses snake_case names).
-- Adapters: twenty-three registered names, exact strings — `aider`, `amp`, `auggie`, `claude-code`,
-  `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`,
+- Adapters: twenty-four registered names, exact strings — `aider`, `amp`, `auggie`, `claude-code`,
+  `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `kiro`,
   `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`. Lookup is case-sensitive.
 
 Both package roots initialize the built-in registry and expose subprocess

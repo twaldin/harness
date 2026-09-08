@@ -2,7 +2,7 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -419,7 +419,7 @@ Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md
 
 ## Status
 
-Twenty-three adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
+Twenty-four adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
 ### host Node version
 
@@ -474,6 +474,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 - `mistral-vibe` uses official Python package `mistral-vibe`, executable `vibe`, with completed-history JSONL output. Models remain native config aliases, and workspace trust is explicit via `VibeOptions`; instructions require that opt-in. See [setup, permissions and coverage](ADAPTER-MATRIX.md#mistral-vibe).
 - `cursor` uses the standalone Cursor `agent` CLI in print/stream-JSON mode, not the editor's `cursor` launcher. Model/auth/config remain native; only explicit bypass adds `--force`. See [permissions, optional usage and qualification limits](ADAPTER-MATRIX.md#cursor).
 - `mini-swe-agent` invokes native `mini`, separately from the legacy `swe-agent` wrapper. Onboarding is disabled in the child; tool approval remains explicit. It reads only a trajectory confirmed by the current CLI output. Local shell actions can escape CLI-group cancellation. See [setup, permissions, extraction and coverage](ADAPTER-MATRIX.md#mini-swe-agent).
+- `kiro` uses official `kiro-cli` headless V2 with JSONL events. Tool trust is explicit through `KiroOptions`; bypass alone grants all tools. Model/auth remain caller-selected, and token/USD totals remain null. See [setup, migration and coverage](ADAPTER-MATRIX.md#kiro).
 - `auggie` uses official `@augmentcode/auggie` in print/JSON mode. A configured Augment account and noninteractive entitlement are required; native completion/errors remain in `raw`, and credits are never converted to USD. See [setup, permissions and qualification limits](ADAPTER-MATRIX.md#auggie).
 
 Pending:

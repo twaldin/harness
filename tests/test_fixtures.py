@@ -36,6 +36,7 @@ from harness import (
     CodexOptions,
     CopilotOptions,
     HarnessError,
+    KiroOptions,
     RunSpec,
     SubprocOutcome,
     VibeOptions,
@@ -67,9 +68,12 @@ AMBIENT_ENV = ("OPENCODE_DB", "OPENCODE_DISABLE_CHANNEL_DB", "KILO_DB", "KILO_DI
 NULLABLE_SPEC_FIELDS = {"timeoutSeconds", "inactivityTimeoutSeconds", "stdin"}
 NATIVE_OPTION_TYPES = {
     "claude-code": ClaudeCodeOptions, "codex": CodexOptions, "cline": ClineOptions, "copilot": CopilotOptions, "amp": AmpOptions,
-    "mistral-vibe": VibeOptions,
+    "mistral-vibe": VibeOptions, "kiro": KiroOptions,
 }
-NATIVE_OPTION_NAMES = {"autoApprove": "auto_approve", "allowTools": "allow_tools", "denyTools": "deny_tools"}
+NATIVE_OPTION_NAMES = {
+    "autoApprove": "auto_approve", "allowTools": "allow_tools", "denyTools": "deny_tools",
+    "trustTools": "trust_tools", "requireMcpStartup": "require_mcp_startup",
+}
 
 
 def _substitute(value, mapping: dict[str, str]):
@@ -267,7 +271,7 @@ def test_capabilities_match_fixture(case: dict, tmp_path: Path):
     else:
         rejects("unsupported-capability", config_file=config_file)
 
-    for options in (ClaudeCodeOptions(), CodexOptions(), ClineOptions(), CopilotOptions(), AmpOptions(), VibeOptions()):
+    for options in (ClaudeCodeOptions(), CodexOptions(), ClineOptions(), CopilotOptions(), AmpOptions(), VibeOptions(), KiroOptions()):
         if options.kind != caps["nativeOptions"]:
             rejects("invalid-options", native_options=options)
 

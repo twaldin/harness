@@ -60,6 +60,7 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   'mistral-vibe': ['--auto-approve'],
   'mini-swe-agent': ['--yolo'],
   cursor: ['--force'],
+  kiro: ['--trust-all-tools'],
 }
 const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MODE: 'auto' } }
 /** Native knobs `specFor`'s projected instructions need before the adapter accepts them. */
@@ -268,7 +269,7 @@ describe('getCapabilities', () => {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS || name in BYPASS_ENVS)
-      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot' && name !== 'amp' && name !== 'mistral-vibe') expect(caps.nativeOptions).toBeNull()
+      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot' && name !== 'amp' && name !== 'mistral-vibe' && name !== 'kiro') expect(caps.nativeOptions).toBeNull()
       else expect(caps.nativeOptions).toBe(name)
       expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)

@@ -1,7 +1,7 @@
 import { register } from '../registry.js'
 import { HarnessError, finalizeCommand, validateRunSpec } from '../base.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
-import { readFileSync } from 'node:fs'
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { stripAnsi } from '../util.js'
 
@@ -27,6 +27,7 @@ import { stripAnsi } from '../util.js'
 const TRAJECTORY_DIR = '.harness'
 const TRAJECTORY_FILE = 'mini-swe-agent.traj.json'
 const TRAJECTORY_FORMAT = 'mini-swe-agent-1.1'
+const MAX_TRAJECTORY_BYTES = 16 * 1024 * 1024
 /** Set by upstream's first-run wizard; `true` skips the wizard and nothing else. */
 const CONFIGURED_ENV = 'MSWEA_CONFIGURED'
 
@@ -47,11 +48,26 @@ function hasSavedMarker(stdout: string, trajFile: string): boolean {
   return stripAnsi(stdout).replace(/[\r\n]/g, '').trimEnd().endsWith(`Saved trajectory to '${trajFile}'`)
 }
 
-/** Strict UTF-8 JSON read: missing, undecodable or malformed content is not an artifact. */
+/** Bounded regular-file UTF-8 JSON read; never follow the artifact symlink. */
 function readTrajectory(trajFile: string): JsonObject | null {
   let parsed: unknown
   try {
-    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(readFileSync(trajFile)))
+    const fd = openSync(trajFile, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW)
+    try {
+      const info = fstatSync(fd)
+      if (!info.isFile() || info.size > MAX_TRAJECTORY_BYTES) return null
+      const data = Buffer.allocUnsafe(info.size + 1)
+      let length = 0
+      while (length < data.length) {
+        const count = readSync(fd, data, length, data.length - length, null)
+        if (count === 0) break
+        length += count
+      }
+      if (length !== info.size) return null
+      parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(data.subarray(0, length)))
+    } finally {
+      closeSync(fd)
+    }
   } catch {
     return null
   }

@@ -708,6 +708,9 @@ or an unrecognized `trajectory_format` returns null metrics/raw. In particular, 
 provider-failed invocation never reuses an earlier run's file. Its stdout/stderr
 remains available, but unconfirmed partial trajectory telemetry is not exposed.
 The CLI overwrites this reserved path; use a caller-owned workdir.
+Artifact reads reject symlinks, non-regular files, files larger than 16 MiB and
+files whose length changes while being read. They open nonblocking and read at
+most the checked size plus one byte; rejected artifacts yield null metrics/raw.
 
 For `mini-swe-agent-1.1` trajectories, `raw` retains the whole object.
 `info.model_stats.instance_cost` is a nonnegative finite USD value, including zero.

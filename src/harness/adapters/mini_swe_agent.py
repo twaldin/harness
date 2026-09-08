@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import stat
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome
@@ -38,6 +40,7 @@ from harness.util import strip_ansi
 _TRAJECTORY_FORMAT = "mini-swe-agent-1.1"
 _CONFIGURED_ENV = "MSWEA_CONFIGURED"
 _MAX_SAFE_INTEGER = 9007199254740991
+_MAX_TRAJECTORY_BYTES = 16 * 1024 * 1024
 
 
 class MiniSweAgentAdapter(Adapter):
@@ -106,10 +109,17 @@ def _saved_marker_present(stdout: str, traj_file: Path) -> bool:
 
 
 def _read_trajectory(traj_file: Path) -> dict | None:
-    """The artifact as a dict, or None when missing, unreadable, not strict
-    UTF-8/JSON, not an object, or not the `mini-swe-agent-1.1` format."""
+    """Read bounded regular-file UTF-8 JSON without following the artifact symlink."""
     try:
-        text = traj_file.read_bytes().decode("utf-8")
+        fd = os.open(traj_file, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_TRAJECTORY_BYTES:
+                return None
+            data = stream.read(info.st_size + 1)
+        if len(data) != info.st_size:
+            return None
+        text = data.decode("utf-8")
         traj = json.loads(text, parse_constant=_reject_constant)
     except (OSError, ValueError):
         return None

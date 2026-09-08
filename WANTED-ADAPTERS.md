@@ -43,6 +43,8 @@ upstream compatibility.
   approve other forks.
 - `swe-agent` currently invokes a consumer-supplied mini-SWE Python wrapper, not
   a native SWE-agent CLI. The distinct `mini-swe-agent` adapter now invokes native `mini`.
+- Native mini-SWE-agent shipped through [TWA-82](https://linear.app/twaldin/issue/TWA-82).
+  See [setup, capabilities and qualification](ADAPTER-MATRIX.md#mini-swe-agent).
 - `auggie` shipped through [TWA-81](https://linear.app/twaldin/issue/TWA-81).
   See [setup, JSON billing and account qualification](ADAPTER-MATRIX.md#auggie).
 - `hermes` now ships local quiet chat in both languages ([TWA-73](https://linear.app/twaldin/issue/TWA-73)).
@@ -118,15 +120,6 @@ See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
   paid Kiro plan and may be admin-restricted. Verify `KIRO_API_KEY` prerequisites,
   tool denial, model restrictions, exit codes and the actual event schema.
   Usage/USD remains unqualified; subscription gating is not a reason to exclude it.
-
-### Native mini-SWE-agent — [TWA-82](https://linear.app/twaldin/issue/TWA-82)
-
-`mini-swe-agent` now ships in both registries, distinct from the legacy wrapper.
-Official PyPI 2.4.6 supplies `mini` and `mini-extra`; Harness uses the terminating
-`mini --task=TEXT --exit-immediately` path with explicit approval choices.
-Current-run-confirmed trajectory extraction avoids stale results. Local shell
-actions use detached process groups and are outside CLI-group cancellation.
-See [setup, capabilities and qualification](ADAPTER-MATRIX.md#mini-swe-agent).
 
 ### OpenHands CLI — [TWA-83](https://linear.app/twaldin/issue/TWA-83)
 

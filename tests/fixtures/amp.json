@@ -1,0 +1,787 @@
+{
+  "spec": {
+    "harness": "amp",
+    "prompt": "Summarize the synthetic repository.",
+    "instructions": "Use synthetic files only.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "amp",
+    "args": [
+      "--executor",
+      "local",
+      "--stream-json",
+      "--execute=Summarize the synthetic repository."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": "amp",
+    "configHomeEnv": null,
+    "configFileFlag": "--settings-file",
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 2.5,
+    "timedOut": false,
+    "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"<workdir>\",\"session_id\":\"T-synthetic\",\"tools\":[],\"mcp_servers\":[],\"agent_mode\":\"medium\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"cache_read_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\"}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": 17,
+    "tokensOut": 8,
+    "raw": [
+      {
+        "type": "system",
+        "subtype": "init",
+        "cwd": "<workdir>",
+        "session_id": "T-synthetic",
+        "tools": [],
+        "mcp_servers": [],
+        "agent_mode": "medium"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Synthetic answer"
+            }
+          ],
+          "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 100
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "T-synthetic"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Synthetic answer"
+            }
+          ],
+          "usage": {
+            "input_tokens": 7,
+            "output_tokens": 3,
+            "cache_read_input_tokens": 100
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "T-synthetic"
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "num_turns": 2,
+        "result": "Synthetic answer",
+        "session_id": "T-synthetic"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "native-provider-error-can-exit-zero",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"<workdir>\",\"session_id\":\"T-synthetic\",\"tools\":[],\"mcp_servers\":[],\"agent_mode\":\"medium\"}\n{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"num_turns\":0,\"error\":\"Synthetic account has no credits.\",\"session_id\":\"T-synthetic\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "cwd": "<workdir>",
+            "session_id": "T-synthetic",
+            "tools": [],
+            "mcp_servers": [],
+            "agent_mode": "medium"
+          },
+          {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "num_turns": 0,
+            "error": "Synthetic account has no credits.",
+            "session_id": "T-synthetic"
+          }
+        ]
+      }
+    },
+    {
+      "name": "nonzero-failure-retains-native-error",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"num_turns\":0,\"error\":\"Synthetic account has no credits.\",\"session_id\":\"T-synthetic\"}\n",
+        "stderr": "Synthetic failure.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "num_turns": 0,
+            "error": "Synthetic account has no credits.",
+            "session_id": "T-synthetic"
+          }
+        ]
+      }
+    },
+    {
+      "name": "partial-output-retains-complete-events",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"<workdir>\",\"session_id\":\"T-synthetic\",\"tools\":[],\"mcp_servers\":[],\"agent_mode\":\"medium\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"assistant\",\"message\":",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 10,
+        "tokensOut": 5,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "cwd": "<workdir>",
+            "session_id": "T-synthetic",
+            "tools": [],
+            "mcp_servers": [],
+            "agent_mode": "medium"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_creation_input_tokens": 100
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          }
+        ]
+      }
+    },
+    {
+      "name": "result-totals-replace-message-counts",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"<workdir>\",\"session_id\":\"T-synthetic\",\"tools\":[],\"mcp_servers\":[],\"agent_mode\":\"medium\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"cache_read_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\",\"usage\":{\"input_tokens\":0,\"output_tokens\":20}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 0,
+        "tokensOut": 20,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "cwd": "<workdir>",
+            "session_id": "T-synthetic",
+            "tools": [],
+            "mcp_servers": [],
+            "agent_mode": "medium"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_creation_input_tokens": 100
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 7,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 100
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic",
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing-result-field-falls-back-independently",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"<workdir>\",\"session_id\":\"T-synthetic\",\"tools\":[],\"mcp_servers\":[],\"agent_mode\":\"medium\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"cache_read_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\",\"usage\":{\"input_tokens\":30}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 30,
+        "tokensOut": 8,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "cwd": "<workdir>",
+            "session_id": "T-synthetic",
+            "tools": [],
+            "mcp_servers": [],
+            "agent_mode": "medium"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_creation_input_tokens": 100
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 7,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 100
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic",
+            "usage": {
+              "input_tokens": 30
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "nested-agent-and-result-usage-not-double-counted",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_creation_input_tokens\":100}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":999,\"output_tokens\":999}},\"parent_tool_use_id\":\"tool-synthetic\",\"session_id\":\"T-synthetic\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\",\"parent_tool_use_id\":\"tool-synthetic\",\"usage\":{\"input_tokens\":999,\"output_tokens\":999}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 10,
+        "tokensOut": 5,
+        "raw": [
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_creation_input_tokens": 100
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 999,
+                "output_tokens": 999
+              }
+            },
+            "parent_tool_use_id": "tool-synthetic",
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic",
+            "parent_tool_use_id": "tool-synthetic",
+            "usage": {
+              "input_tokens": 999,
+              "output_tokens": 999
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-usage-keeps-known-fields",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":true,\"output_tokens\":-1}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":\"12\",\"output_tokens\":1.5}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer\"}],\"usage\":{\"input_tokens\":9007199254740992,\"output_tokens\":2}},\"parent_tool_use_id\":null,\"session_id\":\"T-synthetic\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\",\"usage\":{\"input_tokens\":null,\"output_tokens\":false}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": 2,
+        "raw": [
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": true,
+                "output_tokens": -1
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": "12",
+                "output_tokens": 1.5
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer"
+                }
+              ],
+              "usage": {
+                "input_tokens": 9007199254740992,
+                "output_tokens": 2
+              }
+            },
+            "parent_tool_use_id": null,
+            "session_id": "T-synthetic"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic",
+            "usage": {
+              "input_tokens": null,
+              "output_tokens": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing-usage-is-null",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"<workdir>\",\"session_id\":\"T-synthetic\",\"tools\":[],\"mcp_servers\":[],\"agent_mode\":\"medium\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":2,\"result\":\"Synthetic answer\",\"session_id\":\"T-synthetic\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "cwd": "<workdir>",
+            "session_id": "T-synthetic",
+            "tools": [],
+            "mcp_servers": [],
+            "agent_mode": "medium"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic"
+          }
+        ]
+      }
+    },
+    {
+      "name": "malformed-and-nonobject-lines-preserve-final-object",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "noise\nnull\n[]\n42\n{\"x\":NaN}\n{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": false, \"num_turns\": 2, \"result\": \"Synthetic answer\", \"session_id\": \"T-synthetic\"}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 2,
+            "result": "Synthetic answer",
+            "session_id": "T-synthetic"
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-complete-json-object",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "noise\n{\"type\":",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "explicit-model",
+      "spec": {
+        "model": "vendor/model"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "no-resolve-model",
+      "spec": {
+        "model": "vendor/model",
+        "modelNoResolve": true
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "empty-prompt",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "empty-mode",
+      "spec": {
+        "nativeOptions": {
+          "kind": "amp",
+          "mode": ""
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "blank-mode",
+      "spec": {
+        "nativeOptions": {
+          "kind": "amp",
+          "mode": " "
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "nul-mode",
+      "spec": {
+        "nativeOptions": {
+          "kind": "amp",
+          "mode": "x\u0000"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "nonstring-mode",
+      "spec": {
+        "nativeOptions": {
+          "kind": "amp",
+          "mode": true
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "unsupported-native-executor",
+      "spec": {
+        "nativeOptions": {
+          "kind": "amp",
+          "executor": "orb"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "mode-is-not-a-model",
+      "spec": {
+        "nativeOptions": {
+          "kind": "amp",
+          "mode": "Custom Plugin"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "amp",
+        "args": [
+          "--executor",
+          "local",
+          "--stream-json",
+          "--mode",
+          "Custom Plugin",
+          "--execute=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "leading-dash-prompt",
+      "spec": {
+        "prompt": "--orb-execute\nsynthetic"
+      },
+      "expectedCommand": {
+        "cmd": "amp",
+        "args": [
+          "--executor",
+          "local",
+          "--stream-json",
+          "--execute=--orb-execute\nsynthetic"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-config",
+      "spec": {
+        "configFile": "<root>/amp-settings.json"
+      },
+      "expectedCommand": {
+        "cmd": "amp",
+        "args": [
+          "--executor",
+          "local",
+          "--stream-json",
+          "--execute=Summarize the synthetic repository.",
+          "--settings-file",
+          "<root>/amp-settings.json"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "integer-valued-json-numbers",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":1.0,\"output_tokens\":2e2}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 1,
+        "tokensOut": 200,
+        "raw": [{"type":"assistant","message":{"usage":{"input_tokens":1,"output_tokens":200}}}]
+      }
+    },
+    {
+      "name": "unsafe-aggregate-is-null",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":9007199254740991,\"output_tokens\":1}}}\n{\"type\":\"assistant\",\"message\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":2}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": 3,
+        "raw": [
+          {"type":"assistant","message":{"usage":{"input_tokens":9007199254740991,"output_tokens":1}}},
+          {"type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":2}}}
+        ]
+      }
+    }
+  ]
+}

@@ -64,7 +64,7 @@ const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MOD
 /** Native knobs `specFor`'s projected instructions need before the adapter accepts them. */
 const PROJECTION_NATIVE: Record<string, NativeOptions> = { 'mistral-vibe': { kind: 'mistral-vibe', trust: true } }
 
-const NO_BYPASS = ['opencode', 'pi', 'crush', 'swe-agent']
+const NO_BYPASS = ['amp', 'opencode', 'pi', 'crush', 'swe-agent']
 
 const ALL_BYPASS_FLAGS = Object.values(BYPASS_FLAGS).flat()
 const SHIPPED = [...Object.keys(BYPASS_FLAGS), ...Object.keys(BYPASS_ENVS), ...NO_BYPASS]
@@ -251,6 +251,7 @@ describe('getCapabilities', () => {
       copilot: ['COPILOT_HOME', null],
       'mistral-vibe': ['VIBE_HOME', null],
       cursor: ['CURSOR_CONFIG_DIR', null],
+      amp: [null, '--settings-file'],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)
@@ -265,7 +266,7 @@ describe('getCapabilities', () => {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS || name in BYPASS_ENVS)
-      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot' && name !== 'mistral-vibe') expect(caps.nativeOptions).toBeNull()
+      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot' && name !== 'amp' && name !== 'mistral-vibe') expect(caps.nativeOptions).toBeNull()
       else expect(caps.nativeOptions).toBe(name)
       expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)

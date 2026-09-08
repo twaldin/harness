@@ -2,16 +2,10 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
-- Repaired Claude Code, OpenClaude, Factory Droid, Gemini, Qwen, Continue and
-  SWE-wrapper artifact helpers in both languages, with shared upstream-shaped
-  fixtures and native cutoff units. Discovery honors qualified config roots and
-  project metadata instead of unrelated latest/basename logs. OpenClaude now
-  uses only its own config root and preserves provider model namespaces.
-  Native session metrics replace guessed schemas; Continue headless output
-  remains non-telemetry. See [sources and runtime limits](ADAPTER-MATRIX.md#artifact-qualification--2026-09-08).
-  Malformed or unsafe Claude token totals and non-finite Continue metrics remain
-  unknown rather than throwing or reporting invalid numeric telemetry.
-  Pane precedence and controlled-session ownership are unchanged.
+- Added `amp` local execute mode in both languages through the shared subprocess
+  lifecycle. `AmpOptions.mode` selects an upstream mode; direct model selection
+  and bypass reject. JSONL retains native thread identity, errors and optional
+  token usage; USD is unavailable. See [setup and smoke limits](ADAPTER-MATRIX.md#amp).
 - Added `mistral-vibe` in both languages, using native completed-history JSONL
   and the shared lifecycle. `VibeOptions` exposes agent selection and explicit
   invocation-only workspace trust; projected instructions require trust.
@@ -75,6 +69,16 @@
   telemetry limits, and paired migration examples. Existing results remain
   compatible; these source changes are not yet a package release. Paired
   fixture-update patch bumps follow SPEC and do not publish packages.
+- Repaired Claude Code, OpenClaude, Factory Droid, Gemini, Qwen, Continue and
+  SWE-wrapper artifact helpers in both languages, with shared upstream-shaped
+  fixtures and native cutoff units. Discovery honors qualified config roots and
+  project metadata instead of unrelated latest/basename logs. OpenClaude now
+  uses only its own config root and preserves provider model namespaces.
+  Native session metrics replace guessed schemas; Continue headless output
+  remains non-telemetry. See [sources and runtime limits](ADAPTER-MATRIX.md#artifact-qualification--2026-09-08).
+  Malformed or unsafe Claude token totals and non-finite Continue metrics remain
+  unknown rather than throwing or reporting invalid numeric telemetry.
+  Pane precedence and controlled-session ownership are unchanged.
 
 ## 2026-05-06 (later)
 

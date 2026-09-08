@@ -41,7 +41,7 @@ ErrorCode = Literal[
     "protocol-error",
     "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "mistral-vibe"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 #: Signal the runner sends the owned process group once before escalating to
@@ -125,6 +125,19 @@ class CopilotOptions:
 
 
 @dataclass(frozen=True)
+class AmpOptions:
+    """Typed `amp` CLI knobs. `mode` is emitted as `--mode <value>`.
+
+    Amp resolves the value against its built-in and plugin agent modes at
+    runtime (key or label), so it is a non-blank, NUL-free string passed
+    through verbatim rather than an enum. Omitted: upstream config decides.
+    """
+
+    kind: Literal["amp"] = field(default="amp", init=False)
+    mode: str | None = None
+
+
+@dataclass(frozen=True)
 class VibeOptions:
     """Typed `vibe` (Mistral Vibe) CLI knobs. `agent` is emitted as
     `--agent=<name>` and `trust` as a bare `--trust` when True, in that order.
@@ -140,7 +153,7 @@ class VibeOptions:
     trust: bool | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | VibeOptions
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions
 
 
 @dataclass
@@ -175,7 +188,7 @@ class RunSpec:
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
                       `CodexOptions`, `ClineOptions`, `CopilotOptions`,
-                      `VibeOptions`). The kind must match `harness`.
+                      `AmpOptions`, `VibeOptions`). The kind must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -588,9 +601,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, VibeOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions or VibeOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions or VibeOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -633,6 +646,10 @@ class Adapter(ABC):
                     "cline auto_approve conflicts with permission_policy='bypass' (bypass is --auto-approve true); choose one",
                     code="invalid-options",
                 )
+        elif isinstance(native, AmpOptions):
+            mode = native.mode
+            if mode is not None and (not isinstance(mode, str) or not mode.strip() or "\0" in mode):
+                raise HarnessError("amp mode must be None or a non-blank string without NUL bytes", code="invalid-options")
         elif isinstance(native, VibeOptions):
             agent = native.agent
             if agent is not None and (not isinstance(agent, str) or not agent.strip() or "\0" in agent):
@@ -670,6 +687,8 @@ class Adapter(ABC):
                 *(f"--allow-tool={rule}" for rule in native.allow_tools or ()),
                 *(f"--deny-tool={rule}" for rule in native.deny_tools or ()),
             )
+        elif isinstance(native, AmpOptions) and native.mode is not None:
+            native_args = ("--mode", native.mode)
         elif isinstance(native, VibeOptions):
             if native.agent is not None:
                 native_args += (f"--agent={native.agent}",)

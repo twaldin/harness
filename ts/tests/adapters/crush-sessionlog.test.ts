@@ -13,7 +13,7 @@ const SCHEMA = [
   "CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, parts TEXT NOT NULL DEFAULT '[]', model TEXT, provider TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, finished_at INTEGER)",
 ]
 
-function seed(models: string[], cost: number, withMessages = true): { workdir: string; dbPath: string } {
+function seed(models: (string | null)[], cost: number, withMessages = true): { workdir: string; dbPath: string } {
   const root = mkdtempSync(join(tmpdir(), 'harness-ts-crush-'))
   const workdir = join(root, 'repo')
   const dataDir = join(workdir, '.harness', 'crush-data')
@@ -60,8 +60,8 @@ describe('crush session log', () => {
     expect(telemetry.costUsd).not.toBe(deriveCost('gpt-5.4', 111, 22))
   })
 
-  test('mixed-model session reports no model and no estimate', () => {
-    const { workdir } = seed(['gpt-5.4-mini', 'claude-sonnet-4-6'], 0)
+  test.each(['claude-sonnet-4-6', null])('inconsistent or unavailable model %s prevents estimation', (otherModel) => {
+    const { workdir } = seed(['gpt-5.4-mini', otherModel], 0)
     const telemetry = getAdapter('crush').parseSessionLog!(getAdapter('crush').sessionLogPath!(workdir)!)
     expect([telemetry.tokensIn, telemetry.tokensOut, telemetry.costUsd, telemetry.model]).toEqual([111, 22, 0, null])
   })

@@ -158,6 +158,7 @@ class CodexAdapter(Adapter):
         model_name: str | None = None
         context_model: str | None = None
         mixed_models = False
+        missing_model = False
         try:
             for line in p.read_text(encoding="utf-8").splitlines():
                 t = line.strip()
@@ -185,17 +186,21 @@ class CodexAdapter(Adapter):
                 if event.get("type") == "turn_context":
                     payload = event.get("payload")
                     m = payload.get("model") if isinstance(payload, dict) else None
-                    if isinstance(m, str) and m:
+                    if isinstance(m, str) and m.strip():
                         if context_model is None:
                             context_model = m
                         elif context_model != m:
                             mixed_models = True
+                    else:
+                        missing_model = True
         except OSError:
             return SessionTelemetry(path, None, None, None, None, None)
-        # Cumulative usage spans every turn; a mixed-model total cannot be
-        # priced using one arbitrarily selected model.
-        if context_model is not None:
-            model_name = None if mixed_models else context_model
+        # Cumulative usage cannot be attributed to one model when any
+        # contributing context has a missing model or disagrees with another.
+        if missing_model or mixed_models:
+            model_name = None
+        elif context_model is not None:
+            model_name = context_model
         ti = last_in if saw_usage else None
         to = last_out if saw_usage else None
         return SessionTelemetry(path, ti, to, derive_cost(model_name, ti, to), model_name, None)

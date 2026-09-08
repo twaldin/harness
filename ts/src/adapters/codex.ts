@@ -134,6 +134,7 @@ codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {
   let modelName: string | null = null
   let contextModel: string | null = null
   let mixedModels = false
+  let missingModel = false
   try {
     for (const line of readFileSync(path, 'utf-8').split('\n')) {
       const t = line.trim()
@@ -162,18 +163,21 @@ codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {
         const payload = obj['payload']
         const m = payload && typeof payload === 'object'
           ? (payload as Record<string, unknown>)['model'] : undefined
-        if (typeof m === 'string' && m) {
+        if (typeof m === 'string' && m.trim()) {
           if (contextModel === null) contextModel = m
           else if (contextModel !== m) mixedModels = true
+        } else {
+          missingModel = true
         }
       }
     }
   } catch {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
-  // Cumulative usage spans every turn; do not price a mixed-model total
-  // using one arbitrarily selected model.
-  if (contextModel !== null) modelName = mixedModels ? null : contextModel
+  // Cumulative usage cannot be attributed to one model when any
+  // contributing context has a missing model or disagrees with another.
+  if (missingModel || mixedModels) modelName = null
+  else if (contextModel !== null) modelName = contextModel
   const ti = sawUsage ? lastIn : null
   const to = sawUsage ? lastOut : null
   return { sessionLogPath: path, tokensIn: ti, tokensOut: to, costUsd: deriveCost(modelName, ti, to), model: modelName, raw: null }

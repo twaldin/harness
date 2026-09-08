@@ -56,6 +56,30 @@
   },
   "cases": [
     {
+      "name": "normalized-command-retains-requested-reporting-label",
+      "spec": {
+        "model": " anthropic/claude-sonnet-4-6 "
+      },
+      "expectedCommand": {
+        "cmd": "cn",
+        "args": [
+          "-p",
+          "add docstrings to all public functions",
+          "--model",
+          "anthropic/claude-sonnet-4-6",
+          "--rule",
+          "<workdir>/CONTINUE.md",
+          "--format",
+          "json"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/CONTINUE.md",
+        "directories": [],
+        "model": " anthropic/claude-sonnet-4-6 "
+      }
+    },
+    {
       "name": "caller-config-rejects-explicit-Hub-model",
       "spec": {
         "configFile": "<root>/continue.yaml"

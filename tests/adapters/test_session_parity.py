@@ -162,13 +162,15 @@ def test_session_log_path_and_parse_parity_sqlite(adapter: str, tmp_path: Path, 
     [
         (["gpt-5.4-mini"], "gpt-5.4-mini", 0.00056),
         (["gpt-5.4-mini", "gpt-5.4"], None, None),
+        (["gpt-5.4-mini", None], None, None),
+        ([None, "gpt-5.4-mini"], None, None),
         ([], None, None),
     ],
 )
 def test_codex_rollout_model_pricing_parity(models, expected_model, expected_cost, tmp_path: Path):
     if shutil.which("bun") is None:
         pytest.skip("bun not available")
-    events = [{"type": "turn_context", "payload": {"model": model}} for model in models]
+    events = [{"type": "turn_context", "payload": {} if model is None else {"model": model}} for model in models]
     events.extend([
         {"type": "event_msg", "payload": {"type": "token_count", "info": {
             "total_token_usage": {"input_tokens": 500, "output_tokens": 50}}}},

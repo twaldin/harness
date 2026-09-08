@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain twenty-five adapters, with shared fixture files:
+After adapter initialization, both registries contain twenty-six adapters, with shared fixture files:
 `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
-`gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qoder`, `qwen`, `swe-agent`.
+`gemini`, `goose`, `hermes`, `kilo`, `kimi-code`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qoder`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
@@ -141,10 +141,15 @@ See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
 
 The September 7 catalog discovered Qoder and Kimi Code under
 [TWA-87](https://linear.app/twaldin/issue/TWA-87), dependent on shared conformance
-[TWA-67](https://linear.app/twaldin/issue/TWA-67). Qoder has since shipped above;
-Kimi Code retains its separate implementation ticket below.
+[TWA-67](https://linear.app/twaldin/issue/TWA-67). Both have since shipped:
+Qoder is listed above; Kimi Code's intake evidence and current reference follow.
 
 ### Kimi Code CLI — [TWA-93](https://linear.app/twaldin/issue/TWA-93)
+
+**Shipped September 8:** one `kimi-code` adapter in both languages. See the
+[maintained adapter reference](ADAPTER-MATRIX.md#kimi-code) for current
+permissions, configuration, parsing and qualification gaps. The original
+source-qualified intake evidence follows.
 
 - **Identity / maintenance:** [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code),
   MIT; npm [`@moonshot-ai/kimi-code`](https://www.npmjs.com/package/@moonshot-ai/kimi-code)

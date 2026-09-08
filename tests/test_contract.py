@@ -50,7 +50,7 @@ BYPASS_ARGS = {
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
 ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
-NO_BYPASS = ["amp", "crush", "opencode", "pi", "qoder", "swe-agent"]
+NO_BYPASS = ["amp", "crush", "kimi-code", "opencode", "pi", "qoder", "swe-agent"]
 
 
 def _spec(harness: str, workdir: Path, **kw) -> RunSpec:
@@ -284,6 +284,7 @@ CONFIG_MAPPINGS = {
     "amp": (None, "--settings-file"),
     "mistral-vibe": ("VIBE_HOME", None),
     "mini-swe-agent": ("MSWEA_GLOBAL_CONFIG_DIR", "--config"),
+    "kimi-code": ("KIMI_CODE_HOME", None),
     "qoder": ("QODER_CONFIG_DIR", None),
 }
 

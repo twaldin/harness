@@ -66,7 +66,7 @@ const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MOD
 /** Native knobs `specFor`'s projected instructions need before the adapter accepts them. */
 const PROJECTION_NATIVE: Record<string, NativeOptions> = { 'mistral-vibe': { kind: 'mistral-vibe', trust: true } }
 
-const NO_BYPASS = ['amp', 'opencode', 'pi', 'crush', 'swe-agent', 'qoder']
+const NO_BYPASS = ['amp', 'opencode', 'pi', 'crush', 'swe-agent', 'kimi-code', 'qoder']
 
 const ALL_BYPASS_FLAGS = Object.values(BYPASS_FLAGS).flat()
 const SHIPPED = [...Object.keys(BYPASS_FLAGS), ...Object.keys(BYPASS_ENVS), ...NO_BYPASS]
@@ -256,6 +256,7 @@ describe('getCapabilities', () => {
       'mini-swe-agent': ['MSWEA_GLOBAL_CONFIG_DIR', '--config'],
       cursor: ['CURSOR_CONFIG_DIR', null],
       amp: [null, '--settings-file'],
+      'kimi-code': ['KIMI_CODE_HOME', null],
       qoder: ['QODER_CONFIG_DIR', null],
     }
     for (const name of SHIPPED) {

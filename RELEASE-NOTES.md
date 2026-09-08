@@ -2,6 +2,12 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added maintained `kimi-code` in both languages, with exact model aliases,
+  caller-selected `KIMI_CODE_HOME` and shared subprocess lifecycle. Native print
+  mode implies auto permissions; explicit bypass and arbitrary config files
+  reject. Assistant/tool JSONL stays in `raw`; accounting remains unknown.
+  Source and synthetic conformance only; no native/provider smoke is claimed.
+  See [setup and qualification limits](ADAPTER-MATRIX.md#kimi-code).
 - Added `qoder` in Python and TypeScript with explicit non-bypass permission
   modes, caller-selected model/config/auth and shared subprocess cleanup.
   Native JSON/errors remain raw; token/USD metrics stay null. Provider edit/test

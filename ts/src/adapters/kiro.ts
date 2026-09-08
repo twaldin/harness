@@ -1,28 +1,11 @@
 import { register } from '../registry.js'
 import { HarnessError, finalizeCommand, validateRunSpec } from '../base.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
+import { parseJsonObjectLines } from '../util.js'
 
 // Kiro CLI 2.21.1 `chat --no-interactive --agent-engine v2 --output-format stream-json`
 // writes native ACP events as JSON Lines. No aggregate accounting schema is
 // qualified, so metrics stay null and objects are preserved for the caller.
-
-function parseKiroEvents(stdout: string): ParsedOutput {
-  const events: object[] = []
-  // A complete final line needs no trailing newline; a truncated one fails to
-  // parse and is dropped like any other malformed line.
-  for (const line of stdout.split('\n')) {
-    const s = line.trim()
-    if (!s) continue
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(s)
-    } catch {
-      continue
-    }
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) events.push(parsed)
-  }
-  return { costUsd: null, tokensIn: null, tokensOut: null, raw: events.length === 0 ? null : events }
-}
 
 const kiroAdapter: Adapter = {
   name: 'kiro',
@@ -47,7 +30,8 @@ const kiroAdapter: Adapter = {
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
-    return parseKiroEvents(outcome.stdout)
+    const events = parseJsonObjectLines(outcome.stdout)
+    return { costUsd: null, tokensIn: null, tokensOut: null, raw: events.length === 0 ? null : events }
   },
 }
 

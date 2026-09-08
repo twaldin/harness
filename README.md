@@ -2,7 +2,7 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro`, `qoder` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kimi-code`, `kiro`, `qoder` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -193,7 +193,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-five adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-six adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 
@@ -419,7 +419,7 @@ Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md
 
 ## Status
 
-Twenty-five adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro`, `qoder`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
+Twenty-six adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kimi-code`, `kiro`, `qoder`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
 ### host Node version
 
@@ -476,6 +476,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 - `mini-swe-agent` invokes native `mini`, separately from the legacy `swe-agent` wrapper. Onboarding is disabled in the child; tool approval remains explicit. It reads only a trajectory confirmed by the current CLI output. Local shell actions can escape CLI-group cancellation. See [setup, permissions, extraction and coverage](ADAPTER-MATRIX.md#mini-swe-agent).
 - `kiro` uses official `kiro-cli` headless V2 with JSONL events. Tool trust is explicit through `KiroOptions`; bypass alone grants all tools. Model/auth remain caller-selected, and token/USD totals remain null. See [setup, migration and coverage](ADAPTER-MATRIX.md#kiro).
 - `auggie` uses official `@augmentcode/auggie` in print/JSON mode. A configured Augment account and noninteractive entitlement are required; JSON-native completion/error records remain in `raw`, while authentication, entitlement and other non-JSON failures remain in process status and `stderr`. Credits are never converted to USD. See [setup, permissions and qualification limits](ADAPTER-MATRIX.md#auggie).
+- `kimi-code` invokes maintained `@moonshot-ai/kimi-code` (`kimi`), not the Python predecessor. **Print mode always uses native auto permissions**; explicit bypass is unsupported rather than silently dropped. Exact model aliases and `KIMI_CODE_HOME` remain caller-selected. JSONL assistant/tool messages remain in `raw`, with null accounting. Source/fixture qualification only; no installed/provider smoke. See [setup and limits](ADAPTER-MATRIX.md#kimi-code).
 - `qoder` uses official `@qoder-ai/qodercli` with JSON output. `QoderOptions(permission_mode="accept_edits")` / `{kind: 'qoder', permissionMode: 'accept_edits'}` approves workspace edits, not shell commands. Model, `QODER_CONFIG_DIR` and account auth remain caller-selected; metrics stay null. See [setup, prompt compatibility and provider-smoke gaps](ADAPTER-MATRIX.md#qoder).
 
 Pending:

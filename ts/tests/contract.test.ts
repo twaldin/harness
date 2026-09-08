@@ -57,6 +57,7 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   'continue-cli': ['--auto'],
   cline: ['--auto-approve', 'true'],
   copilot: ['--allow-all'],
+  cursor: ['--force'],
 }
 const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MODE: 'auto' } }
 
@@ -244,6 +245,7 @@ describe('getCapabilities', () => {
       omp: ['PI_CODING_AGENT_DIR', '--config'],
       cline: ['CLINE_DIR', null],
       copilot: ['COPILOT_HOME', null],
+      cursor: ['CURSOR_CONFIG_DIR', null],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)

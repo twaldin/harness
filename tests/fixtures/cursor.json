@@ -1,0 +1,639 @@
+{
+  "spec": {
+    "harness": "cursor",
+    "prompt": "Summarize the synthetic repository.",
+    "instructions": "Use only the synthetic repository.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "agent",
+    "args": [
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--stream-partial-output",
+      "--",
+      "Summarize the synthetic repository."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null,
+    "gracefulSignal": "SIGINT"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": "CURSOR_CONFIG_DIR",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 2.5,
+    "timedOut": false,
+    "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"env\",\"cwd\":\"/synthetic\",\"session_id\":\"synthetic-session\",\"model\":\"Synthetic Model\",\"permissionMode\":\"default\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One file.\"}]},\"session_id\":\"synthetic-session\",\"timestamp_ms\":100}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\",\"usage\":{\"inputTokens\":100,\"outputTokens\":12,\"cacheReadTokens\":50,\"cacheWriteTokens\":25}}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": 100,
+    "tokensOut": 12,
+    "raw": [
+      {
+        "type": "system",
+        "subtype": "init",
+        "apiKeySource": "env",
+        "cwd": "/synthetic",
+        "session_id": "synthetic-session",
+        "model": "Synthetic Model",
+        "permissionMode": "default"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "One file."
+            }
+          ]
+        },
+        "session_id": "synthetic-session",
+        "timestamp_ms": 100
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "duration_ms": 1234,
+        "duration_api_ms": 1234,
+        "result": "One file.",
+        "session_id": "synthetic-session",
+        "request_id": "synthetic-request",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 12,
+          "cacheReadTokens": 50,
+          "cacheWriteTokens": 25
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "auth-failure-stderr-no-json",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": "Synthetic failure.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "partial-stream-retains-events-before-truncated-tail",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"env\",\"cwd\":\"/synthetic\",\"session_id\":\"synthetic-session\",\"model\":\"Synthetic Model\",\"permissionMode\":\"default\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One file.\"}]},\"session_id\":\"synthetic-session\",\"timestamp_ms\":100}\n{\"type\":\"result\",\"usage\":",
+        "stderr": "Synthetic failure.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "system",
+            "subtype": "init",
+            "apiKeySource": "env",
+            "cwd": "/synthetic",
+            "session_id": "synthetic-session",
+            "model": "Synthetic Model",
+            "permissionMode": "default"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "One file."
+                }
+              ]
+            },
+            "session_id": "synthetic-session",
+            "timestamp_ms": 100
+          }
+        ]
+      }
+    },
+    {
+      "name": "documented-result-without-usage",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request"
+          }
+        ]
+      }
+    },
+    {
+      "name": "delta-flush-and-result-remain-distinct",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One file.\"}]},\"session_id\":\"synthetic-session\",\"timestamp_ms\":100}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One file.\"}]},\"session_id\":\"synthetic-session\",\"timestamp_ms\":100,\"model_call_id\":\"synthetic-call\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One file.\"}]},\"session_id\":\"synthetic-session\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\",\"usage\":{\"inputTokens\":100,\"outputTokens\":12,\"cacheReadTokens\":50,\"cacheWriteTokens\":25}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 100,
+        "tokensOut": 12,
+        "raw": [
+          {
+            "type": "assistant",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "One file."
+                }
+              ]
+            },
+            "session_id": "synthetic-session",
+            "timestamp_ms": 100
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "One file."
+                }
+              ]
+            },
+            "session_id": "synthetic-session",
+            "timestamp_ms": 100,
+            "model_call_id": "synthetic-call"
+          },
+          {
+            "type": "assistant",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "One file."
+                }
+              ]
+            },
+            "session_id": "synthetic-session"
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request",
+            "usage": {
+              "inputTokens": 100,
+              "outputTokens": 12,
+              "cacheReadTokens": 50,
+              "cacheWriteTokens": 25
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "last-result-authoritative-not-summed",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\",\"usage\":{\"inputTokens\":100,\"outputTokens\":12,\"cacheReadTokens\":50,\"cacheWriteTokens\":25}}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":999}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request",
+            "usage": {
+              "inputTokens": 100,
+              "outputTokens": 12,
+              "cacheReadTokens": 50,
+              "cacheWriteTokens": 25
+            }
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request",
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 999
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "last-result-without-usage-clears-earlier-counts",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\",\"usage\":{\"inputTokens\":100,\"outputTokens\":12,\"cacheReadTokens\":50,\"cacheWriteTokens\":25}}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request",
+            "usage": {
+              "inputTokens": 100,
+              "outputTokens": 12,
+              "cacheReadTokens": 50,
+              "cacheWriteTokens": 25
+            }
+          },
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-usage-fields-independent",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\",\"usage\":{\"inputTokens\":true,\"outputTokens\":4}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": 4,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request",
+            "usage": {
+              "inputTokens": true,
+              "outputTokens": 4
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "negative-and-string-counts-rejected",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":1234,\"duration_api_ms\":1234,\"result\":\"One file.\",\"session_id\":\"synthetic-session\",\"request_id\":\"synthetic-request\",\"usage\":{\"inputTokens\":-1,\"outputTokens\":\"12\"}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request",
+            "usage": {
+              "inputTokens": -1,
+              "outputTokens": "12"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "nonresult-usage-does-not-report-totals",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"One file.\"}]},\"session_id\":\"synthetic-session\",\"timestamp_ms\":100,\"usage\":{\"inputTokens\":100,\"outputTokens\":12}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "assistant",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "One file."
+                }
+              ]
+            },
+            "session_id": "synthetic-session",
+            "timestamp_ms": 100,
+            "usage": {
+              "inputTokens": 100,
+              "outputTokens": 12
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "native-error-does-not-rewrite-exit",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"Synthetic error\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "error",
+            "is_error": true,
+            "result": "Synthetic error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "strict-json-noise-and-final-line-without-newline",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "null\n[]\n1\n{\"bad\":NaN}\n{\"bad\":Infinity}\nnoise\n{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": false, \"duration_ms\": 1234, \"duration_api_ms\": 1234, \"result\": \"One file.\", \"session_id\": \"synthetic-session\", \"request_id\": \"synthetic-request\"}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "duration_ms": 1234,
+            "duration_api_ms": 1234,
+            "result": "One file.",
+            "session_id": "synthetic-session",
+            "request_id": "synthetic-request"
+          }
+        ]
+      }
+    },
+    {
+      "name": "explicit-bypass-only",
+      "spec": {
+        "permissionPolicy": "bypass"
+      },
+      "expectedCommand": {
+        "cmd": "agent",
+        "args": [
+          "--print",
+          "--output-format",
+          "stream-json",
+          "--stream-partial-output",
+          "--force",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "leading-dash-prompt-literal",
+      "spec": {
+        "prompt": "--force\nsecond line"
+      },
+      "expectedCommand": {
+        "cmd": "agent",
+        "args": [
+          "--print",
+          "--output-format",
+          "stream-json",
+          "--stream-partial-output",
+          "--",
+          "--force\nsecond line"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "explicit-model-preserved",
+      "spec": {
+        "model": " vendor/model[effort=high] "
+      },
+      "expectedCommand": {
+        "cmd": "agent",
+        "args": [
+          "--print",
+          "--output-format",
+          "stream-json",
+          "--stream-partial-output",
+          "--model",
+          "vendor/model[effort=high]",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": " vendor/model[effort=high] ",
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "config-home-executable-and-native-env",
+      "spec": {
+        "configHome": "<root>/cursor-home",
+        "executable": "<root>/cursor-agent",
+        "env": {
+          "CURSOR_API_ENDPOINT": "https://synthetic.invalid"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "<root>/cursor-agent",
+        "args": [
+          "--print",
+          "--output-format",
+          "stream-json",
+          "--stream-partial-output",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CURSOR_CONFIG_DIR": "<root>/cursor-home",
+          "CURSOR_API_ENDPOINT": "https://synthetic.invalid"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "empty-prompt",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "config-home-conflict",
+      "spec": {
+        "configHome": "<root>/cursor-home",
+        "env": {
+          "CURSOR_CONFIG_DIR": "<root>/other"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "config-file-unsupported",
+      "spec": {
+        "configFile": "<root>/cli.json"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "native-mode-unsupported",
+      "spec": {
+        "nativeOptions": {
+          "kind": "cursor",
+          "mode": "ask"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "sdk-unsupported",
+      "spec": {
+        "backend": "sdk"
+      },
+      "expectedError": "unsupported-backend"
+    },
+    {
+      "name": "rpc-unsupported",
+      "spec": {
+        "backend": "rpc"
+      },
+      "expectedError": "unsupported-backend"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, ScrollKeys, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -18,11 +18,17 @@ const claudeCodeAdapter: Adapter = {
   instructionsFilename: 'CLAUDE.md',
   defaultModel: 'sonnet',
   scrollOwnership: 'fullscreen-aware',
+  permissionBypassArgs: ['--dangerously-skip-permissions'],
+  nativeOptionsKind: 'claude-code',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model, permissionArgs, nativeOptions } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-    const args = ['-p', spec.prompt, '--model', model, '--output-format', 'json', '--dangerously-skip-permissions']
+    const args = ['-p', spec.prompt, '--model', model]
+    if (nativeOptions?.kind === 'claude-code' && nativeOptions.effort) {
+      args.push('--effort', nativeOptions.effort)
+    }
+    args.push('--output-format', 'json', ...permissionArgs)
     // -p mode does not auto-walk workdir for CLAUDE.md; inject explicitly so
     // the instructions are always visible to the model.
     if (spec.instructions) {

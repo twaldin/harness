@@ -1,7 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -49,9 +49,10 @@ const openClaudeAdapter: Adapter = {
   name: 'openclaude',
   instructionsFilename: 'CLAUDE.md',
   defaultModel: 'gpt-5.4',
+  permissionBypassArgs: ['--dangerously-skip-permissions'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model, permissionArgs } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     const args = [
@@ -59,7 +60,7 @@ const openClaudeAdapter: Adapter = {
       spec.prompt,
       '--output-format',
       'json',
-      '--dangerously-skip-permissions',
+      ...permissionArgs,
     ]
     if (spec.instructions) {
       args.push('--append-system-prompt', spec.instructions)

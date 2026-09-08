@@ -2,22 +2,49 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, write_instructions
-from harness.base import Adapter, BuildCommand, RunSpec, SessionTelemetry
-from harness.model_normalization import normalize_model_for_harness
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    SessionTelemetry,
+)
 from harness.pricing import derive_cost
+from harness.util import last_non_empty_join, strip_ansi
+
+_READY_RE = re.compile(r"Ready\s*[-—]", re.IGNORECASE)
+_PROMPT_LINE_RE = re.compile(r"^\s*❯\s*$")
+_PROMPT_TAIL_RE = re.compile(r"❯\s*$")
+_UPDATE_RE = re.compile(r"Update available", re.IGNORECASE)
+_RATE_LIMIT_RE = re.compile(r"rate.?limit", re.IGNORECASE)
+_SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_WORKING_RE = re.compile(r"Thinking|Working", re.IGNORECASE)
 
 
 class OpenClaudeAdapter(Adapter):
     name = "openclaude"
     instructions_filename = "CLAUDE.md"
+    permission_bypass_args = ("--dangerously-skip-permissions",)
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "openclaude"),
+        update_command=("npm", "install", "-g", "openclaude@latest"),
+        version_command=("openclaude", "--version"),
+    )
 
     DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
+        model = resolved.model
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         args = [
@@ -25,11 +52,14 @@ class OpenClaudeAdapter(Adapter):
             spec.prompt,
             "--output-format",
             "json",
-            "--dangerously-skip-permissions",
+            *resolved.permission_args,
         ]
         if spec.instructions:
             args += ["--append-system-prompt", spec.instructions]
 
+        # OpenAI-compatible provider path: prefer env-based setup. openclaude's
+        # README documents OPENAI_MODEL + CLAUDE_CODE_USE_OPENAI rather than an
+        # explicit --model flag for custom OpenAI-compatible endpoints.
         env: dict[str, str] = {}
         if spec.env.get("OPENAI_API_KEY") or spec.env.get("OPENAI_BASE_URL"):
             env["CLAUDE_CODE_USE_OPENAI"] = "1"
@@ -46,7 +76,7 @@ class OpenClaudeAdapter(Adapter):
             instructions_file=instructions_file,
         )
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw = _parse_last_json_object(outcome.stdout)
         if not isinstance(raw, dict):
             return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
@@ -116,6 +146,32 @@ class OpenClaudeAdapter(Adapter):
         final_out = tokens_out if saw_usage else None
         final_cost = cost_usd if saw_cost else derive_cost(model_name, final_in, final_out)
         return SessionTelemetry(path, final_in, final_out, final_cost, model_name, None)
+
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        last20 = last_non_empty_join(pane, 20)
+        # openclaude shows "Ready — type /help to begin" + ❯ prompt
+        if _READY_RE.search(last20) or any(_PROMPT_LINE_RE.match(l.strip()) for l in strip_ansi(pane).split("\n")):
+            return "ready"
+        if _UPDATE_RE.search(last20):
+            return "dialog"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        if _UPDATE_RE.search(strip_ansi(pane)):
+            return ["Escape"]
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        last10 = last_non_empty_join(pane, 10)
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _SPINNER_RE.search(last10) or _WORKING_RE.search(last10):
+            return "running"
+        if _READY_RE.search(last10) or _PROMPT_TAIL_RE.search(last10):
+            return "idle"
+        return "unknown"
 
 
 def _parse_last_json_object(stdout: str) -> dict | None:

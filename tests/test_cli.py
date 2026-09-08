@@ -60,3 +60,36 @@ def test_run_passes_model_no_resolve_flag(monkeypatch, tmp_path: Path):
     assert result.exit_code == 0
     assert captured["spec"].model_no_resolve is True
     assert captured["spec"].model == "openai/gpt-5.4"
+
+
+def test_run_passes_policy_and_backend_defaults(monkeypatch, tmp_path: Path):
+    captured = {}
+
+    def fake_run(spec):
+        captured["spec"] = spec
+        raise SystemExit(0)
+
+    monkeypatch.setattr("harness.cli.run", fake_run)
+    runner.invoke(app, ["run", "hi", "--harness", "codex", "--workdir", str(tmp_path)])
+    assert captured["spec"].backend == "cli"
+    assert captured["spec"].permission_policy == "upstream"
+
+    runner.invoke(app, ["run", "hi", "--harness", "codex", "--workdir", str(tmp_path), "--permission-policy", "bypass"])
+    assert captured["spec"].permission_policy == "bypass"
+
+
+def test_run_rejects_unsupported_backend_without_spawning(monkeypatch, tmp_path: Path):
+    def boom(*_a, **_kw):
+        raise AssertionError("must not spawn")
+
+    monkeypatch.setattr("harness._subproc.run_subprocess", boom)
+    result = runner.invoke(app, ["run", "hi", "--harness", "codex", "--workdir", str(tmp_path), "--backend", "rpc"])
+    assert result.exit_code == 2
+    assert "unsupported-backend" in result.output
+    assert not (tmp_path / "AGENTS.md").exists()
+
+
+def test_run_rejects_invalid_policy_string(tmp_path: Path):
+    result = runner.invoke(app, ["run", "hi", "--harness", "codex", "--workdir", str(tmp_path), "--permission-policy", "yolo"])
+    assert result.exit_code != 0
+    assert "Invalid value for '--permission-policy'" in result.output

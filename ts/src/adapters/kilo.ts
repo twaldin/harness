@@ -1,7 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { createRequire } from 'module'
@@ -117,9 +117,10 @@ const kiloAdapter: Adapter = {
   name: 'kilo',
   instructionsFilename: 'AGENTS.md',
   defaultModel: 'gpt-5.4',
+  permissionBypassArgs: ['--auto'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model, permissionArgs } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     const dbPath = kiloDbPath(spec.workdir, spec.env)
@@ -140,7 +141,7 @@ const kiloAdapter: Adapter = {
 
     return {
       cmd: 'kilo',
-      args: ['run', '--auto', '--format', 'json', '--dir', spec.workdir, '--model', model, spec.prompt],
+      args: ['run', ...permissionArgs, '--format', 'json', '--dir', spec.workdir, '--model', model, spec.prompt],
       cwd: spec.workdir,
       env: {
         KILO_DB: dbPath,

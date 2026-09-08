@@ -2,9 +2,16 @@
 
 [agentelo](https://github.com/twaldin/agentelo) is a Bradley-Terry leaderboard for AI coding agents on real GitHub bugs. Its `bin/agentelo` (Node) currently has ~800 lines of per-harness spawn / env-setup / token-parsing logic, mirrored from the same patterns now living in `harness`'s adapters.
 
+This is a historical consumer-migration sketch, not evidence of a completed
+agentelo migration. Harness now also ships a native TypeScript package; new
+consumers can call `runAsync` directly. Both paths use upstream permission
+defaults unless bypass is explicitly selected. See [SPEC](../../SPEC.md).
+
 ## Migration plan: TS shells out to `harness run --json`
 
-Rather than port harness to TS, agentelo will call the Python `harness` CLI as a subprocess and parse its `--json` output. The Python startup cost (~150ms) is negligible against 15-25min agent runs.
+This sketch calls the Python `harness` CLI as a subprocess and parses its
+snake_case `--json` output. It is optional; TypeScript callers no longer need
+this bridge merely to use Harness.
 
 Sketch:
 
@@ -12,13 +19,14 @@ Sketch:
 // bin/agentelo (post-migration sketch)
 const { spawnSync } = require('child_process')
 
-function runHarness({ harness, model, workdir, prompt, instructionsFile, timeoutSeconds }) {
+function runHarness({ harness, model, workdir, prompt, instructionsFile, timeoutSeconds, permissionPolicy = 'upstream' }) {
   const args = [
     'run',
     '--harness', harness,
     '--model', model,
     '--workdir', workdir,
     '--timeout', String(timeoutSeconds),
+    '--permission-policy', permissionPolicy,
     '--json',
   ]
   if (instructionsFile) args.push('--instructions', instructionsFile)

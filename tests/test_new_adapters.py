@@ -32,7 +32,7 @@ def test_codex_sums_turn_completed_usage(tmp_path, monkeypatch):
         json.dumps({"type": "turn.completed", "usage": {"input_tokens": 50, "output_tokens": 20}}),
         json.dumps({"type": "other.event", "usage": {"input_tokens": 999}}),
     ])
-    monkeypatch.setattr("harness.adapters.codex.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
     spec = RunSpec(harness="codex", prompt="x", workdir=tmp_path, instructions="rules")
     result = CodexAdapter().run(spec)
     assert result.tokens_in == 150
@@ -42,7 +42,7 @@ def test_codex_sums_turn_completed_usage(tmp_path, monkeypatch):
 
 
 def test_codex_handles_empty_stdout(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness.adapters.codex.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     result = CodexAdapter().run(RunSpec(harness="codex", prompt="x", workdir=tmp_path))
     assert result.tokens_in is None
     assert result.tokens_out is None
@@ -54,7 +54,7 @@ def test_codex_handles_empty_stdout(tmp_path, monkeypatch):
 def test_gemini_parses_whole_stdout_json(tmp_path, monkeypatch):
     payload = {"stats": {"models": {"gemini-2.5-pro": {"tokens": {"input": 200, "candidates": 70}}}}}
     monkeypatch.setattr(
-        "harness.adapters.gemini.run_subprocess", lambda *a, **kw: _stub(stdout=json.dumps(payload))
+        "harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=json.dumps(payload))
     )
     spec = RunSpec(harness="gemini", prompt="x", workdir=tmp_path, instructions="r")
     result = GeminiAdapter().run(spec)
@@ -67,7 +67,7 @@ def test_gemini_parses_whole_stdout_json(tmp_path, monkeypatch):
 def test_gemini_falls_back_to_per_line_json(tmp_path, monkeypatch):
     embedded = json.dumps({"stats": {"models": {"x": {"tokens": {"input": 5, "candidates": 3}}}}})
     stdout = f"some preamble line\nbanner\n{embedded}\ntrailing junk"
-    monkeypatch.setattr("harness.adapters.gemini.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
     result = GeminiAdapter().run(RunSpec(harness="gemini", prompt="x", workdir=tmp_path))
     assert result.tokens_in == 5
     assert result.tokens_out == 3
@@ -75,7 +75,7 @@ def test_gemini_falls_back_to_per_line_json(tmp_path, monkeypatch):
 
 def test_gemini_no_stats_means_no_tokens(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "harness.adapters.gemini.run_subprocess", lambda *a, **kw: _stub(stdout='{"foo":"bar"}')
+        "harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout='{"foo":"bar"}')
     )
     result = GeminiAdapter().run(RunSpec(harness="gemini", prompt="x", workdir=tmp_path))
     assert result.tokens_in is None
@@ -87,7 +87,7 @@ def test_gemini_no_stats_means_no_tokens(tmp_path, monkeypatch):
 
 def test_aider_scrapes_token_summary(tmp_path, monkeypatch):
     stdout = "blah blah\nTokens: 12.4k sent, 850 received.\nDone."
-    monkeypatch.setattr("harness.adapters.aider.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
     spec = RunSpec(harness="aider", prompt="x", workdir=tmp_path, instructions="cfg yaml")
     result = AiderAdapter().run(spec)
     assert result.tokens_in == 12400
@@ -99,14 +99,14 @@ def test_aider_scrapes_token_summary(tmp_path, monkeypatch):
 
 def test_aider_handles_thousands_separators(tmp_path, monkeypatch):
     stdout = "Tokens: 1,234 sent, 5,678 received."
-    monkeypatch.setattr("harness.adapters.aider.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
     result = AiderAdapter().run(RunSpec(harness="aider", prompt="x", workdir=tmp_path))
     assert result.tokens_in == 1234
     assert result.tokens_out == 5678
 
 
 def test_aider_no_token_line_returns_none(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness.adapters.aider.run_subprocess", lambda *a, **kw: _stub(stdout="no info"))
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout="no info"))
     result = AiderAdapter().run(RunSpec(harness="aider", prompt="x", workdir=tmp_path))
     assert result.tokens_in is None
     assert result.tokens_out is None
@@ -116,7 +116,7 @@ def test_aider_no_token_line_returns_none(tmp_path, monkeypatch):
 
 
 def test_swe_agent_requires_wrapper(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness.adapters.swe_agent.run_subprocess", lambda *a, **kw: _stub())
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "fake-home")  # no agentelo wrapper here
     monkeypatch.delenv("SWE_WRAPPER", raising=False)
     spec = RunSpec(harness="swe-agent", prompt="x", workdir=tmp_path)
@@ -142,7 +142,7 @@ def test_swe_agent_reads_trajectory(tmp_path, monkeypatch):
         (tmp_path / ".harness" / "swe-traj.json").write_text(json.dumps(traj))
         return _stub()
 
-    monkeypatch.setattr("harness.adapters.swe_agent.run_subprocess", fake_run)
+    monkeypatch.setattr("harness._subproc.run_subprocess", fake_run)
     spec = RunSpec(harness="swe-agent", prompt="x", workdir=tmp_path, env={"SWE_WRAPPER": str(wrapper)})
     result = SweAgentAdapter().run(spec)
     assert result.tokens_in == 150
@@ -160,7 +160,7 @@ def test_swe_agent_folds_instructions_into_prompt(tmp_path, monkeypatch):
         captured["cmd"] = cmd
         return _stub()
 
-    monkeypatch.setattr("harness.adapters.swe_agent.run_subprocess", fake_run)
+    monkeypatch.setattr("harness._subproc.run_subprocess", fake_run)
     spec = RunSpec(
         harness="swe-agent",
         prompt="fix the bug",

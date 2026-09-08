@@ -1,7 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { basename, join } from 'path'
@@ -77,9 +77,10 @@ const factoryDroidAdapter: Adapter = {
   name: 'factory-droid',
   instructionsFilename: 'AGENTS.md',
   defaultModel: 'gpt-5.4',
+  permissionBypassArgs: ['--skip-permissions-unsafe'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model, permissionArgs } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     return {
@@ -88,7 +89,7 @@ const factoryDroidAdapter: Adapter = {
         'exec',
         '--output-format',
         'json',
-        '--skip-permissions-unsafe',
+        ...permissionArgs,
         '--model',
         model,
         '--spec-model',

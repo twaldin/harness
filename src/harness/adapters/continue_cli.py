@@ -8,22 +8,47 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, run_subprocess, write_instructions
-from harness.base import Adapter, BuildCommand, RunResult, RunSpec, SessionTelemetry
-from harness.model_normalization import normalize_model_for_harness
+from harness._subproc import SubprocOutcome, write_instructions
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    SessionTelemetry,
+)
 from harness.pricing import derive_cost
+from harness.util import last_non_empty_join, strip_ansi
+
+_MODEL_LOADING_RE = re.compile(r"Model:\s*Loading", re.IGNORECASE)
+_ASK_ANYTHING_RE = re.compile(r"Ask anything", re.IGNORECASE)
+_UPDATE_RE = re.compile(r"Update available", re.IGNORECASE)
+_RATE_LIMIT_RE = re.compile(r"rate.?limit", re.IGNORECASE)
+_SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_WORKING_RE = re.compile(r"thinking|working", re.IGNORECASE)
 
 
 class ContinueCliAdapter(Adapter):
     name = "continue-cli"
     instructions_filename = "CONTINUE.md"
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "@continuedev/cli"),
+        update_command=("npm", "install", "-g", "@continuedev/cli@latest"),
+        version_command=("cn", "--version"),
+    )
 
     DEFAULT_MODEL = "claude-sonnet-4-6"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
+        model = resolved.model
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         openai_key = spec.env.get("OPENAI_API_KEY")
@@ -36,7 +61,7 @@ class ContinueCliAdapter(Adapter):
         args = ["-p", spec.prompt, "--model", model, "--json"]
         return BuildCommand(cmd="cn", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw: dict | None = None
         if outcome.stdout.strip():
             try:
@@ -97,28 +122,34 @@ class ContinueCliAdapter(Adapter):
         except (OSError, json.JSONDecodeError, ValueError, TypeError):
             return SessionTelemetry(path, None, None, None, None, None)
 
-    def run(self, spec: RunSpec) -> RunResult:
-        bc = self.build_command(spec)
-        outcome = run_subprocess(
-            [bc.cmd] + bc.args,
-            cwd=bc.cwd,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env={**bc.env, **spec.env},
-        )
-        parsed = self.parse_output(spec, outcome)
-        return RunResult(
-            harness=self.name,
-            model=spec.model or self.DEFAULT_MODEL,
-            exit_code=outcome.exit_code,
-            duration_seconds=outcome.duration_seconds,
-            stdout=outcome.stdout,
-            stderr=outcome.stderr,
-            timed_out=outcome.timed_out,
-            cost_usd=parsed.get("cost_usd"),
-            tokens_in=parsed.get("tokens_in"),
-            tokens_out=parsed.get("tokens_out"),
-            raw=parsed.get("raw"),
-        )
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        last20 = last_non_empty_join(pane, 20)
+        # cn shows "Ask anything" placeholder while the model is still loading.
+        # Real ready = input visible AND model loaded (no "Model: Loading..." line).
+        if _MODEL_LOADING_RE.search(last20):
+            return "loading"
+        if _ASK_ANYTHING_RE.search(last20):
+            return "ready"
+        if _UPDATE_RE.search(last20):
+            return "dialog"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        if _UPDATE_RE.search(strip_ansi(pane)):
+            return ["Escape"]
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        last10 = last_non_empty_join(pane, 10)
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _SPINNER_RE.search(last10) or _WORKING_RE.search(last10):
+            return "running"
+        if _ASK_ANYTHING_RE.search(last10):
+            return "idle"
+        return "unknown"
 
 
 def _write_continue_config(workdir: Path, model: str, api_key: str, api_base: str | None, instructions: str | None) -> Path:

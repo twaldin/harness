@@ -1,7 +1,7 @@
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -11,13 +11,20 @@ const codexAdapter: Adapter = {
   name: 'codex',
   instructionsFilename: 'AGENTS.md',
   defaultModel: 'gpt-5.3-codex',
+  permissionBypassArgs: ['--dangerously-bypass-approvals-and-sandbox'],
+  nativeOptionsKind: 'codex',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model, permissionArgs, nativeOptions } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
+    const args = ['exec', '-m', model]
+    if (nativeOptions?.kind === 'codex' && nativeOptions.sandbox) {
+      args.push('--sandbox', nativeOptions.sandbox)
+    }
+    args.push(...permissionArgs, '--json', '-C', spec.workdir, spec.prompt)
     return {
       cmd: 'codex',
-      args: ['exec', '-m', model, '--dangerously-bypass-approvals-and-sandbox', '--json', '-C', spec.workdir, spec.prompt],
+      args,
       cwd: spec.workdir,
       env: {},
       instructionsFile,

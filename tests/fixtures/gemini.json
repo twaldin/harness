@@ -12,7 +12,6 @@
     "args": [
       "-p",
       "refactor the queue class",
-      "-y",
       "-m",
       "gemini-2.5-flash",
       "--output-format",

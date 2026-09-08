@@ -2,7 +2,7 @@ import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
 import { writeFileSync } from 'fs'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 
 const TOKEN_RE = /Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i
 
@@ -21,9 +21,10 @@ const aiderAdapter: Adapter = {
   name: 'aider',
   instructionsFilename: '.aider.conf.yml',
   defaultModel: 'openrouter/anthropic/claude-sonnet-4.6',
+  permissionBypassArgs: ['--yes-always'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
+    const { model, permissionArgs } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
 
     const configPath = `${spec.workdir}/.agentelo-aider.yml`
@@ -38,7 +39,7 @@ const aiderAdapter: Adapter = {
         '--input-history-file', `${spec.workdir}/.agentelo-aider-input.history`,
         '--model', model,
         '--message', spec.prompt,
-        '--yes-always',
+        ...permissionArgs,
         '--no-auto-commits',
         '--no-analytics',
         '--no-show-model-warnings',

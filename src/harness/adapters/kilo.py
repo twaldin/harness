@@ -3,23 +3,50 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, write_instructions
-from harness.base import Adapter, BuildCommand, RunSpec, SessionTelemetry
-from harness.model_normalization import normalize_model_for_harness
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    SessionTelemetry,
+)
 from harness.pricing import derive_cost
+from harness.util import last_non_empty_join
+
+_CONFIRM_CANCEL_RE = re.compile(r"Confirm\s+Cancel", re.IGNORECASE)
+_ALLOW_ROW_RE = re.compile(r"Allow once\s+Allow always\s+Reject", re.IGNORECASE)
+_UPDATE_RE = re.compile(r"Update available", re.IGNORECASE)
+_ASK_ANYTHING_RE = re.compile(r"Ask anything\.\.\.", re.IGNORECASE)
+_RATE_LIMIT_RE = re.compile(r"rate.?limit", re.IGNORECASE)
+_SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_WORKING_RE = re.compile(r"thinking|working", re.IGNORECASE)
 
 
 class KiloAdapter(Adapter):
     name = "kilo"
     instructions_filename = "AGENTS.md"
+    permission_bypass_args = ("--auto",)
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "kilo"),
+        update_command=("npm", "install", "-g", "kilo@latest"),
+        version_command=("kilo", "--version"),
+    )
 
     DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
+        model = resolved.model
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         workdir = Path(spec.workdir)
@@ -51,7 +78,7 @@ class KiloAdapter(Adapter):
 
         args = [
             "run",
-            "--auto",
+            *resolved.permission_args,
             "--format",
             "json",
             "--dir",
@@ -62,9 +89,48 @@ class KiloAdapter(Adapter):
         ]
         return BuildCommand(cmd="kilo", args=args, cwd=workdir, env=env, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, _model = _read_kilo_session_totals(Path(spec.workdir), spec.env)
         return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
+
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        # Discriminate dialog by visible button row at the bottom (not title).
+        tail = last_non_empty_join(pane, 12)
+        if _CONFIRM_CANCEL_RE.search(tail) or _ALLOW_ROW_RE.search(tail) or _UPDATE_RE.search(tail):
+            return "dialog"
+        if _ASK_ANYTHING_RE.search(tail):
+            return "ready"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        # kilo permission flow has two dialogs back-to-back. Discriminate by the
+        # BUTTON ROW (always at the bottom of the visible pane), not by the title
+        # (which lingers in scrollback after the dialog closes):
+        #   1. "Allow once   Allow always   Reject" → Right + Enter picks "Allow always".
+        #   2. "Confirm   Cancel" → Enter (Confirm is default).
+        tail = last_non_empty_join(pane, 12)
+        if _CONFIRM_CANCEL_RE.search(tail):
+            return ["Enter"]
+        if _ALLOW_ROW_RE.search(tail):
+            return ["Right", "Enter"]
+        if _UPDATE_RE.search(tail):
+            return ["Escape"]
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        tail = last_non_empty_join(pane, 12)
+        last10 = last_non_empty_join(pane, 10)
+        if _CONFIRM_CANCEL_RE.search(tail) or _ALLOW_ROW_RE.search(tail):
+            return "dialog"
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _SPINNER_RE.search(last10) or _WORKING_RE.search(last10):
+            return "running"
+        if _ASK_ANYTHING_RE.search(last10):
+            return "idle"
+        return "unknown"
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
         db_path = _kilo_db_path(workdir, None)

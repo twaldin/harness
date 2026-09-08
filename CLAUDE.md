@@ -4,8 +4,8 @@
 AI coding-agent CLIs — `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`,
 `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` —
 behind a shared `RunSpec → RunResult` contract. Both implementations sit in
-this monorepo. [SPEC.md](SPEC.md) defines the parity target; the current public
-exports and session helpers are not identical (see below).
+this monorepo. [SPEC.md](SPEC.md) defines the shared contract and distinguishes
+shipped CLI behavior from future RPC/SDK implementation requirements.
 
 Authoritative references in this repo:
 
@@ -50,19 +50,27 @@ camelCase in TS). When you read one, you can navigate the other by analogy.
 Both implementations provide the core headless API described in
 [SPEC.md](SPEC.md):
 
-- Types: `RunSpec`, `BuildCommand`, `RunResult`, `HarnessError`.
-- Functions: `listAdapters()`, `buildCommand(spec)`, `parseOutput(spec, outcome)`,
-  `run(spec)`, `runAsync(spec)` (Python uses snake_case names).
+- Types: `RunSpec`, `BuildCommand`, `RunResult`, `HarnessError`, `Capabilities`,
+  `Backend`, `PermissionPolicy` and typed `NativeOptions`.
+- Functions: `listAdapters()`, `getAdapter()`, `getCapabilities()`,
+  `buildCommand(spec)`, `parseOutput(spec, outcome)`, `run(spec)`,
+  `runAsync(spec)` (Python uses snake_case names).
 - Adapters: thirteen registered names, exact strings — `aider`, `claude-code`,
   `codex`, `continue-cli`, `crush`, `factory-droid`, `gemini`, `kilo`,
   `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`. Lookup is case-sensitive.
 
-Current surface differences matter to callers: Python's `SubprocOutcome` is
-defined in `harness._subproc`, not exported from `harness`; TypeScript exports
-it from the package root. TypeScript also exposes optional pane-status,
-dialog and install-metadata hooks that Python's base adapter does not define.
-Consult `src/harness/__init__.py`, `src/harness/base.py`, `ts/src/index.ts` and
-`ts/src/base.ts` for the current exports and adapter hooks.
+Both package roots initialize the built-in registry and expose subprocess
+outcomes plus optional pane/dialog/install/session-log helpers. Python's
+`RunResult.ok` and projection keyword arguments remain idiomatic conveniences.
+The exported contract and helper availability must agree across languages;
+see `src/harness/__init__.py`, `src/harness/base.py`, `ts/src/index.ts` and
+`ts/src/base.ts`.
+
+Permission policy defaults to upstream behavior; bypass is explicit opt-in.
+Reject unsupported backends, capabilities and conflicting native options
+before command-build side effects. CLI is the only implemented backend;
+RPC/SDK selection must not silently fall back. See SPEC for exact error codes,
+capabilities, migration and the remaining subprocess lifecycle limitations.
 
 Field naming differs (`cost_usd` ↔ `costUsd`, `tokens_in` ↔ `tokensIn`,
 `timed_out` ↔ `timedOut`). The Python CLI's `harness run --json` emits
@@ -82,11 +90,11 @@ TypeScript is `0.2.8`. This is recorded skew, not a new release policy.
 
 ## How parity is enforced
 
-The contract and fixture suites support parity; they do not prove full equivalence:
+The contract and fixture suites support parity; they do not prove every upstream
+version works:
 
-1. **SPEC.md is the shared contract.** Changes to that contract must be
-   reflected in SPEC.md and both implementations. The export files also
-   include helpers beyond the core types and functions documented there.
+1. **SPEC.md is the shared contract.** Contract changes update both implementations
+   in one PR. Its future-backend implementation gates are not shipped APIs.
 2. **Shared golden fixtures.** Each adapter has a fixture at
    `tests/fixtures/<name>.json` containing a sample `RunSpec`, an
    `expectedCommand`, a sample subprocess outcome, and `expectedParsed`
@@ -126,18 +134,21 @@ must catch up.
 - For the cross-language contract — [`SPEC.md`](SPEC.md) is canonical.
 - For per-CLI quirks — [`ADAPTER-MATRIX.md`](ADAPTER-MATRIX.md).
 
-## What harness does not ship
+## Scope and implementation gates
 
-Explicit non-goals (kept here so contributors don't propose them as features):
+Keep the library narrow while qualifying optional agent SDK/protocol backends:
 
-- tmux lifecycle, pane capture and polling — the consumer's job. TypeScript
-  adapters provide optional pure pane-status/dialog helpers; consumers drive
-  capture, timing and any returned keystrokes.
+- tmux lifecycle, pane capture and polling stay with the consumer. Both languages
+  provide optional pure pane-status/dialog helpers; consumers drive capture,
+  timing and decide whether to send any returned keystrokes.
 - Challenge seeding, grading, ELO scoring — `agentelo`'s job.
 - Prompt mutation, GEPA, training loops — `hone`'s job.
 - Vertex / OAuth proxy shims — context-specific, lives in the consumer.
 - Streaming subprocess output callbacks — not implemented. Python `run()` and
   TypeScript `run()` block; `run_async()` / `runAsync()` provide async execution.
+- Optional SDK/RPC backends are authorized scope but not implemented. They must
+  satisfy SPEC ownership, permission, capability and compatibility requirements
+  without importing SDKs for CLI callers or becoming a fleet/application layer.
 
 Alongside command construction, output parsing and headless execution, the
 package includes instruction projection, pricing and session helpers. These

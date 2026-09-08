@@ -12,7 +12,6 @@
     "args": [
       "-p",
       "refactor the session cache",
-      "-y",
       "-m",
       "qwen3-coder",
       "--output-format",

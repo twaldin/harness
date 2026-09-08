@@ -13,7 +13,6 @@
       "exec",
       "-m",
       "gpt-5.3-codex",
-      "--dangerously-bypass-approvals-and-sandbox",
       "--json",
       "-C",
       "/tmp/harness-fixture-codex",

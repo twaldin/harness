@@ -13,7 +13,6 @@
       "exec",
       "--output-format",
       "json",
-      "--skip-permissions-unsafe",
       "--model",
       "custom:gpt-5.4",
       "--spec-model",

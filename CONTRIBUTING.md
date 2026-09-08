@@ -1,6 +1,6 @@
 # Contributing to harness
 
-Thanks for the interest. harness is a small library with one job: wrap AI coding CLIs uniformly. Keep contributions focused on that.
+Harness is a small library for uniform coding-agent integration. CLI execution ships today; optional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
 
 ## Before you open a PR
 
@@ -57,6 +57,7 @@ class MyCLIAdapter(Adapter):
     DEFAULT_MODEL = "mycli/default"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
+        self.validate_run_spec(spec)
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         model = normalize_model_for_harness(
             self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve,
@@ -84,7 +85,7 @@ Create `ts/src/adapters/<name>.ts`. Copy the shape of `ts/src/adapters/gemini.ts
 ```typescript
 import { register } from '../registry.js'
 import { writeInstructions } from '../subproc.js'
-import { normalizeModelForHarness } from '../model-normalization.js'
+import { validateRunSpec } from '../base.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
 
 const myCLIAdapter: Adapter = {
@@ -93,8 +94,8 @@ const myCLIAdapter: Adapter = {
   defaultModel: 'mycli/default',
 
   buildCommand(spec: RunSpec): BuildCommand {
+    const { model } = validateRunSpec(this, spec)
     const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-    const model = normalizeModelForHarness(this.name, spec.model ?? this.defaultModel, { resolve: !spec.modelNoResolve }) ?? this.defaultModel
     return { cmd: 'mycli', args: ['run', '--model', model, spec.prompt],
              cwd: spec.workdir, env: {}, instructionsFile }
   },
@@ -114,10 +115,12 @@ Add the import to `ts/src/adapters/index.ts`:
 import './mycli.js'
 ```
 
-These examples mirror the existing Gemini adapters, including current
-empty-model skew: Python falls back for `None` or `""`, while TypeScript falls
-back only for a nullish model. Both trim whitespace after choosing the fallback.
-This records existing behavior, not an exception to the same-PR parity rule.
+An omitted or empty model selects the default in both languages; whitespace is
+trimmed after that choice. Before writing instructions/config, every adapter must
+validate backend, permission and native-option compatibility using the shared
+validator (see the current Gemini builders). Add a bypass mapping only when it
+is supported and explicitly requested; the default preserves upstream policy.
+Reject unsupported options rather than discarding them.
 
 ### 3. Add a fixture
 
@@ -148,5 +151,11 @@ Add a row to [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) covering: CLI binary name, i
 
 - Changes to one impl without the other.
 - New adapters that don't ship a fixture.
-- "Streaming API" — not planned for v1.
-- Wrapping non-CLI tools (API SDKs, MCP servers).
+- Automatic CLI/SDK fallback, implicit permission bypass, or unsupported capabilities disguised as no-ops.
+- Fleet/worktree/host-driver ownership or raw model API wrappers presented as agent backends.
+
+Streaming, controlled sessions and optional agent SDK integrations are eligible
+when they implement the [SPEC gates](SPEC.md#backend-and-session-implementation-gates)
+in both languages. This supersedes the historical blanket SDK exclusion; it
+does not claim those backends currently ship. Keep optional SDK loading isolated
+from ordinary CLI imports and preserve existing caller-selected configuration.

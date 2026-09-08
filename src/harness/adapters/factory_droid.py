@@ -3,21 +3,47 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome, write_instructions
-from harness.base import Adapter, BuildCommand, RunSpec, SessionTelemetry
-from harness.model_normalization import normalize_model_for_harness
+from harness.base import (
+    Adapter,
+    AgentStatus,
+    BuildCommand,
+    InstallMeta,
+    ParsedOutput,
+    ReadyState,
+    RunSpec,
+    SessionTelemetry,
+)
+from harness.util import last_non_empty_join, strip_ansi
+
+_READY_RE = re.compile(r'Try\s+"|Auto.*\(Off\)|Auto.*\(On\)', re.IGNORECASE)
+_IDLE_RE = re.compile(r'Try\s+"|Auto.*\(', re.IGNORECASE)
+_UPDATE_RE = re.compile(r"Update available", re.IGNORECASE)
+_RATE_LIMIT_RE = re.compile(r"rate.?limit", re.IGNORECASE)
+_SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_WORKING_RE = re.compile(r"Thinking|Working", re.IGNORECASE)
 
 
 class FactoryDroidAdapter(Adapter):
     name = "factory-droid"
     instructions_filename = "AGENTS.md"
+    permission_bypass_args = ("--skip-permissions-unsafe",)
+    submit_keys = ("Enter",)
+    install_meta = InstallMeta(
+        package_manager="npm",
+        install_command=("npm", "install", "-g", "@factory-ai/droid"),
+        update_command=("npm", "install", "-g", "@factory-ai/droid@latest"),
+        version_command=("droid", "--version"),
+    )
 
     DEFAULT_MODEL = "gpt-5.4"
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
-        model = normalize_model_for_harness(self.name, spec.model or self.DEFAULT_MODEL, resolve=not spec.model_no_resolve)
+        resolved = self.resolve_run_spec(spec)
+        model = resolved.model
         instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         # Keep strict same-model fairness by pinning spec generation to the
@@ -26,7 +52,7 @@ class FactoryDroidAdapter(Adapter):
             "exec",
             "--output-format",
             "json",
-            "--skip-permissions-unsafe",
+            *resolved.permission_args,
             "--model",
             model,
             "--spec-model",
@@ -35,7 +61,7 @@ class FactoryDroidAdapter(Adapter):
         ]
         return BuildCommand(cmd="droid", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
 
-    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> dict:
+    def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw = _parse_last_json_object(outcome.stdout)
         if not isinstance(raw, dict):
             return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
@@ -55,6 +81,31 @@ class FactoryDroidAdapter(Adapter):
             "tokens_out": _to_int(usage.get("output_tokens") or usage.get("output")),
             "raw": raw,
         }
+
+    # ---- session-aware ---------------------------------------------------
+
+    def detect_ready(self, pane: str) -> ReadyState:
+        last30 = last_non_empty_join(pane, 30)
+        if _READY_RE.search(last30):
+            return "ready"
+        if _UPDATE_RE.search(last30):
+            return "dialog"
+        return "loading"
+
+    def handle_dialog(self, pane: str) -> list[str] | None:
+        if _UPDATE_RE.search(strip_ansi(pane)):
+            return ["Escape"]
+        return None
+
+    def detect_status(self, pane: str) -> AgentStatus:
+        last10 = last_non_empty_join(pane, 10)
+        if _RATE_LIMIT_RE.search(last10):
+            return "rate-limited"
+        if _SPINNER_RE.search(last10) or _WORKING_RE.search(last10):
+            return "running"
+        if _IDLE_RE.search(last10):
+            return "idle"
+        return "unknown"
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
         base = workdir.name

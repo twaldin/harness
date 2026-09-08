@@ -38,6 +38,46 @@ console.log(`exit=${r.exitCode}  cost=${cost}  tokens=${r.tokensIn}/${r.tokensOu
 
 See [`examples/hello-world.py`](examples/hello-world.py) and [`ts/examples/hello-world.ts`](ts/examples/hello-world.ts) for runnable versions.
 
+### Permissions and explicit backends
+
+Permission policy now defaults to the upstream tool's normal behavior. Harness
+no longer adds approval/bypass flags automatically. This can affect unattended
+callers that depended on the old defaults: explicitly choose
+`permission_policy="bypass"` (Python), `permissionPolicy: "bypass"` (TypeScript)
+or `harness run --permission-policy bypass` only when that authority is intended.
+Codex bypass also disables sandboxing. Unsupported bypass requests fail; no
+tool is silently escalated. Existing upstream config and environment still apply.
+
+The execution backend defaults to `"cli"`. Selecting `"rpc"` or `"sdk"` is an
+explicit unsupported-backend error today, never a fallback to another path.
+`get_capabilities("codex")` / `getCapabilities('codex')` reports support without
+probing installation or auth. Typed native options cover Claude Code effort
+and Codex sandbox selection:
+
+```python
+from harness import CodexOptions, RunSpec, build_command
+
+command = build_command(RunSpec(
+    harness="codex", prompt="Review this code", workdir="/tmp/scratch",
+    backend="cli", native_options=CodexOptions(sandbox="read-only"),
+))
+```
+
+```typescript
+import { buildCommand } from '@twaldin/harness-ts'
+
+const command = buildCommand({
+  harness: 'codex', prompt: 'Review this code', workdir: '/tmp/scratch',
+  backend: 'cli', nativeOptions: { kind: 'codex', sandbox: 'read-only' },
+})
+```
+
+Combining a selected Codex sandbox with bypass is an error. See
+[SPEC](SPEC.md#permission-policy-and-migration) for migration, supported mappings,
+ownership, errors, telemetry and future SDK/session requirements. These APIs
+describe the source tree; published packages are not updated by a documentation
+or implementation merge.
+
 ---
 
 ## Who should use this
@@ -283,6 +323,11 @@ PYTHONPATH=src ./scripts/smoke_gpt54.py --timeout 90
 ```
 
 The smoke runner asks each harness to write `hi` to `hi.txt` in cwd. If the file exists with the expected content, that harness is considered minimally alive for gpt-5.4 bringup.
+
+It now preserves upstream permission defaults. For a deliberately isolated
+Claude Code smoke requiring automatic approval, select
+`--harness claude-code --permission-policy bypass` explicitly. Adapters without
+a bypass mapping reject that request; the script does not silently escalate.
 
 ### model resolution policy
 

@@ -124,4 +124,4 @@ __all__ = [
     "strip_ansi",
     "write_instructions",
 ]
-__version__ = "0.3.7"
+__version__ = "0.3.8"

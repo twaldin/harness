@@ -33,8 +33,10 @@ BYPASS_FLAGS = {
     "codex": "--dangerously-bypass-approvals-and-sandbox",
     "factory-droid": "--skip-permissions-unsafe",
     "gemini": "-y",
+    "hermes": "--yolo",
     "qwen": "-y",
     "kilo": "--auto",
+    "omp": "--auto-approve",
 }
 ALL_KNOWN_BYPASS_FLAGS = set(BYPASS_FLAGS.values())
 NO_BYPASS = ["continue-cli", "crush", "opencode", "pi", "swe-agent"]
@@ -246,8 +248,10 @@ def test_native_kind_is_fixed():
 CONFIG_MAPPINGS = {
     "claude-code": ("CLAUDE_CONFIG_DIR", "--settings"),
     "codex": ("CODEX_HOME", None),
+    "hermes": ("HERMES_HOME", None),
     "aider": (None, "--config"),
     "continue-cli": (None, "--config"),
+    "omp": ("PI_CODING_AGENT_DIR", "--config"),
 }
 
 

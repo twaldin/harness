@@ -83,7 +83,7 @@ def test_executable_overrides_cmd(workdir: Path, executable: str):
     assert build_command(_spec("claude-code", workdir, executable=executable)).cmd == executable
 
 
-@pytest.mark.parametrize("name", [n for n in list_adapters() if n not in ("claude-code", "codex")])
+@pytest.mark.parametrize("name", [n for n in list_adapters() if n not in ("claude-code", "codex", "hermes", "omp")])
 def test_config_home_unsupported_where_unmapped(name: str, workdir: Path, tmp_path: Path):
     env = {"SWE_WRAPPER": str(_wrapper(tmp_path))} if name == "swe-agent" else {}
     with pytest.raises(HarnessError) as exc:
@@ -91,7 +91,7 @@ def test_config_home_unsupported_where_unmapped(name: str, workdir: Path, tmp_pa
     assert exc.value.code == "unsupported-capability"
 
 
-@pytest.mark.parametrize("name", [n for n in list_adapters() if n not in ("claude-code", "aider", "continue-cli")])
+@pytest.mark.parametrize("name", [n for n in list_adapters() if n not in ("claude-code", "aider", "continue-cli", "omp")])
 def test_config_file_unsupported_where_unmapped(name: str, workdir: Path, tmp_path: Path):
     env = {"SWE_WRAPPER": str(_wrapper(tmp_path))} if name == "swe-agent" else {}
     with pytest.raises(HarnessError) as exc:

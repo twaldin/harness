@@ -2,7 +2,7 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -193,7 +193,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all thirteen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all fifteen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 
@@ -286,7 +286,8 @@ It never silently overwrites those edits or steals a stale lease.
 
 `RunSpec.executable` selects a bare binary name or absolute executable path.
 `config_home` / `configHome` and `config_file` / `configFile` select absolute
-upstream paths only where the adapter declares support. Unsupported choices
+upstream paths only where the adapter declares support (`configHome` maps to
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HERMES_HOME`). Unsupported choices
 reject; no files or credentials are copied. Omitted overrides preserve the
 caller-selected environment and host-local authentication. See the
 [configuration mappings and migration](SPEC.md#supported-configuration-overrides).
@@ -412,7 +413,7 @@ Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md
 
 ## Status
 
-Thirteen adapters are included: `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
+Fourteen adapters are included: `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush`, `hermes`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
 ### host Node version
 
@@ -459,6 +460,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 - `kilo` and `crush` enforce strict same-model defaults (`model == small_model`) to avoid helper-model drift.
 - `openclaude` adapter does not set `--fallback-model`; single-model runs are default.
 - `factory-droid` adapter pins `--model` and `--spec-model` to the same value for fairness.
+- `hermes` is a Python CLI (`hermes chat --cli --quiet --query=<prompt>`, upstream Python `>=3.11,<3.14`) installed by the [official installer](https://hermes-agent.nousresearch.com/docs/getting-started/installation/); it reports null tokens/cost, preserves stdout verbatim and exposes only `raw.session_id` from stderr. The library has no default model for it: omit `model` to use the upstream `config.yaml` selection, and pass `configHome` to select an existing `HERMES_HOME`. Optional Docker/SSH/Modal terminal backends are configured upstream by the caller.
 
 Pending:
 - Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).

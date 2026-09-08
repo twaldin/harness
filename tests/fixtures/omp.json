@@ -1,0 +1,783 @@
+{
+  "spec": {
+    "harness": "omp",
+    "prompt": "Say hello.",
+    "model": "sonnet",
+    "instructions": "Be terse.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "omp",
+    "args": [
+      "--print",
+      "--mode",
+      "json",
+      "--no-session",
+      "--model",
+      "sonnet",
+      "--",
+      "Say hello."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": "sonnet"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": "PI_CODING_AGENT_DIR",
+    "configFileFlag": "--config",
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.2,
+    "timedOut": false,
+    "stdout": "{\"type\":\"session\",\"id\":\"synthetic-omp-session\",\"version\":3,\"cwd\":\"<workdir>\"}\n{\"type\":\"agent_start\"}\n{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"Synthetic answer.\"}}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"},\"toolResults\":[]}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello.\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}]}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.125,
+    "tokensIn": 12,
+    "tokensOut": 3,
+    "raw": [
+      {
+        "type": "session",
+        "id": "synthetic-omp-session",
+        "version": 3,
+        "cwd": "<workdir>"
+      },
+      {
+        "type": "agent_start"
+      },
+      {
+        "type": "message_update",
+        "assistantMessageEvent": {
+          "type": "text_delta",
+          "delta": "Synthetic answer."
+        }
+      },
+      {
+        "type": "message_end",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Synthetic answer."
+            }
+          ],
+          "usage": {
+            "input": 12,
+            "output": 3,
+            "cacheRead": 7,
+            "cacheWrite": 2,
+            "cost": {
+              "total": 0.125
+            }
+          },
+          "stopReason": "stop"
+        }
+      },
+      {
+        "type": "turn_end",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Synthetic answer."
+            }
+          ],
+          "usage": {
+            "input": 12,
+            "output": 3,
+            "cacheRead": 7,
+            "cacheWrite": 2,
+            "cost": {
+              "total": 0.125
+            }
+          },
+          "stopReason": "stop"
+        },
+        "toolResults": []
+      },
+      {
+        "type": "agent_end",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Say hello."
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Synthetic answer."
+              }
+            ],
+            "usage": {
+              "input": 12,
+              "output": 3,
+              "cacheRead": 7,
+              "cacheWrite": 2,
+              "cost": {
+                "total": 0.125
+              }
+            },
+            "stopReason": "stop"
+          }
+        ]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "nonzero-startup-failure",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": "Synthetic startup failure: unavailable provider.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "native-error-preserves-process-status",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":0,\"output\":0,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0}},\"stopReason\":\"error\",\"errorMessage\":\"Synthetic provider failure.\"}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":0,\"output\":0,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0}},\"stopReason\":\"error\",\"errorMessage\":\"Synthetic provider failure.\"}]}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "raw": [
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0
+                }
+              },
+              "stopReason": "error",
+              "errorMessage": "Synthetic provider failure."
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Synthetic answer."
+                  }
+                ],
+                "usage": {
+                  "input": 0,
+                  "output": 0,
+                  "cacheRead": 7,
+                  "cacheWrite": 2,
+                  "cost": {
+                    "total": 0
+                  }
+                },
+                "stopReason": "error",
+                "errorMessage": "Synthetic provider failure."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "partial-message-end-before-turn-end",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}}\n{\"type\":\"turn_end\",\"message\":",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.125,
+        "tokensIn": 12,
+        "tokensOut": 3,
+        "raw": [
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 12,
+                "output": 3,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              },
+              "stopReason": "stop"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "turn-end-fallback",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"},\"toolResults\":[]}\n{\"type\":\"agent_end\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.125,
+        "tokensIn": 12,
+        "tokensOut": 3,
+        "raw": [
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 12,
+                "output": 3,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              },
+              "stopReason": "stop"
+            },
+            "toolResults": []
+          },
+          {
+            "type": "agent_end"
+          }
+        ]
+      }
+    },
+    {
+      "name": "terminal-snapshot-is-authoritative",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":99,\"output\":99,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":9}},\"stopReason\":\"stop\"}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}]}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.125,
+        "tokensIn": 12,
+        "tokensOut": 3,
+        "raw": [
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 99,
+                "output": 99,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 9
+                }
+              },
+              "stopReason": "stop"
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Synthetic answer."
+                  }
+                ],
+                "usage": {
+                  "input": 12,
+                  "output": 3,
+                  "cacheRead": 7,
+                  "cacheWrite": 2,
+                  "cost": {
+                    "total": 0.125
+                  }
+                },
+                "stopReason": "stop"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "multiple-cycles-and-partial-next-cycle",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}]}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":8,\"output\":2,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.25}},\"stopReason\":\"stop\"}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":8,\"output\":2,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.25}},\"stopReason\":\"stop\"}]}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":4,\"output\":1,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}}\n{\"unfinished\":",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.5,
+        "tokensIn": 24,
+        "tokensOut": 6,
+        "raw": [
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 12,
+                "output": 3,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              },
+              "stopReason": "stop"
+            }
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 12,
+                "output": 3,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              },
+              "stopReason": "stop"
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Synthetic answer."
+                  }
+                ],
+                "usage": {
+                  "input": 12,
+                  "output": 3,
+                  "cacheRead": 7,
+                  "cacheWrite": 2,
+                  "cost": {
+                    "total": 0.125
+                  }
+                },
+                "stopReason": "stop"
+              }
+            ]
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 8,
+                "output": 2,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0.25
+                }
+              },
+              "stopReason": "stop"
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Synthetic answer."
+                  }
+                ],
+                "usage": {
+                  "input": 8,
+                  "output": 2,
+                  "cacheRead": 7,
+                  "cacheWrite": 2,
+                  "cost": {
+                    "total": 0.25
+                  }
+                },
+                "stopReason": "stop"
+              }
+            ]
+          },
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 4,
+                "output": 1,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              },
+              "stopReason": "stop"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-authoritative-cycle-is-unknown",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"usage\":{\"input\":12,\"output\":3,\"cacheRead\":7,\"cacheWrite\":2,\"cost\":{\"total\":0.125}},\"stopReason\":\"stop\"}}\n{\"type\":\"agent_end\",\"messages\":[]}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "usage": {
+                "input": 12,
+                "output": 3,
+                "cacheRead": 7,
+                "cacheWrite": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              },
+              "stopReason": "stop"
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-usage-keeps-raw",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"extension_error\",\"error\":\"Synthetic extension failure.\"}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"content\":[]}]}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "extension_error",
+            "error": "Synthetic extension failure."
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "content": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "malformed-nested-metrics",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message_end\",\"message\":[]}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"toolResult\",\"usage\":{\"input\":200}}}\n{\"type\":\"agent_end\",\"messages\":[null,{\"role\":\"assistant\",\"usage\":\"bad\"},{\"role\":\"assistant\",\"usage\":{\"input\":true,\"output\":-1,\"cost\":{\"total\":\"9\"}}},{\"role\":\"assistant\",\"usage\":{\"input\":2.5,\"output\":3.0,\"cost\":false}},{\"role\":\"assistant\",\"usage\":{\"input\":2.0,\"cost\":{\"total\":0}}}]}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0,
+        "tokensIn": 2,
+        "tokensOut": 3,
+        "raw": [
+          {
+            "type": "message_end",
+            "message": []
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "toolResult",
+              "usage": {
+                "input": 200
+              }
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              null,
+              {
+                "role": "assistant",
+                "usage": "bad"
+              },
+              {
+                "role": "assistant",
+                "usage": {
+                  "input": true,
+                  "output": -1,
+                  "cost": {
+                    "total": "9"
+                  }
+                }
+              },
+              {
+                "role": "assistant",
+                "usage": {
+                  "input": 2.5,
+                  "output": 3.0,
+                  "cost": false
+                }
+              },
+              {
+                "role": "assistant",
+                "usage": {
+                  "input": 2.0,
+                  "cost": {
+                    "total": 0
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "noise-and-nonobject-records",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"agent_start\"}\nnot JSON\n[]\nnull\n42\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "agent_start"
+          }
+        ]
+      }
+    },
+    {
+      "name": "literal-flag-prompt",
+      "spec": {
+        "prompt": "--auto-approve"
+      },
+      "expectedCommand": {
+        "cmd": "omp",
+        "args": [
+          "--print",
+          "--mode",
+          "json",
+          "--no-session",
+          "--model",
+          "sonnet",
+          "--",
+          "--auto-approve"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "sonnet"
+      }
+    },
+    {
+      "name": "literal-file-prompt",
+      "spec": {
+        "prompt": "@private-file"
+      },
+      "expectedCommand": {
+        "cmd": "omp",
+        "args": [
+          "--print",
+          "--mode",
+          "json",
+          "--no-session",
+          "--model",
+          "sonnet",
+          "--",
+          "@private-file"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "sonnet"
+      }
+    },
+    {
+      "name": "explicit-home-model-config-and-permission",
+      "spec": {
+        "model": "custom-provider/model-id",
+        "executable": "<root>/selected-omp",
+        "configHome": "<root>/agent-home",
+        "configFile": "<root>/selected.yml",
+        "permissionPolicy": "bypass",
+        "env": {
+          "OMP_PROFILE": "named-profile",
+          "CUSTOM_SETTING": "synthetic"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "<root>/selected-omp",
+        "args": [
+          "--print",
+          "--mode",
+          "json",
+          "--no-session",
+          "--model",
+          "custom-provider/model-id",
+          "--profile",
+          "default",
+          "--auto-approve",
+          "--config",
+          "<root>/selected.yml",
+          "--",
+          "Say hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "PI_CODING_AGENT_DIR": "<root>/agent-home",
+          "OMP_PROFILE": "named-profile",
+          "CUSTOM_SETTING": "synthetic"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "custom-provider/model-id"
+      }
+    },
+    {
+      "name": "conflicting-home-rejected",
+      "spec": {
+        "configHome": "<root>/agent-home",
+        "env": {
+          "PI_CODING_AGENT_DIR": "<root>/different-home"
+        }
+      },
+      "expectedError": "invalid-options"
+    }
+  ]
+}

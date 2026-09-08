@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain thirteen adapters, with shared fixture files:
+After adapter initialization, both registries contain fifteen adapters, with shared fixture files:
 `aider`, `claude-code`, `codex`, `continue-cli`, `crush`, `factory-droid`,
-`gemini`, `kilo`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
+`gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
@@ -43,11 +43,18 @@ upstream compatibility.
   approve other forks.
 - `swe-agent` currently invokes a consumer-supplied mini-SWE Python wrapper, not
   a native SWE-agent CLI. The distinct native mini-SWE CLI is tracked below.
+- `hermes` now ships local quiet chat in both languages ([TWA-73](https://linear.app/twaldin/issue/TWA-73)).
+  See its [qualification and smoke limits](ADAPTER-MATRIX.md#hermes); the gateway,
+  controlled sessions and machine-readable usage are not part of this adapter.
 - Refresh the shipped set in [TWA-68](https://linear.app/twaldin/issue/TWA-68).
   Pi's current upstream advertises `@earendil-works/pi-coding-agent`
   ([upstream](https://github.com/earendil-works/pi)); the checked-in adapter
   reference still names `@mariozechner/pi-coding-agent`. Requalification and RPC
   belong to [TWA-71](https://linear.app/twaldin/issue/TWA-71), not another Pi ticket.
+- Oh My Pi (`omp`) now ships in both languages through [TWA-70](https://linear.app/twaldin/issue/TWA-70).
+  See [its adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for current
+  installation, headless behavior and qualification limits. RPC and optional
+  SDK support remain separate work.
 
 ## Source-qualified: existing implementation backlog
 
@@ -55,19 +62,6 @@ These are unshipped. Reuse the linked ticket; each owns one adapter. Commands
 show the headless entry point, not a universal safe permission configuration.
 Caller-selected auth and configuration must already be available. Each entry's
 specific checks supplement the [common validation scope](#validation-and-maintenance).
-
-### Oh My Pi — [TWA-70](https://linear.app/twaldin/issue/TWA-70)
-
-- **Identity / maintenance:** [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi),
-  MIT; [v18.1.14](https://github.com/can1357/oh-my-pi/releases/tag/v18.1.14)
-  released September 7. Official `https://omp.sh/install` installer or
-  `@oh-my-pi/pi-coding-agent` distribution supplies `omp`; distinct from Pi.
-- **Path:** `omp -p --mode json "PROMPT"`; provider/model selection is explicit.
-  RPC, ACP and the optional SDK are separate backend work, not extra agents.
-- **Gate / validation:** preserve caller-selected settings/auth and tool policy;
-  this is not a security sandbox. Verify terminal `agent_end` records, actual
-  usage fields, partial output and child cleanup rather than assuming Pi's parser
-  is interchangeable. SDK work: [TWA-85](https://linear.app/twaldin/issue/TWA-85).
 
 ### Prime Agent — [TWA-72](https://linear.app/twaldin/issue/TWA-72)
 
@@ -82,19 +76,6 @@ specific checks supplement the [common validation scope](#validation-and-mainten
   runs with user permissions. Verify worker/kernel lifetime and usage aggregation.
   Do not implement cleanup with global `shutdown` or manage unrelated background
   agents. Its own subagents do not make the single-run CLI an orchestration API.
-
-### Hermes Agent — [TWA-73](https://linear.app/twaldin/issue/TWA-73)
-
-- **Identity / maintenance:** [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent),
-  release `v2026.9.7` published September 7.
-  [Official installation](https://hermes-agent.nousresearch.com/docs/getting-started/installation/)
-  supplies `hermes`; the source project is named `hermes-agent`.
-- **Path:** [`hermes chat -q "PROMPT"`](https://hermes-agent.nousresearch.com/docs/user-guide/cli/),
-  with `--model`, `--provider` and selected toolsets.
-- **Gate / validation:** use preconfigured provider/account access. Verify single-query
-  exit, approval behavior, output/usage schema and state isolation. No machine-readable
-  usage contract is established here. Gateway, schedules and worktree management
-  remain outside this adapter.
 
 ### Goose — [TWA-74](https://linear.app/twaldin/issue/TWA-74)
 

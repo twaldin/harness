@@ -50,8 +50,10 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   codex: ['--dangerously-bypass-approvals-and-sandbox'],
   'factory-droid': ['--skip-permissions-unsafe'],
   gemini: ['-y'],
+  hermes: ['--yolo'],
   qwen: ['-y'],
   kilo: ['--auto'],
+  omp: ['--auto-approve'],
 }
 
 const NO_BYPASS = ['opencode', 'pi', 'crush', 'continue-cli', 'swe-agent']
@@ -226,8 +228,10 @@ describe('getCapabilities', () => {
     const declared: Record<string, [string | null, string | null]> = {
       'claude-code': ['CLAUDE_CONFIG_DIR', '--settings'],
       codex: ['CODEX_HOME', null],
+      hermes: ['HERMES_HOME', null],
       aider: [null, '--config'],
       'continue-cli': [null, '--config'],
+      omp: ['PI_CODING_AGENT_DIR', '--config'],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)
@@ -237,7 +241,7 @@ describe('getCapabilities', () => {
     }
   })
 
-  test('bypass appears exactly for the eight mapped adapters', () => {
+  test('bypass appears exactly for the mapped adapters', () => {
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')

@@ -380,6 +380,7 @@ def test_run_result_ok_requires_clean_callback_and_parse():
 @pytest.mark.parametrize("harness_name,record", [
     ("codex", '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":2}}'),
     ("pi", '{"type":"turn_end","message":{"role":"assistant","usage":{"input":5,"output":2,"cost":{"total":0.5}}}}'),
+    ("omp", '{"type":"message_end","message":{"role":"assistant","usage":{"input":5,"output":2,"cost":{"total":0.5}}}}'),
 ])
 def test_jsonl_parsers_keep_complete_records_before_a_partial_tail(tmp_path: Path, harness_name: str, record: str):
     stdout = record + '\n{"type":"agent_end","messa'

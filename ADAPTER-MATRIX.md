@@ -2,14 +2,14 @@
 
 Per-CLI reference for current command construction, instruction files and token/cost parsing. [SPEC.md](SPEC.md) defines the shared contract; [fixture coverage notes](SPEC.md#json-fixture-driven-verification) describe what the two suites actually assert.
 
-The command/policy contract below is source-derived; the explicit native option flags were also checked against installed Claude Code 2.1.220 and Codex 0.153.4 help. This is not a full current-upstream qualification or provider smoke.
+The command/policy contract below is source-derived; the explicit native option flags were also checked against installed Claude Code 2.1.220 and Codex 0.153.4 help, and the Hermes headless flags against installed Hermes Agent v0.20.0 (2026.8.3) plus the current upstream parser. This is not a full current-upstream qualification or provider smoke.
 
 ## Shipped versus planned
 
-The thirteen adapters below are registered in **both** implementations and have
+The fifteen adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `crush`,
-`factory-droid`, `gemini`, `kilo`, `openclaude`, `opencode`, `pi`, `qwen`,
-`swe-agent`. Registration and fixtures are not proof of current upstream
+`factory-droid`, `gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
+`qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
 adapters no longer depends on a prior Python build/parse/run call.
@@ -32,10 +32,11 @@ implementation, not promised upstream behavior.
 
 ## Session telemetry coverage
 
-Both languages expose session-path and parsing hooks for the same 12 non-aider
-adapters. "Wired" means the hooks exist, not that every log contains usage or
-that discovery identifies a unique live session. These remain caller-driven
-artifact helpers, separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
+Both languages expose session-path and parsing hooks for the same 12 adapters
+(every adapter except `aider`, `hermes` and `omp`). "Wired" means the hooks exist,
+not that every log contains usage or discovery identifies a unique live session.
+These remain caller-driven artifact helpers, separate from
+[controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 
 | adapter | TypeScript hooks | Python hooks | notes |
 |---|---|---|---|
@@ -52,17 +53,22 @@ artifact helpers, separate from [controlled Pi RPC sessions](SPEC.md#controlled-
 | qwen | wired | wired | `~/.qwen/tmp/<basename>/logs.json` (fallback `.gemini`); stats blobs can supply usage, other logs return null metrics |
 | kilo | wired | wired | SQLite selector path |
 | aider | unwired | unwired | no session-log hooks |
+| hermes | unwired | unwired | no session-log hooks; the headless `raw.session_id` comes from stderr, not a log file |
+| omp | unwired | unwired | ephemeral headless JSONL; no latest-session discovery |
 
 ## Backend and permission capabilities
 
-All thirteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All fifteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
-streaming and cancellation true, controlled sessions false.
-The separate `get_session_capabilities("pi")` / `getSessionCapabilities("pi")`
-reports the Pi 0.85.1 RPC session contract. Its current official package is
-`@earendil-works/pi-coding-agent`; older Pi and OMP protocols are not assumed
-compatible. See [session qualification and limits](SPEC.md#controlled-rpc-sessions).
-Pure pane/install helpers remain separate from native session control.
+streaming (raw subprocess chunks, not structured events) and cancellation true,
+controlled sessions false. The separate `get_session_capabilities("pi")` /
+`getSessionCapabilities("pi")` reports the Pi 0.85.1 RPC session contract.
+Its current official package is `@earendil-works/pi-coding-agent`; older Pi and
+OMP protocols are not assumed compatible. See
+[session qualification and limits](SPEC.md#controlled-rpc-sessions).
+Pure pane/install helpers exist for the same twelve adapters that have session
+hooks; `aider` and `hermes` ship none. OMP adds install metadata but no Pi-derived
+pane or session-log heuristics. These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
 flags. This preserves the selected upstream's policy, not a guarantee of
@@ -78,6 +84,8 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | gemini, qwen | `-y` |
 | aider | `--yes-always` |
 | kilo | `--auto` |
+| hermes | `--yolo` |
+| omp | `--auto-approve` |
 | continue-cli, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
 Only Claude Code and Codex currently have typed native options:
@@ -87,9 +95,10 @@ Sandbox plus bypass is a conflict, not a precedence rule. See
 [SPEC permission migration](SPEC.md#permission-policy-and-migration).
 
 Configuration selection is also explicit: `executable` selects the binary;
-`configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for
-Codex. `configFile` maps to Claude Code `--settings`, Aider `--config`, or
-Continue `--config`. Other adapters reject these typed overrides. Existing
+`configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
+Codex, `HERMES_HOME` for Hermes, and `PI_CODING_AGENT_DIR` plus `--profile default`
+for OMP. `configFile` maps to Claude Code `--settings`, or `--config` for Aider,
+Continue and OMP. Other adapters reject these typed overrides. Existing
 caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
 official sources, and limits.
@@ -114,10 +123,12 @@ helpers. "Populated" requires the expected output or database to be available.
 | qwen         | **null**          | populated                     | JSON array, last `type:'result'` item `usage` |
 | continue-cli | populated         | populated                     | `--json` envelope `usage`         |
 | pi           | populated         | populated                     | `--mode json` event stream, summed from `agent_end.messages[].usage` |
+| omp          | populated when reported | populated when reported | JSONL completed-cycle usage, with partial-message fallback |
 | crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
 | kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
+| hermes       | **null**          | **null**                      | not parsed; stdout is preserved verbatim, only `session_id:` stderr lines are read |
 
-Headless cost is null for codex, aider and qwen. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
+Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
 ---
 
@@ -130,12 +141,63 @@ Headless cost is null for codex, aider and qwen. Gemini estimates cost from toke
   - **pi** prefixes bare `gpt-5*` models with `openai-codex/` and preserves recognized explicit providers.
   - **factory-droid** strips known provider prefixes and adds `custom:` for a configured BYOK model.
   - **crush** preserves explicit provider prefixes and passes bare names through.
+  - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
+  - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
   - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
   - `crush`: `--model == --small-model`
   - `kilo`: default `model == small_model` via `KILO_CONFIG_CONTENT`; an existing caller-selected config is preserved
   - `openclaude`: no `--fallback-model`
   - `factory-droid`: `--model == --spec-model`
+
+---
+
+## omp (Oh My Pi)
+
+- **Distribution / executable:** [`@oh-my-pi/pi-coding-agent`](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent) supplies `omp`. This is [Oh My Pi](https://github.com/can1357/oh-my-pi), not Pi or Prime Agent.
+- **Setup:** upstream recommends `bun install -g @oh-my-pi/pi-coding-agent` (Bun ≥ 1.3.14); `brew install can1357/tap/omp` is also supported and used by install metadata. Authenticate with upstream in the caller-selected home; Harness never copies credentials.
+- **Checked September 8, 2026:** npm metadata reports 18.1.14, `omp: dist/cli.js`, Bun ≥ 1.3.14. Installed help/version qualification used a locally patched managed `omp/18.1.10`, not a claim that every 18.x release works.
+- **Instructions / model:** owned `AGENTS.md` projection; default `sonnet`. Explicit bare names and `provider/model` strings pass through unchanged apart from shared whitespace trimming. Use a provider-qualified model when provider choice matters; no Pi-style provider inference or helper-model pinning is applied.
+- **Command:** `omp --print --mode json --no-session --model MODEL [--profile default] [--auto-approve] [--config FILE] -- PROMPT`. The separator keeps flag-shaped and `@file`-shaped prompts literal.
+- **Configuration:** `configHome` selects `PI_CODING_AGENT_DIR` and emits `--profile default`, since named profiles otherwise ignore that variable. It does not isolate global/project discovery or all caches. `configFile` is an additional upstream config overlay. Existing env/profile choices remain upstream-controlled when no typed home override is supplied.
+- **Permission:** omitted policy leaves upstream behavior intact. Explicit bypass emits `--auto-approve`; no sandbox or interactive approval transport is provided. No typed native options are claimed.
+- **Lifecycle:** the shared runner owns only its child process group, deadline/cancellation, bounded stdout/stderr capture and instruction lease. `--no-session` makes the primary conversation ephemeral; it is not a promise of zero upstream cache/state writes. Cleanup never invokes global `omp ps`, GC or daemon shutdown.
+- **Backend boundary:** chunk streaming and cancellation work through the common CLI API. Controlled sessions, resume, RPC, ACP and SDK are not exposed by this headless adapter; unsupported backend requests reject. [TWA-69](https://linear.app/twaldin/issue/TWA-69) owns the shared session contract and [TWA-85](https://linear.app/twaldin/issue/TWA-85) owns optional SDK work.
+
+### Structured output and failures
+
+JSONL `message_end`, `turn_end` and `agent_end.messages` repeat assistant usage.
+The parser uses each completed cycle's `agent_end.messages` as authoritative,
+sums multiple cycles, and falls back to complete `message_end` records for an
+unfinished cycle (`turn_end` when that turn has no message-end record).
+Stream deltas never count as usage. An incomplete final line is ignored;
+complete object records, including unknown events and native errors, remain in
+`raw`. Missing or malformed metrics remain independently null; explicit zero
+remains zero. `input`/`output` exclude separate cache counts; `cost.total` is
+upstream-reported USD, not proof of subscription billing.
+
+**Process exit is not semantic success:** OMP JSON mode can emit assistant
+`stopReason: "error"` or `"aborted"` with exit code zero. Harness preserves the
+actual process status and raw native error; callers must inspect terminal
+assistant records as well as lifecycle fields. It does not rewrite exit codes
+or pretend an upstream error is a parser failure.
+
+Sources: [pinned print-mode implementation](https://github.com/can1357/oh-my-pi/blob/v18.1.10/packages/coding-agent/src/modes/print-mode.ts),
+[argument parsing](https://github.com/can1357/oh-my-pi/blob/v18.1.10/packages/coding-agent/src/cli/args.ts),
+[environment precedence](https://github.com/can1357/oh-my-pi/blob/main/docs/environment-variables.md),
+[native RPC reference](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md).
+Shared synthetic fixtures cover success, nonzero startup failure, native
+error with zero exit, multiple cycles, malformed usage, partial output, explicit
+configuration and owned cleanup. The bounded installed-CLI smoke used isolated
+HOME/agent directories, an explicit config overlay and `openai-codex/gpt-5.4`,
+with tools/extensions/skills/rules disabled by an explicit smoke wrapper.
+Python `run`/`run_async` and TypeScript `run`/`runAsync` each returned the native
+missing-credential failure in under two seconds, retained the session header,
+honored the selected agent home over an inherited named profile, streamed stdout,
+restored existing instructions and released the lease. Each had a 30-second
+deadline and 64-KiB capture bound. No credentials were copied. Real-provider
+success, other providers, and an unmodified 18.1.14 runtime remain unqualified;
+synthetic success fixtures do not fill that gap.
 
 ---
 
@@ -423,6 +485,45 @@ WHERE session_id IN (
   LIMIT 1
 )
 AND json_extract(data, '$.role') = 'assistant'
+```
+
+---
+
+## hermes
+
+- **CLI**: `hermes` (from [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent); the [official installer](https://hermes-agent.nousresearch.com/docs/getting-started/installation/) places it under `~/.hermes/hermes-agent/` with a `hermes` launcher on `PATH`)
+- **Instructions file**: `AGENTS.md` (Hermes auto-injects the workdir `AGENTS.md`; Harness projects and restores it like the other `AGENTS.md` adapters)
+- **Default model**: none in the library — the upstream `config.yaml` / provider selection applies. `BuildCommand.model` and `RunResult.model` are null when `model` is omitted or empty.
+- **Command**: `hermes chat --cli --quiet --query=<prompt>`; inserts `--model <model>` after `--quiet` when a trimmed explicit model is supplied, then `--yolo` for `permission_policy="bypass"`, and `--query=<prompt>` last. The `--query=` form keeps a prompt that starts with `-` from being parsed as a flag.
+- **Prompt**: passed verbatim (no trimming). An empty prompt rejects with `invalid-options` before any write or spawn; whitespace-only prompts are passed through.
+- **Permissions**: `upstream` adds nothing, so Hermes' own approval behavior applies and it may reject a dangerous command with stdin closed. `bypass` maps to `chat --yolo`. The top-level `hermes -z/--oneshot` path was intentionally not used: it auto-bypasses approvals, which would make the `upstream` policy impossible to honor, and its `--usage-file` only exists on that path.
+- **Config**: `configHome` maps to `HERMES_HOME`, selecting an existing Hermes home (config.yaml, `.env`, sessions, skills); it is not a sandbox and nothing is copied there. `configFile` and native options are unsupported and reject. Omitted `configHome` keeps the caller's existing `~/.hermes` state.
+- **Token source**: none — `tokens_in` / `tokens_out` are always `null`. Quiet output has no machine-readable usage contract, and Harness never parses Hermes stdout as JSON.
+- **Cost source**: none — always `null`
+- **`raw`**: `{"session_id": "<id>"}` when stderr contains a complete line matching `^session_id: ([A-Za-z0-9_-]+)\r?\n`; the last complete match wins, a truncated trailing line without its newline is ignored, and no match yields `raw: null`. Resuming that session is an upstream feature (`hermes chat --resume`), not a Harness session API.
+- **stdout**: preserved verbatim in `RunResult.stdout`; the final response is whatever Hermes printed. Exit code, stderr, timeouts, cancellation and streaming chunks come from the shared subprocess engine.
+- **Env**: provider credentials come from the selected Hermes home / caller env; Harness injects none. Optional terminal backends (Docker, SSH, Modal, etc.) are configured upstream by the caller; the library provisions no runtime and reads no credential.
+- **Capabilities**: `cli` only; `bypass` supported; streaming and cancellation true; controlled sessions false; no session-log, pane or install helpers.
+
+### Qualification
+
+Installed locally: Hermes Agent v0.20.0 (2026.8.3), Python 3.11.15, OpenAI SDK 2.24.0, source `9d6c5a920c773f86fad9ea16528212faeaa21815`. Current upstream `main` (`pyproject` version 0.21.1, Python `>=3.11,<3.14`) and its [`hermes_cli/_parser.py`](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/_parser.py) still accept `chat --cli --quiet --query --model --yolo`; the installed build lacks the newer `--query-file`, which Harness does not use. This is flag-level verification against installed help and the current parser, not provider execution.
+
+Real CLI smoke (2026-09-08, macOS arm64): Python `run` and TypeScript `run`
+each invoked installed v0.20.0 with `chat --cli --quiet --query=...` in separate
+temporary HOME/HERMES_HOME/workdirs, with a 45-second Harness deadline.
+Both exited 1 in about 6.7 seconds with “No inference provider configured”;
+stdout was preserved, no session footer was emitted, and raw/metrics were null.
+No credentials were copied or existing configuration changed. This verifies the
+installed CLI's bounded missing-provider path, **not a successful provider turn**.
+Provider success, model availability, tool execution, remote/container runtimes
+and current-main runtime compatibility remain untested.
+
+### Output shape
+
+stdout is the plain final response; stderr carries the session line in quiet mode:
+```
+session_id: 20260908_094809_a1b2c3
 ```
 
 ---

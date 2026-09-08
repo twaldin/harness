@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (13 adapters)
+│   ├── adapters/*.py       (15 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "crush" | "kilo"
+  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes"
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -225,7 +225,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All thirteen CLI adapters share these lifecycle capabilities.
+for sessions. All fifteen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -251,6 +251,8 @@ approval request by silently escalating.
 | gemini, qwen | `-y` |
 | aider | `--yes-always` |
 | kilo | `--auto` |
+| hermes | `--yolo` |
+| omp | `--auto-approve` |
 
 The other five adapters reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
@@ -259,8 +261,8 @@ silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 the selected sandbox. Claude Code `effort` emits `--effort`; it is not a common
 model/effort policy for every tool.
 
-**Compatibility change:** older command builders inserted the eight mappings
-above unconditionally. Existing unattended callers that intentionally require
+**Compatibility change:** older command builders inserted the original eight
+mappings above (Hermes and OMP postdate them) unconditionally. Existing unattended callers that intentionally require
 that authority must set `permission_policy="bypass"` (Python) or
 `permissionPolicy: "bypass"` (TypeScript). Otherwise upstream defaults apply.
 The existing RunSpec/RunResult fields and entry points are retained; this is an
@@ -516,6 +518,30 @@ Cost and tokens are summed from assistant messages in the `--mode json` event st
 }
 ```
 
+### hermes
+
+Metrics are always null: Hermes' `--quiet` output has no machine-readable usage
+contract and stdout is never parsed as JSON. `raw` is `{"session_id": ...}` when
+stderr contains a complete `session_id: <id>` line (last one wins), otherwise
+null. `model` is null when the spec omits it, because the upstream
+configuration selects the model.
+
+```json
+{
+  "harness": "hermes",
+  "model": null,
+  "exitCode": 0,
+  "durationSeconds": 12.4,
+  "timedOut": false,
+  "stdout": "Hello from harness\n",
+  "stderr": "session_id: 20260908_094809_a1b2c3\n",
+  "costUsd": null,
+  "tokensIn": null,
+  "tokensOut": null,
+  "raw": { "session_id": "20260908_094809_a1b2c3" }
+}
+```
+
 ---
 
 ## Adapter contract
@@ -526,7 +552,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset |
+| `defaultModel` | used when RunSpec.model is unset; `hermes` has none (empty sentinel), so the upstream configuration selects the model and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -603,8 +629,10 @@ Configuration files are passed by path, never read or copied by the builder.
 |---|---|---|
 | claude-code | `CLAUDE_CONFIG_DIR` | `--settings` |
 | codex | `CODEX_HOME` | unsupported |
+| hermes | `HERMES_HOME` | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
+| omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
 | all others | unsupported | unsupported |
 
 An unsupported explicit override raises `unsupported-capability`. Home/file
@@ -615,12 +643,23 @@ process-global cwd. Preparation requires an existing caller-owned workdir.
 
 These mappings select existing upstream state, not a sandbox or an empty home.
 For example, Codex stores authentication alongside configuration under
-`CODEX_HOME`; pointing it at a new home does not copy authentication there.
+`CODEX_HOME`, and Hermes keeps `config.yaml`, `.env`, sessions and skills under
+`HERMES_HOME`; pointing either at a new home does not copy authentication there.
 Managed settings, upstream project discovery and upstream writes still apply.
 Raw `HOME`, `XDG_*` and native env overrides remain caller-controlled; passing
 an env variable does not claim the upstream supports it or separates credentials.
 Harness does not rewrite a user's settings to make a model selection stick.
-An omitted/empty model retains the existing adapter default contract.
+An omitted/empty model retains the existing adapter default contract; for Hermes
+that contract is no `--model` flag and a null reported model.
+
+OMP preserves the requested model string, including unknown provider prefixes;
+it does not apply Pi's `openai-codex/` inference. An explicit OMP `configHome`
+also selects the default profile because named upstream profiles ignore the
+agent-directory override. Without `configHome`, inherited profile selection
+remains upstream-controlled. This selects agent state, not all global/project
+discovery or a sandbox. OMP config files are additional overlays, not replacements.
+See the [OMP adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for setup,
+event semantics, native errors and qualification limits.
 
 Continue no longer generates YAML containing API keys. Its former explicit
 OpenAI-compatible env branch requires a caller-selected `configFile`.
@@ -636,10 +675,15 @@ only when neither inherited nor explicit env selected that variable.
 
 Override evidence: [Claude settings](https://code.claude.com/docs/en/settings),
 [Codex configuration/state](https://developers.openai.com/codex/config-advanced/),
-[Aider options](https://aider.chat/docs/config/options.html), and
-[Continue CLI](https://github.com/continuedev/continue/blob/main/extensions/cli/README.md).
-Claude Code 2.1.220 and Codex 0.153.4 help were inspected locally. These are
-configuration/flag checks, not provider execution or credential-isolation proof.
+[Aider options](https://aider.chat/docs/config/options.html),
+[Continue CLI](https://github.com/continuedev/continue/blob/main/extensions/cli/README.md),
+and [Hermes installation](https://hermes-agent.nousresearch.com/docs/getting-started/installation/)
+/ [CLI guide](https://hermes-agent.nousresearch.com/docs/user-guide/cli/).
+Claude Code 2.1.220, Codex 0.153.4 and Hermes Agent v0.20.0 (2026.8.3) help were
+inspected locally; the Hermes flags were also checked against the current
+upstream [`hermes_cli/_parser.py`](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/_parser.py).
+These are configuration/flag checks, not provider execution or
+credential-isolation proof.
 
 ---
 
@@ -896,8 +940,9 @@ apply its permission policy rather than automatically sending every suggestion.
 a redundant nested telemetry copy merely for symmetry. `RunResult.model`
 is the requested/default model, not proof of which model executed; normalization
 occurs in argv. An omitted or empty model selects the adapter default in both
-languages; whitespace is trimmed after default selection. Explicit
-`modelNoResolve` skips rewriting, not trimming.
+languages; whitespace is trimmed after default selection. Hermes has no library
+default: an omitted or empty model adds no `--model` flag and reports null.
+Explicit `modelNoResolve` skips rewriting, not trimming.
 
 Null means unknown/unavailable, not zero. Zero is a legitimate reported value.
 Cost may be reported or estimated according to the adapter matrix; it is not
@@ -1136,7 +1181,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "claude-code", "codex", "continue-cli", "crush", "factory-droid", "gemini", "kilo", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "claude-code", "codex", "continue-cli", "crush", "factory-droid", "gemini", "hermes", "kilo", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

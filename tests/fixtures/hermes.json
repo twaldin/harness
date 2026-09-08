@@ -1,0 +1,261 @@
+{
+  "spec": {
+    "harness": "hermes",
+    "prompt": "summarize the open TODO comments in this repository",
+    "instructions": "Prefer small, reviewable diffs.\n",
+    "timeoutSeconds": 900
+  },
+  "expectedCommand": {
+    "cmd": "hermes",
+    "args": [
+      "chat",
+      "--cli",
+      "--quiet",
+      "--query=summarize the open TODO comments in this repository"
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": "HERMES_HOME",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 12.4,
+    "timedOut": false,
+    "stdout": "Found 3 open TODO comments:\n- src/app.py:42 validate the request body\n- src/db.py:17 add a retry around connect()\n- tests/test_app.py:8 cover the empty-payload path\n",
+    "stderr": "session_id: sess_9f8e7d6c5b4a\n"
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": {
+      "session_id": "sess_9f8e7d6c5b4a"
+    }
+  },
+  "cases": [
+    {
+      "name": "whitespace-model-omits-empty-flag",
+      "spec": {
+        "model": "   "
+      },
+      "expectedCommand": {
+        "cmd": "hermes",
+        "args": [
+          "chat",
+          "--cli",
+          "--quiet",
+          "--query=summarize the open TODO comments in this repository"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "   "
+      }
+    },
+    {
+      "name": "nonzero-exit-keeps-session-id",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 4.8,
+        "timedOut": false,
+        "stdout": "Scanning repository for TODO comments...\n",
+        "stderr": "Traceback (most recent call last):\n  File \"<redacted>/hermes_cli/chat.py\", line 88, in run\nRuntimeError: provider returned HTTP 429\nsession_id: sess_0a1b2c3d4e5f\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "session_id": "sess_0a1b2c3d4e5f"
+        }
+      }
+    },
+    {
+      "name": "truncated-footer-has-no-session",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.1,
+        "timedOut": false,
+        "stdout": "Scanning repository for TODO comments...\nFound 2 open TODO comm",
+        "stderr": "session_id: sess_3c4d5e6f"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "last-complete-footer-wins",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 18.7,
+        "timedOut": false,
+        "stdout": "Found 1 open TODO comment:\n- src/app.py:42 validate the request body\n",
+        "stderr": "session_id: sess_first-0001\r\nWarning: retrying provider call after transient error\nsession_id: sess_second_0002\nsession_id: sess_partial"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "session_id": "sess_second_0002"
+        }
+      }
+    },
+    {
+      "name": "stdout-json-and-footer-ignored",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 6.3,
+        "timedOut": false,
+        "stdout": "{\"session_id\":\"sess_from_stdout\",\"usage\":{\"input_tokens\":950,\"output_tokens\":380},\"total_cost_usd\":0.0187}\nsession_id: sess_stdout_footer\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "malformed-stderr-footers-ignored",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 6.3,
+        "timedOut": false,
+        "stdout": "No open TODO comments found.\n",
+        "stderr": "  session_id: sess_indented\nsession_id:sess_missing_space\nsession_id: sess with spaces\nSESSION_ID: sess_upper_key\nsession_id: sess_trailing!\nsession id: sess_no_underscore\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "empty-prompt-rejected",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "leading-dash-multiline-prompt-preserved",
+      "spec": {
+        "prompt": "--help\nthen explain what each flag does\n"
+      },
+      "expectedCommand": {
+        "cmd": "hermes",
+        "args": [
+          "chat",
+          "--cli",
+          "--quiet",
+          "--query=--help\nthen explain what each flag does\n"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-provider-model-preserved",
+      "spec": {
+        "model": "openrouter/anthropic/claude-sonnet-4-6"
+      },
+      "expectedCommand": {
+        "cmd": "hermes",
+        "args": [
+          "chat",
+          "--cli",
+          "--quiet",
+          "--model",
+          "openrouter/anthropic/claude-sonnet-4-6",
+          "--query=summarize the open TODO comments in this repository"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "openrouter/anthropic/claude-sonnet-4-6"
+      }
+    },
+    {
+      "name": "bypass-adds-yolo-after-model",
+      "spec": {
+        "model": "gpt-5.4",
+        "permissionPolicy": "bypass"
+      },
+      "expectedCommand": {
+        "cmd": "hermes",
+        "args": [
+          "chat",
+          "--cli",
+          "--quiet",
+          "--model",
+          "gpt-5.4",
+          "--yolo",
+          "--query=summarize the open TODO comments in this repository"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      }
+    },
+    {
+      "name": "config-home-maps-to-hermes-home",
+      "spec": {
+        "configHome": "<root>/hermes-home"
+      },
+      "expectedCommand": {
+        "cmd": "hermes",
+        "args": [
+          "chat",
+          "--cli",
+          "--quiet",
+          "--query=summarize the open TODO comments in this repository"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "HERMES_HOME": "<root>/hermes-home"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "config-home-conflicts-with-explicit-env",
+      "spec": {
+        "configHome": "<root>/hermes-home",
+        "env": {
+          "HERMES_HOME": "<root>/other-home"
+        }
+      },
+      "expectedError": "invalid-options"
+    }
+  ]
+}

@@ -2,6 +2,10 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added `auggie` in both languages using official print/JSON mode and the shared
+  lifecycle. JSON-native results retain unit-tagged billing; non-JSON failures
+  remain in process status and stderr. Decoder recursion errors no longer discard
+  surrounding valid records. See [setup and qualification limits](ADAPTER-MATRIX.md#auggie).
 - Added `amp` local execute mode in both languages through the shared subprocess
   lifecycle. `AmpOptions.mode` selects an upstream mode; direct model selection
   and bypass reject. JSONL retains native thread identity, errors and optional

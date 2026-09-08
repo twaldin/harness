@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (20 adapters)
+│   ├── adapters/*.py       (21 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -127,11 +127,16 @@ interface AmpOptions {
   kind: 'amp'
   mode?: string                    // built-in or plugin mode, not a model ID
 }
-type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions
+interface VibeOptions {
+  kind: 'mistral-vibe'
+  agent?: string                   // exact upstream profile name
+  trust?: boolean                  // explicit invocation-only workspace trust
+}
+type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions
 interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
-  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | null
+  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | 'mistral-vibe' | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -141,7 +146,7 @@ interface Capabilities {
 ```
 
 Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
-`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions` and `AmpOptions` with equivalent values.
+`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions`, `AmpOptions` and `VibeOptions` with equivalent values.
 Construct native options as `ClaudeCodeOptions(effort="high")`,
 `CodexOptions(sandbox="read-only")`,
 `ClineOptions(provider="openai-compatible", auto_approve=False)` or
@@ -281,6 +286,7 @@ approval request by silently escalating.
 | cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
+| mistral-vibe | `--auto-approve` |
 | cursor | `--force` (native explicit denies and team policy still apply) |
 
 The other five adapters (including Amp) reject `"bypass"` as unsupported; a missing mapping is
@@ -645,6 +651,25 @@ Native provider failures can emit `result.is_error: true` and still exit zero.
 Callers must inspect the terminal event; Harness preserves the process exit
 and termination status rather than converting a native error into a parse failure.
 
+### mistral-vibe
+
+`vibe --output streaming --prompt=PROMPT` emits completed native history entries
+as JSONL, not token deltas or a terminal usage envelope. `raw` preserves every
+complete JSON object in order; malformed/nonobject lines are ignored, and no
+objects means null. Complete entries survive partial output and process failure.
+All token/cost metrics are null; native error notices do not rewrite process exit.
+
+Omitted model uses upstream configuration and reports null. An explicit model
+alias is trimmed and set as child `VIBE_ACTIVE_MODEL`; conflicting explicit
+environment selection rejects. `VibeOptions(agent="ask", trust=True)` /
+`{kind: 'mistral-vibe', agent: 'ask', trust: true}` selects a native profile and
+invocation-only workspace trust. Trust loads project configuration, hooks and
+instructions; it is distinct from tool auto-approval. Nonempty `instructions`
+requires explicit `trust=true`, otherwise `unsupported-capability`, rather than
+silently projecting an ignored file or granting trust implicitly. Empty prompts
+reject before preparation. Harness never passes `--worktree`. See the
+[adapter reference](ADAPTER-MATRIX.md#mistral-vibe) for unsupported operations.
+
 ### cursor
 
 `raw` preserves all complete JSON object lines in order, including assistant
@@ -673,7 +698,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `amp`, `hermes`, `goose`, `copilot` and `cursor` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `hermes`, `goose`, `copilot`, `cursor` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -755,6 +780,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | goose | `GOOSE_PATH_ROOT` | unsupported |
 | copilot | `COPILOT_HOME` | unsupported |
 | amp | unsupported | `--settings-file` (custom user settings; workspace/managed settings still apply) |
+| mistral-vibe | `VIBE_HOME` | unsupported |
 | cursor | `CURSOR_CONFIG_DIR` (config, not all data/credentials) | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
@@ -1352,7 +1378,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "amp", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)
@@ -1396,7 +1422,7 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.10` and TypeScript `0.2.14`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.12` and TypeScript `0.2.16`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

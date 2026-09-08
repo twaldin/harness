@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, or hermes as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, or hermes as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -120,7 +120,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'claude-code', 'cline', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -137,8 +137,11 @@ buildCommand({
 })
 ```
 
-Codex sandbox and bypass conflict. `ClaudeCodeOptions` instead exposes `effort`;
-a mismatched native option kind is an error, not a dropped option.
+Codex sandbox and bypass conflict. `ClaudeCodeOptions` exposes `effort`.
+`ClineOptions` exposes `provider` and `autoApprove`; an explicit `autoApprove`
+conflicts with bypass. Cline defaults to upstream auto-approval, so use
+`nativeOptions: { kind: 'cline', autoApprove: false }` to request per-run denial
+of tools requiring approval when stdin is closed. A mismatched native kind is an error.
 
 ---
 
@@ -146,7 +149,7 @@ a mismatched native option kind is an error, not a dropped option.
 
 ```typescript
 interface RunSpec {
-  harness: string            // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes"
+  harness: string            // registered adapter name; see listAdapters()
   prompt: string
   workdir: string            // normalized absolute cwd; must exist when prepared
   model?: string             // canonical or adapter-specific (normalized per harness; see ADAPTER-MATRIX.md)
@@ -156,7 +159,7 @@ interface RunSpec {
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
   permissionPolicy?: 'upstream' | 'bypass' // default upstream
-  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions
+  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions
   executable?: string       // bare name or absolute path
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file

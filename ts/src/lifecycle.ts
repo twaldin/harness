@@ -4,8 +4,9 @@
 // Every run owns a fresh POSIX process group (spawn `detached: true` → setsid,
 // so pgid === leader pid). The group is the ownership boundary: whatever the
 // leader forks stays inside it unless a descendant deliberately escapes via
-// setsid/setpgid, which is unsupported. Teardown is bounded: SIGTERM the
-// group, grace `GRACE_MS`, escalate to SIGKILL, then wait at most `DRAIN_MS`
+// setsid/setpgid, which is unsupported. Teardown is bounded: send the graceful
+// signal (SIGTERM by default, SIGINT when the request selects it) to the group
+// once, grace `GRACE_MS`, escalate to SIGKILL, then wait at most `DRAIN_MS`
 // for the stdio pipes to close before force-closing them. Leftovers are
 // stopped even after a normal leader exit, and the leader's own outcome is
 // preserved in that case.
@@ -27,12 +28,12 @@ import { randomUUID } from 'node:crypto'
 import { constants as osConstants } from 'node:os'
 import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
-import type { OutputCallback, OutputStream, SubprocOutcome, Termination, TimeoutKind } from './base.js'
-import { HarnessError } from './base.js'
+import type { GracefulSignal, OutputCallback, OutputStream, SubprocOutcome, Termination, TimeoutKind } from './base.js'
+import { HarnessError, isGracefulSignal } from './base.js'
 import { outputPipes } from './pipes.js'
 import type { OutputPipe } from './pipes.js'
 
-/** SIGTERM grace before escalating to SIGKILL. */
+/** Graceful-signal grace before escalating to SIGKILL. */
 export const GRACE_MS = 500
 /** After escalation: how long pipes may stay open before they are force-closed. */
 export const DRAIN_MS = 1000
@@ -60,6 +61,8 @@ export interface LaunchRequest {
   maxOutputBytes: number
   /** UTF-8 payload for the child's stdin followed by EOF; null means EOF from the start. */
   stdin: string | null
+  /** Sent to the process group once when the run must stop, before the SIGKILL escalation. */
+  gracefulSignal: GracefulSignal
 }
 
 export interface RunSubprocessOptions {
@@ -83,6 +86,8 @@ export interface RunSubprocessOptions {
    * state; a signal aborted while it blocks has no effect.
    */
   cancel?: AbortSignal
+  /** Signal sent to the group once when the run must stop; defaults to `SIGTERM`. The SIGKILL escalation and drain budget are unchanged. */
+  gracefulSignal?: GracefulSignal
 }
 
 function errnoCode(err: unknown): string | null {
@@ -148,12 +153,16 @@ export function prepareLaunch(cmd: readonly string[], opts: RunSubprocessOptions
   if (opts.cancel !== undefined && !(opts.cancel instanceof AbortSignal)) {
     throw invalid('cancel must be an AbortSignal')
   }
+  const gracefulSignal: unknown = opts.gracefulSignal === undefined ? 'SIGTERM' : opts.gracefulSignal
+  if (!isGracefulSignal(gracefulSignal)) {
+    throw invalid(`gracefulSignal must be "SIGTERM" or "SIGINT", got ${JSON.stringify(opts.gracefulSignal)}`)
+  }
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value
   }
   Object.assign(env, opts.extraEnv ?? {})
-  return { cmd: [...cmd], cwd: opts.cwd, env, timeoutMs, inactivityMs, maxOutputBytes, stdin }
+  return { cmd: [...cmd], cwd: opts.cwd, env, timeoutMs, inactivityMs, maxOutputBytes, stdin, gracefulSignal }
 }
 
 function terminalOutcome(termination: Termination, durationSeconds: number, extra: Partial<SubprocOutcome> = {}): Required<SubprocOutcome> {
@@ -411,7 +420,7 @@ export function runLifecycle(
       return !groupGone
     }
 
-    // TERM → grace → KILL → bounded drain. Once the group is empty (or has
+    // Graceful signal → grace → KILL → bounded drain. Once the group is empty (or has
     // been force-killed) the pipes get `DRAIN_MS` to close on their own: an
     // escaped descendant may still hold them, and we never wait on it longer.
     const stopGroup = (reason: StopReason | null, kind: TimeoutKind | null = null): void => {
@@ -423,7 +432,7 @@ export function runLifecycle(
         stopReason = reason
         stopKind = kind
       }
-      if (!group('SIGTERM')) {
+      if (!group(request.gracefulSignal)) {
         groupStopped = true
         drainTimer = setTimeout(finishFromState, DRAIN_MS)
         finishIfClosed()
@@ -610,6 +619,7 @@ function isLaunchRequest(value: unknown): value is LaunchRequest {
     && 'inactivityMs' in value && isDeadline(value.inactivityMs)
     && 'maxOutputBytes' in value && typeof value.maxOutputBytes === 'number'
     && 'stdin' in value && (value.stdin === null || typeof value.stdin === 'string')
+    && 'gracefulSignal' in value && isGracefulSignal(value.gracefulSignal)
 }
 
 const TERMINATIONS: readonly Termination[] = ['exited', 'signaled', 'timed-out', 'cancelled', 'callback-error', 'launch-failed']

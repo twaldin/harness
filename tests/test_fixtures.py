@@ -31,6 +31,7 @@ import pytest
 from harness import (
     BuildCommand,
     ClaudeCodeOptions,
+    ClineOptions,
     CodexOptions,
     HarnessError,
     RunSpec,
@@ -58,7 +59,11 @@ RUN_CASE_NAMES = FIXTURE_NAMES + [name for name, variant in VARIANTS if "expecte
 ERROR_CASE_NAMES = [name for name, variant in VARIANTS if "expectedError" in variant]
 LOCK = ".harness-run.lock"
 #: Ambient state that would change a command plan or a parser result.
-AMBIENT_ENV = ("OPENCODE_DB", "KILO_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME")
+AMBIENT_ENV = ("OPENCODE_DB", "KILO_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME", "CLINE_TOOL_APPROVAL_MODE")
+#: Spec fields where JSON `null` is a real value rather than "not provided".
+NULLABLE_SPEC_FIELDS = {"timeoutSeconds", "inactivityTimeoutSeconds", "stdin"}
+NATIVE_OPTION_TYPES = {"claude-code": ClaudeCodeOptions, "codex": CodexOptions, "cline": ClineOptions}
+NATIVE_OPTION_NAMES = {"autoApprove": "auto_approve"}
 
 
 def _substitute(value, mapping: dict[str, str]):
@@ -91,13 +96,23 @@ def _load_fixture(case_id: str, root: Path, workdir: Path) -> dict:
     return _substitute(fixture, {"<workdir>": str(workdir), "<root>": str(root)})
 
 
+def _native_options(raw: dict) -> object:
+    """Fixture `nativeOptions` object → the typed dataclass its `kind` names."""
+    fields = {NATIVE_OPTION_NAMES.get(key, key): value for key, value in raw.items() if key != "kind"}
+    return NATIVE_OPTION_TYPES[raw["kind"]](**fields)
+
+
 def _make_spec(raw: dict, workdir: Path, **overrides) -> RunSpec:
     names = {
         "timeoutSeconds": "timeout_seconds", "modelNoResolve": "model_no_resolve",
         "permissionPolicy": "permission_policy", "nativeOptions": "native_options",
         "configHome": "config_home", "configFile": "config_file",
     }
-    fields = {names.get(key, key): value for key, value in raw.items()}
+    # A variant can only override base keys, so `null` stands in for "not
+    # provided" except where the contract gives null a meaning of its own.
+    fields = {names.get(key, key): value for key, value in raw.items() if value is not None or key in NULLABLE_SPEC_FIELDS}
+    if isinstance(fields.get("native_options"), dict):
+        fields["native_options"] = _native_options(fields["native_options"])
     fields["workdir"] = workdir
     fields["env"] = dict(raw.get("env", {}))
     fields.update(overrides)
@@ -125,6 +140,7 @@ def _expected_command(raw: dict) -> BuildCommand:
         instruction_content=raw.get("instructionContent"),
         directories=tuple(Path(d) for d in raw["directories"]),
         model=raw["model"],
+        graceful_signal=raw.get("gracefulSignal"),
     )
 
 
@@ -236,7 +252,7 @@ def test_capabilities_match_fixture(case: dict, tmp_path: Path):
     else:
         rejects("unsupported-capability", config_file=config_file)
 
-    for options in (ClaudeCodeOptions(), CodexOptions()):
+    for options in (ClaudeCodeOptions(), CodexOptions(), ClineOptions()):
         if options.kind != caps["nativeOptions"]:
             rejects("invalid-options", native_options=options)
 

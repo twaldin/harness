@@ -25,8 +25,8 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain fifteen adapters, with shared fixture files:
-`aider`, `claude-code`, `codex`, `continue-cli`, `crush`, `factory-droid`,
+After adapter initialization, both registries contain sixteen adapters, with shared fixture files:
+`aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `crush`, `factory-droid`,
 `gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
@@ -55,6 +55,10 @@ upstream compatibility.
   See [its adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for current
   installation, headless behavior and qualification limits. RPC and optional
   SDK support remain separate work.
+- Cline CLI now ships in both languages through [TWA-75](https://linear.app/twaldin/issue/TWA-75).
+  See [setup, local ownership and qualification limits](ADAPTER-MATRIX.md#cline).
+  It uses standalone foreground JSON and SIGINT teardown; controlled sessions,
+  detached hub execution and optional SDK qualification (TWA-86) remain separate.
 
 ## Source-qualified: existing implementation backlog
 
@@ -89,19 +93,6 @@ specific checks supplement the [common validation scope](#validation-and-mainten
   exposes input/output/cache totals and optional `cost_usd`. Verify JSON metadata
   versus stream-json completion events, absent pricing and accumulation; do not
   assume session export is JSONL or that an estimate proves billed spend.
-
-### Cline CLI — [TWA-75](https://linear.app/twaldin/issue/TWA-75)
-
-- **Identity / maintenance:** [cline/cline CLI](https://github.com/cline/cline/blob/main/apps/cli/README.md),
-  Apache-2.0; `cli-v3.0.61` released September 2. `npm install -g cline` supplies
-  **`cline`**, not `cn` (the shipped Continue binary). CLI and extension versions differ.
-- **Path:** `cline --json -P PROVIDER -m MODEL "PROMPT"` produces NDJSON;
-  `--yolo` is an explicit approval bypass, not an adapter default to assume.
-- **Gate / validation:** preconfigured OAuth or provider API key; missing OAuth
-  credentials must not trigger interactive login in headless execution. Verify
-  approval denial, `--data-dir` isolation and the NDJSON usage schema. Verbose
-  `-v` stats are documented, but their presence in JSON is unqualified. Avoid
-  detached `--zen` execution. SDK qualification belongs to TWA-86.
 
 ### GitHub Copilot CLI — [TWA-76](https://linear.app/twaldin/issue/TWA-76)
 

@@ -1,6 +1,7 @@
 """Importing this package registers every shipped adapter."""
 from harness.adapters.aider import AiderAdapter
 from harness.adapters.claude_code import ClaudeCodeAdapter
+from harness.adapters.cline import ClineAdapter
 from harness.adapters.codex import CodexAdapter
 from harness.adapters.continue_cli import ContinueCliAdapter
 from harness.adapters.crush import CrushAdapter
@@ -31,10 +32,12 @@ register("crush", CrushAdapter)
 register("kilo", KiloAdapter)
 register("hermes", HermesAdapter)
 register("omp", OmpAdapter)
+register("cline", ClineAdapter)
 
 __all__ = [
     "AiderAdapter",
     "ClaudeCodeAdapter",
+    "ClineAdapter",
     "CodexAdapter",
     "ContinueCliAdapter",
     "CrushAdapter",

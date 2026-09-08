@@ -26,7 +26,7 @@ def test_run_requires_arguments():
 @pytest.mark.parametrize("policy", ["upstream", "bypass", "yolo"])
 def test_run_json_exposes_execution_and_cli_choices(monkeypatch, tmp_path: Path, policy: str):
     binary = tmp_path / "codex"
-    binary.write_text('#!/bin/sh\ntouch invoked\nprintf "%s\\n" "$@"\nexit 7\n')
+    binary.write_text('#!/bin/sh\ntouch invoked\ncp AGENTS.md observed-instructions\nprintf "%s\\n" "$@"\nexit 7\n')
     binary.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
     instructions = tmp_path / "instructions.txt"
@@ -42,6 +42,7 @@ def test_run_json_exposes_execution_and_cli_choices(monkeypatch, tmp_path: Path,
         assert not (tmp_path / "AGENTS.md").exists()
         return
     assert (tmp_path / "invoked").exists()
+    assert (tmp_path / "observed-instructions").read_text() == instructions.read_text()
     assert result.exit_code == 1
     payload = json.loads(result.stdout[result.stdout.index("{"):])
     args = payload["stdout"].splitlines()

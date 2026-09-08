@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, or mistral-vibe as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, mistral-vibe, or kiro as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'kiro', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -179,7 +179,7 @@ interface RunSpec {
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
   permissionPolicy?: 'upstream' | 'bypass' // default upstream
-  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions
+  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
   executable?: string       // bare name or absolute path
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file
@@ -237,6 +237,13 @@ with null token/cost totals. `nativeOptions: {kind: 'mistral-vibe', agent: 'ask'
 trust: true}` selects the native agent and explicitly trusts workspace config for
 this run. Nonempty instructions require `trust: true`. Model aliases use child
 `VIBE_ACTIVE_MODEL`, not a CLI model flag. See [setup and limits](../ADAPTER-MATRIX.md#mistral-vibe).
+
+Kiro uses `kiro-cli chat --no-interactive --agent-engine v2 --output-format stream-json`.
+`nativeOptions: {kind: 'kiro', trustTools: 'read,grep', requireMcpStartup: true}`
+selects a trusted tool subset and requires configured MCP servers to start.
+Empty `trustTools: ''` trusts no tools. Bypass grants all tools and conflicts with `trustTools`. Model IDs pass through;
+omitting one uses upstream selection. Complete object events remain in `raw`,
+with null token/USD totals. See [setup and limits](../ADAPTER-MATRIX.md#kiro).
 
 Cursor uses the standalone `agent` executable with print/stream-JSON output.
 Only explicit bypass adds `--force`; model/auth/config remain caller-selected.

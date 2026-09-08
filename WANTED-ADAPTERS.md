@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain twenty-one adapters, with shared fixture files:
+After adapter initialization, both registries contain twenty-two adapters, with shared fixture files:
 `aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
-`gemini`, `goose`, `hermes`, `kilo`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
+`gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
@@ -106,16 +106,11 @@ See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
 
 ### Kiro CLI — [TWA-80](https://linear.app/twaldin/issue/TWA-80)
 
-- **Identity / maintenance:** [Kiro CLI docs](https://kiro.dev/docs/cli/),
-  current CLI 3.x documentation; exact release not pinned here.
-  `https://cli.kiro.dev/install` supplies `kiro-cli`.
-- **Path:** [`kiro-cli chat --no-interactive "PROMPT"`](https://kiro.dev/docs/cli/headless/).
-  Stream-json output requires a supported v2/v3 engine; choose engine and trust
-  policy explicitly rather than inheriting an incompatible default.
-- **Gate / validation:** documented headless API-key access requires an eligible
-  paid Kiro plan and may be admin-restricted. Verify `KIRO_API_KEY` prerequisites,
-  tool denial, model restrictions, exit codes and the actual event schema.
-  Usage/USD remains unqualified; subscription gating is not a reason to exclude it.
+`kiro` now ships in both registries using the official `kiro-cli` V2 headless
+path, with explicit tool trust and opaque JSONL events. It is the successor to
+Amazon Q CLI, not another alias for an existing Harness adapter. Preview V3,
+ACP sessions and aggregate usage/USD remain unqualified.
+See [setup, permissions and coverage](ADAPTER-MATRIX.md#kiro).
 
 ### Auggie — [TWA-81](https://linear.app/twaldin/issue/TWA-81)
 

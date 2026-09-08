@@ -124,4 +124,4 @@ __all__ = [
     "last_lines",
     "last_non_empty_join",
 ]
-__version__ = "0.3.6"
+__version__ = "0.3.7"

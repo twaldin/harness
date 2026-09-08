@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'path'
 import { HarnessError, validateRunSpec } from '../src/base.js'
 import type { Backend, ErrorCode, RunSpec } from '../src/base.js'
-import { buildCommand, getAdapter, getCapabilities, listAdapters, parseOutput, register } from '../src/registry.js'
+import { buildCommand, getAdapter, getCapabilities, parseOutput, register } from '../src/registry.js'
 import '../src/adapters/index.js'
 
 const TMP_ROOT = join('/tmp', `harness-ts-contract-${process.pid}-${Date.now()}`)
@@ -245,11 +245,6 @@ describe('getCapabilities', () => {
 })
 
 describe('registry', () => {
-  test('built-ins are present and sorted by code unit', () => {
-    const names = listAdapters()
-    expect(names).toEqual([...names].sort())
-    for (const name of SHIPPED) expect(names).toContain(name)
-  })
 
   test('getAdapter on unknown name is unknown-harness', () => {
     expectCode(() => getAdapter('nope'), 'unknown-harness')

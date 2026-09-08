@@ -15,7 +15,7 @@ export function register(name: string, adapter: Adapter): void {
 }
 
 export function listAdapters(): string[] {
-  // Default sort is UTF-16 code-unit order: locale-independent, matches Python sorted().
+  // Default sort is locale-independent UTF-16 code-unit order.
   return Array.from(registry.keys()).sort()
 }
 

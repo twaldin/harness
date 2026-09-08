@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (23 adapters)
+│   ├── adapters/*.py       (24 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -259,7 +259,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All twenty-three CLI adapters share these lifecycle capabilities.
+for sessions. All twenty-four CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -286,7 +286,7 @@ approval request by silently escalating.
 | gemini, qwen | `-y` |
 | aider | `--yes-always` |
 | kilo, continue-cli | `--auto` |
-| hermes | `--yolo` |
+| hermes, mini-swe-agent | `--yolo` |
 | omp | `--auto-approve` |
 | cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
@@ -722,6 +722,47 @@ selection when omitted, explicit `--force` only for bypass, and SIGINT graceful
 teardown. No native mode/sandbox/trust/MCP approval or persist/resume/worker
 mapping is exposed. See [setup and qualification limits](ADAPTER-MATRIX.md#cursor).
 
+### mini-swe-agent
+
+The distinct native `mini` CLI uses `--task=TEXT --exit-immediately --output
+<workdir>/.harness/mini-swe-agent.traj.json`. Instructions are prepended to the
+task, not projected to a file. No model is selected by Harness when omitted;
+explicit model IDs pass through unchanged apart from surrounding whitespace.
+`MSWEA_CONFIGURED=true` in the child skips onboarding, not tool confirmation.
+An empty task or explicit empty `MSWEA_CONFIGURED` rejects as `invalid-options`.
+Only explicit bypass adds `--yolo`; upstream policy retains native confirmation
+or configured approvals. With stock confirm mode, closed stdin causes EOF failure
+instead of granting permission. Unattended coding needs bypass or caller-configured
+approvals. `--exit-immediately` disables only the final new-task prompt.
+
+The parser reads the reserved workdir trajectory only after a zero, non-timeout
+exit whose stdout ends with the exact `Saved trajectory to 'PATH'` marker
+(ANSI and Rich line wrapping tolerated). Missing marker/file, malformed JSON,
+or an unrecognized `trajectory_format` returns null metrics/raw. In particular, an interrupted or
+provider-failed invocation never reuses an earlier run's file. Its stdout/stderr
+remains available, but unconfirmed partial trajectory telemetry is not exposed.
+The CLI overwrites this reserved path; use a caller-owned workdir.
+Artifact reads reject symlinks, non-regular files, files larger than 16 MiB and
+files whose length changes while being read. They open nonblocking and read at
+most the checked size plus one byte; rejected artifacts yield null metrics/raw.
+
+For `mini-swe-agent-1.1` trajectories, `raw` retains the whole object.
+`info.model_stats.instance_cost` is a nonnegative finite USD value, including zero.
+Assistant `extra.response.usage` counts are summed independently: `prompt_tokens`
+then `input_tokens`, and `completion_tokens` then `output_tokens`, falling back
+only for missing/null primary keys. Invalid counts are omitted; a dimension with
+no valid counts or a total above 2^53 - 1 is null. No repricing or non-assistant
+usage aggregation occurs. A native `LimitsExceeded` exit status can accompany
+process exit zero; inspect `raw.info.exit_status` for `Submitted`, rather than
+treating process success as task completion.
+
+Streaming is console text, not structured events. Default local shell actions
+start separate process groups in mini 2.4.6 and can survive Harness cancellation;
+only the owned CLI group has the shared teardown guarantee. Container/custom
+environments selected in native config remain caller-owned and unqualified.
+No SDK/RPC, resume, pane or session-discovery mapping is exposed. See the
+[adapter reference](ADAPTER-MATRIX.md#mini-swe-agent) for setup and evidence.
+
 ### auggie
 
 `auggie --print --output-format json --show-cost` emits a compact terminal
@@ -750,14 +791,14 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe` and `kiro` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `kiro`, `mini-swe-agent` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
 `buildCommand` MUST NOT write files, create directories, or fork a subprocess.
 Built-in builders apply the common launch finalizer so direct adapter calls and
 registry calls honor executable, cwd, env and supported config overrides alike.
-`parseOutput` MAY read files the CLI wrote (opencode/kilo/crush sqlite DBs, swe-agent trajectory JSON) but MUST NOT block on I/O > 5s.
+`parseOutput` MAY read files the CLI wrote (opencode/kilo/crush sqlite DBs, swe-agent/mini-swe-agent trajectory JSON) but MUST NOT block on I/O > 5s.
 
 ### JSON-fixture-driven verification
 
@@ -834,6 +875,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | amp | unsupported | `--settings-file` (custom user settings; workspace/managed settings still apply) |
 | mistral-vibe | `VIBE_HOME` | unsupported |
 | cursor | `CURSOR_CONFIG_DIR` (config, not all data/credentials) | unsupported |
+| mini-swe-agent | `MSWEA_GLOBAL_CONFIG_DIR` | `--config` (complete config replacement, not an overlay on `mini.yaml`) |
 | kiro | unsupported | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
@@ -1435,7 +1477,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kiro", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kiro", "mini-swe-agent", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

@@ -2,7 +2,7 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -193,7 +193,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-three adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-four adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 
@@ -259,7 +259,7 @@ verify, then stop. Make the smallest possible change.""",
 `instructions` is temporarily projected into the adapter's instruction file in
 `workdir` (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, or `CONTINUE.md`).
 Aider uses `.harness-aider-instructions.md` through `--read`; Continue passes its
-projected file through `--rule`; swe-agent includes instructions in the prompt.
+projected file through `--rule`; swe-agent and mini-swe-agent include instructions in the prompt.
 `run` restores still-owned files when execution
 finishes. Use different workdirs for concurrent runs: overlapping preparation in
 one canonical workdir rejects instead of mixing instructions.
@@ -419,7 +419,7 @@ Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md
 
 ## Status
 
-Twenty-three adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
+Twenty-four adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kiro`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
 ### host Node version
 
@@ -473,6 +473,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 - `amp` runs local execute mode with JSONL events, not remote orbs. Direct model selection rejects; `AmpOptions.mode` selects an upstream mode and `configFile` selects user settings. Thread identity and native failures stay in raw; provider errors can exit zero. See [permissions, accounting and coverage](ADAPTER-MATRIX.md#amp).
 - `mistral-vibe` uses official Python package `mistral-vibe`, executable `vibe`, with completed-history JSONL output. Models remain native config aliases, and workspace trust is explicit via `VibeOptions`; instructions require that opt-in. See [setup, permissions and coverage](ADAPTER-MATRIX.md#mistral-vibe).
 - `cursor` uses the standalone Cursor `agent` CLI in print/stream-JSON mode, not the editor's `cursor` launcher. Model/auth/config remain native; only explicit bypass adds `--force`. See [permissions, optional usage and qualification limits](ADAPTER-MATRIX.md#cursor).
+- `mini-swe-agent` invokes native `mini`, separately from the legacy `swe-agent` wrapper. Onboarding is disabled in the child; tool approval remains explicit. It reads only a trajectory confirmed by the current CLI output. Local shell actions can escape CLI-group cancellation. See [setup, permissions, extraction and coverage](ADAPTER-MATRIX.md#mini-swe-agent).
 - `kiro` uses official `kiro-cli` headless V2 with JSONL events. Tool trust is explicit through `KiroOptions`; bypass alone grants all tools. Model/auth remain caller-selected, and token/USD totals remain null. See [setup, migration and coverage](ADAPTER-MATRIX.md#kiro).
 - `auggie` uses official `@augmentcode/auggie` in print/JSON mode. A configured Augment account and noninteractive entitlement are required; native completion/errors remain in `raw`, and credits are never converted to USD. See [setup, permissions and qualification limits](ADAPTER-MATRIX.md#auggie).
 

@@ -58,6 +58,7 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   cline: ['--auto-approve', 'true'],
   copilot: ['--allow-all'],
   'mistral-vibe': ['--auto-approve'],
+  'mini-swe-agent': ['--yolo'],
   cursor: ['--force'],
   kiro: ['--trust-all-tools'],
 }
@@ -251,6 +252,7 @@ describe('getCapabilities', () => {
       cline: ['CLINE_DIR', null],
       copilot: ['COPILOT_HOME', null],
       'mistral-vibe': ['VIBE_HOME', null],
+      'mini-swe-agent': ['MSWEA_GLOBAL_CONFIG_DIR', '--config'],
       cursor: ['CURSOR_CONFIG_DIR', null],
       amp: [null, '--settings-file'],
     }

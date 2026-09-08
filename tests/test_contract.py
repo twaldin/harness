@@ -45,6 +45,7 @@ BYPASS_ARGS = {
     "cline": ("--auto-approve", "true"),
     "mistral-vibe": ("--auto-approve",),
     "kiro": ("--trust-all-tools",),
+    "mini-swe-agent": ("--yolo",),
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
 ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
@@ -280,6 +281,7 @@ CONFIG_MAPPINGS = {
     "cline": ("CLINE_DIR", None),
     "amp": (None, "--settings-file"),
     "mistral-vibe": ("VIBE_HOME", None),
+    "mini-swe-agent": ("MSWEA_GLOBAL_CONFIG_DIR", "--config"),
 }
 
 

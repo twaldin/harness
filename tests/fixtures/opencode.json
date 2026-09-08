@@ -57,13 +57,14 @@
       "kind": "sqlite",
       "path": "<root>/opencode.db",
       "sql": [
-        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, model TEXT)",
-        "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
-        "INSERT INTO session (id, directory, time_updated, model) VALUES ('stale', '<workdir>', 10, 'openai/gpt-5.4')",
-        "INSERT INTO message (id, session_id, data) VALUES ('stale-1', 'stale', '{\"tokens\":{\"input\":99999,\"output\":99999},\"cost\":99.0}')",
-        "INSERT INTO session (id, directory, time_updated, model) VALUES ('latest', '<workdir>', 200, 'openai/gpt-5.4')",
-        "INSERT INTO message (id, session_id, data) VALUES ('latest-1', 'latest', '{\"tokens\":{\"input\":523,\"output\":140},\"cost\":0.008}')",
-        "INSERT INTO message (id, session_id, data) VALUES ('latest-2', 'latest', '{\"tokens\":{\"input\":300,\"output\":70},\"cost\":0.0043}')"
+        "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+        "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+        "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+        "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'latest', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'latest', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
       ]
     }
   ],
@@ -93,10 +94,10 @@
           "kind": "sqlite",
           "path": "<root>/selected-home/.local/share/opencode/opencode.db",
           "sql": [
-            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, model TEXT)",
-            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
-            "INSERT INTO session (id, directory, time_updated, model) VALUES ('latest', '<workdir>', 200, 'openai/gpt-5.4')",
-            "INSERT INTO message (id, session_id, data) VALUES ('latest-1', 'latest', '{\"tokens\":{\"input\":823,\"output\":210},\"cost\":0.0123}')"
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0123}')"
           ]
         }
       ]
@@ -131,11 +132,11 @@
           "kind": "sqlite",
           "path": "<root>/xdg/opencode/opencode.db",
           "sql": [
-            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, model TEXT)",
-            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
-            "INSERT INTO session (id, directory, time_updated, model) VALUES ('latest', '<workdir>', 200, 'openai/gpt-5.4')",
-            "INSERT INTO message (id, session_id, data) VALUES ('latest-1', 'latest', '{\"tokens\":{\"input\":523,\"output\":140},\"cost\":0.008}')",
-            "INSERT INTO message (id, session_id, data) VALUES ('latest-2', 'latest', '{\"tokens\":{\"input\":300,\"output\":70},\"cost\":0.0043}')"
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'latest', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
           ]
         }
       ]
@@ -172,21 +173,21 @@
           "kind": "sqlite",
           "path": "<root>/explicit.db",
           "sql": [
-            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, model TEXT)",
-            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
-            "INSERT INTO session (id, directory, time_updated, model) VALUES ('latest', '<workdir>', 200, 'openai/gpt-5.4')",
-            "INSERT INTO message (id, session_id, data) VALUES ('latest-1', 'latest', '{\"tokens\":{\"input\":523,\"output\":140},\"cost\":0.008}')",
-            "INSERT INTO message (id, session_id, data) VALUES ('latest-2', 'latest', '{\"tokens\":{\"input\":300,\"output\":70},\"cost\":0.0043}')"
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'latest', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
           ]
         },
         {
           "kind": "sqlite",
           "path": "<root>/xdg/opencode/opencode.db",
           "sql": [
-            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, model TEXT)",
-            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
-            "INSERT INTO session (id, directory, time_updated, model) VALUES ('decoy', '<workdir>', 200, 'openai/gpt-5.4')",
-            "INSERT INTO message (id, session_id, data) VALUES ('decoy-1', 'decoy', '{\"tokens\":{\"input\":99999,\"output\":99999},\"cost\":99.0}')"
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('decoy', 'proj', NULL, 'decoy', '<workdir>', 'decoy', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('decoy-1', 'decoy', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')"
           ]
         }
       ]

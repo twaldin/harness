@@ -244,20 +244,20 @@ approval request by silently escalating.
 | factory-droid | `--skip-permissions-unsafe` |
 | gemini, qwen | `-y` |
 | aider | `--yes-always` |
-| kilo | `--auto` |
+| kilo, continue-cli | `--auto` |
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
 
-The other five adapters reject `"bypass"` as unsupported; a missing mapping is
+The other four adapters reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
 silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 `--sandbox`, and cannot be combined with `"bypass"` because that would override
 the selected sandbox. Claude Code `effort` emits `--effort`; it is not a common
 model/effort policy for every tool.
 
-**Compatibility change:** older command builders inserted the original eight
-mappings above (Hermes and OMP postdate them) unconditionally. Existing unattended callers that intentionally require
-that authority must set `permission_policy="bypass"` (Python) or
+**Compatibility change:** older command builders inserted bypass mappings
+unconditionally. Hermes, OMP and Continue's mappings postdate that change.
+Callers that intentionally require that authority must set `permission_policy="bypass"` (Python) or
 `permissionPolicy: "bypass"` (TypeScript). Otherwise upstream defaults apply.
 The existing RunSpec/RunResult fields and entry points are retained; this is an
 intentional behavior change, not a claim of fully unchanged compatibility.
@@ -408,7 +408,10 @@ Cost and tokens come from the sqlite session DB read after the process exits.
 
 ### aider
 
-`costUsd` is always null — aider does not emit pricing data. Tokens are parsed from a log line regex.
+`costUsd` stays null: Harness does not parse Aider's textual cost report.
+Tokens sum the formatted per-message `sent`/`received` reports, including lines
+with intermediate cache-write/cache-hit fields. These rounded text counts are
+heuristic telemetry, not exact provider billing.
 
 ```json
 {
@@ -468,23 +471,34 @@ Cost and tokens come from the trajectory JSON file written by the wrapper.
 
 ### continue-cli
 
-Cost and tokens come from the `--json` envelope emitted on stdout.
+`cn --format json` emits the model's final response, not a usage envelope.
+Cost and token metrics are always null, including when the model produces fields
+named `usage` or `total_cost_usd`. `raw` preserves the parsed final JSON; leading
+compaction status records are skipped. [Upstream headless contract](https://docs.continue.dev/cli/headless-mode).
+
+An omitted/empty model delegates selection to the existing upstream configuration
+and reports null. An explicit model is a Continue Hub `owner/package` slug,
+preserved without provider-prefix normalization; bare model IDs reject as
+`unsupported-capability`. A caller-selected `configFile` owns model selection
+and cannot be combined with an explicit model. Instructions are projected into
+`CONTINUE.md` and passed through `--rule`, because Continue does not discover
+that root filename. Explicit bypass adds `--auto`; upstream policy remains the
+default. The adapter's empty-string default-model metadata denotes no selection.
 
 ```json
 {
   "harness": "continue-cli",
-  "model": "claude-sonnet-4-6",
+  "model": null,
   "exitCode": 0,
   "durationSeconds": 7.1,
   "timedOut": false,
-  "costUsd": 0.0187,
-  "tokensIn": 950,
-  "tokensOut": 380,
+  "costUsd": null,
+  "tokensIn": null,
+  "tokensOut": null,
   "raw": {
-    "type": "result",
-    "result": "Hello from harness",
-    "usage": { "input_tokens": 950, "output_tokens": 380 },
-    "total_cost_usd": 0.0187
+    "response": "Hello from harness",
+    "status": "success",
+    "note": "Response was not valid JSON, so it was wrapped in a JSON object"
   }
 }
 ```

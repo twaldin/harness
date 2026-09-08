@@ -80,11 +80,14 @@ def _setup_sqlite_fixture(tmp_path: Path, adapter: str) -> Path:
                 prompt_tokens INTEGER,
                 completion_tokens INTEGER,
                 cost REAL,
-                model TEXT,
                 updated_at INTEGER
             );
-            INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, model, updated_at)
-            VALUES ('s1', NULL, 70, 11, 0.004, 'gpt-5.4', 1);
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY, session_id TEXT, role TEXT, model TEXT, created_at INTEGER
+            );
+            INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, updated_at)
+            VALUES ('s1', NULL, 70, 11, 0.004, 1);
+            INSERT INTO messages VALUES ('m1', 's1', 'assistant', 'gpt-5.4', 1);
             """
         )
         db.commit()
@@ -149,3 +152,36 @@ def test_session_log_path_and_parse_parity_sqlite(adapter: str, tmp_path: Path, 
     py_parsed = _py_telemetry_dict(py_adapter.parse_session_log(py_path))
     ts_parsed = _ts_call(adapter, "parseSessionLog", py_path, env)
     assert py_parsed == ts_parsed
+    expected_tokens = (70, 11) if adapter == "crush" else (90, 30)
+    assert (py_parsed["tokensIn"], py_parsed["tokensOut"]) == expected_tokens
+    assert py_parsed["costUsd"] == 0.004
+
+
+@pytest.mark.parametrize(
+    ("models", "expected_model", "expected_cost"),
+    [
+        (["gpt-5.4-mini"], "gpt-5.4-mini", 0.00056),
+        (["gpt-5.4-mini", "gpt-5.4"], None, None),
+        ([], None, None),
+    ],
+)
+def test_codex_rollout_model_pricing_parity(models, expected_model, expected_cost, tmp_path: Path):
+    if shutil.which("bun") is None:
+        pytest.skip("bun not available")
+    events = [{"type": "turn_context", "payload": {"model": model}} for model in models]
+    events.extend([
+        {"type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": 500, "output_tokens": 50}}}},
+        {"type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": 1000, "output_tokens": 100}}}},
+    ])
+    path = tmp_path / "codex.jsonl"
+    path.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+    py_result = _py_telemetry_dict(get_adapter("codex").parse_session_log(str(path)))
+    ts_result = _ts_call("codex", "parseSessionLog", str(path), os.environ.copy())
+    assert py_result == ts_result
+    assert (py_result["tokensIn"], py_result["tokensOut"], py_result["model"]) == (1000, 100, expected_model)
+    if expected_cost is None:
+        assert py_result["costUsd"] is None
+    else:
+        assert py_result["costUsd"] == pytest.approx(expected_cost)

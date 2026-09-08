@@ -132,6 +132,8 @@ codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {
   // Tokens are CUMULATIVE in total_token_usage; take the last token_count event.
   let lastIn = 0, lastOut = 0, sawUsage = false
   let modelName: string | null = null
+  let contextModel: string | null = null
+  let mixedModels = false
   try {
     for (const line of readFileSync(path, 'utf-8').split('\n')) {
       const t = line.trim()
@@ -156,13 +158,25 @@ codexAdapter.parseSessionLog = function (path: string): SessionTelemetry {
         const m = obj['model']
         if (typeof m === 'string' && !modelName) modelName = m
       }
+      if (obj['type'] === 'turn_context') {
+        const payload = obj['payload']
+        const m = payload && typeof payload === 'object'
+          ? (payload as Record<string, unknown>)['model'] : undefined
+        if (typeof m === 'string' && m) {
+          if (contextModel === null) contextModel = m
+          else if (contextModel !== m) mixedModels = true
+        }
+      }
     }
   } catch {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
+  // Cumulative usage spans every turn; do not price a mixed-model total
+  // using one arbitrarily selected model.
+  if (contextModel !== null) modelName = mixedModels ? null : contextModel
   const ti = sawUsage ? lastIn : null
   const to = sawUsage ? lastOut : null
-  return { sessionLogPath: path, tokensIn: ti, tokensOut: to, costUsd: deriveCost(modelName ?? 'gpt-5.4', ti, to), model: modelName, raw: null }
+  return { sessionLogPath: path, tokensIn: ti, tokensOut: to, costUsd: deriveCost(modelName, ti, to), model: modelName, raw: null }
 }
 
 codexAdapter.installMeta = {

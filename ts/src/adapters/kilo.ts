@@ -63,13 +63,17 @@ function readKiloSessionTotalsByDbPath(
   if (!db) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   try {
+    // Assistant rows carry data.modelID/providerID (never data.model); the
+    // model is reported only when every assistant row agrees on one.
     const row = db.get(
       `
       SELECT
         COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
         COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
         COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-        MAX(json_extract(data, '$.model'))                      AS model,
+        CASE WHEN COUNT(DISTINCT json_extract(data, '$.modelID')) = 1
+                  AND COUNT(NULLIF(json_extract(data, '$.modelID'), '')) = COUNT(*)
+             THEN MAX(json_extract(data, '$.modelID')) END       AS model,
         COUNT(*)                                                 AS row_count
       FROM message
       WHERE session_id IN (
@@ -151,7 +155,7 @@ const kiloAdapter: Adapter = {
     const result = readKiloSessionTotalsByDbPath(dbPath, wdHint || '/')
     let costUsd = result.costUsd
     if ((costUsd == null || costUsd === 0) && (result.tokensIn != null || result.tokensOut != null)) {
-      costUsd = deriveCost(result.model ?? 'gpt-5.4', result.tokensIn, result.tokensOut) ?? costUsd
+      costUsd = deriveCost(result.model, result.tokensIn, result.tokensOut) ?? costUsd
     }
     return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd, model: result.model, raw: null }
   },

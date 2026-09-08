@@ -94,18 +94,40 @@ def test_qwen_propagates_exit_code(tmp_path, monkeypatch):
 
 
 def test_continue_build_command(tmp_path):
-    spec = RunSpec(harness="continue-cli", prompt="add types", workdir=tmp_path, model="claude-sonnet-4-6")
+    spec = RunSpec(harness="continue-cli", prompt="add types", workdir=tmp_path, model="anthropic/claude-sonnet-4-6")
     bc = ContinueCliAdapter().build_command(spec)
     assert bc.cmd == "cn"
-    assert bc.args == ["-p", "add types", "--model", "claude-sonnet-4-6", "--json"]
+    assert bc.args == ["-p", "add types", "--model", "anthropic/claude-sonnet-4-6", "--format", "json"]
     assert bc.env == {}
+    assert bc.model == "anthropic/claude-sonnet-4-6"
 
 
-def test_continue_build_command_default_model(tmp_path):
+def test_continue_build_command_default_model_delegates_to_upstream_config(tmp_path):
     spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path)
     bc = ContinueCliAdapter().build_command(spec)
-    assert "--model" in bc.args
-    assert bc.args[bc.args.index("--model") + 1] == "claude-sonnet-4-6"
+    assert bc.args == ["-p", "x", "--format", "json"]
+    assert bc.model is None
+
+
+def test_continue_rejects_bare_native_model_id(tmp_path):
+    spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path, model="claude-sonnet-4-6")
+    with pytest.raises(HarnessError) as exc:
+        ContinueCliAdapter().build_command(spec)
+    assert exc.value.code == "unsupported-capability"
+    assert "config_file" in str(exc.value)
+
+
+def test_continue_bypass_maps_to_auto(tmp_path):
+    spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path, permission_policy="bypass")
+    bc = ContinueCliAdapter().build_command(spec)
+    assert bc.args == ["-p", "x", "--auto", "--format", "json"]
+
+
+def test_continue_instructions_are_passed_as_a_rule(tmp_path):
+    spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path, instructions="keep it brief")
+    bc = ContinueCliAdapter().build_command(spec)
+    assert bc.instructions_file == tmp_path / "CONTINUE.md"
+    assert bc.args == ["-p", "x", "--rule", str(tmp_path / "CONTINUE.md"), "--format", "json"]
 
 
 def test_continue_projects_instructions_for_the_run(tmp_path, monkeypatch):
@@ -152,22 +174,32 @@ def test_continue_openai_env_requires_caller_config_file(tmp_path):
     assert bc.env["OPENAI_API_KEY"] == "sk-secret"
 
 
-def test_continue_parses_json_envelope(tmp_path, monkeypatch):
-    envelope = {
-        "type": "result",
-        "result": "done",
-        "usage": {"input_tokens": 800, "output_tokens": 200},
-        "total_cost_usd": 0.0187,
+def test_continue_parses_wrapped_headless_response(tmp_path, monkeypatch):
+    wrapped = {
+        "response": "done",
+        "status": "success",
+        "note": "Response was not valid JSON, so it was wrapped in a JSON object",
     }
     monkeypatch.setattr(
         "harness._subproc.run_subprocess",
-        lambda *a, **kw: _stub(stdout=json.dumps(envelope)),
+        lambda *a, **kw: _stub(stdout=json.dumps(wrapped) + "\n"),
     )
     result = ContinueCliAdapter().run(RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path))
-    assert result.tokens_in == 800
-    assert result.tokens_out == 200
-    assert result.cost_usd == pytest.approx(0.0187)
-    assert result.raw is not None
+    assert result.raw == wrapped
+    assert (result.tokens_in, result.tokens_out, result.cost_usd) == (None, None, None)
+
+
+def test_continue_skips_compaction_status_lines_and_ignores_model_usage_fields(tmp_path, monkeypatch):
+    final = {"result": "done", "usage": {"input_tokens": 800, "output_tokens": 200}, "total_cost_usd": 0.0187}
+    stdout = (
+        json.dumps({"status": "info", "message": "Auto-compacting triggered", "contextUsage": "91%"}) + "\n"
+        + json.dumps({"status": "success", "message": "Auto-compacted successfully"}) + "\n"
+        + json.dumps(final, indent=2) + "\n"
+    )
+    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
+    result = ContinueCliAdapter().run(RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path))
+    assert result.raw == final
+    assert (result.tokens_in, result.tokens_out, result.cost_usd) == (None, None, None)
 
 
 def test_continue_handles_garbage_stdout(tmp_path, monkeypatch):

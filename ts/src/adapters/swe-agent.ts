@@ -159,7 +159,7 @@ sweAgentAdapter.installMeta = {
   packageManager: 'pip',
   installCommand: ['pip', 'install', '--user', 'mini-swe-agent'],
   updateCommand: ['pip', 'install', '--user', '--upgrade', 'mini-swe-agent'],
-  versionCommand: ['mini', '--version'],
+  versionCommand: ['python3', '-c', "from importlib.metadata import version; print(version('mini-swe-agent'))"],
 }
 
 register('swe-agent', sweAgentAdapter)

@@ -136,7 +136,7 @@ class KiloAdapter(Adapter):
             hint = path.split("session(", 1)[1][:-1]
         tokens_in, tokens_out, cost, model = _read_kilo_session_totals_by_db_path(Path(db_raw), hint or "/")
         if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
-            cost = derive_cost(model or "gpt-5.4", tokens_in, tokens_out) or cost
+            cost = derive_cost(model, tokens_in, tokens_out) or cost
         return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
@@ -164,13 +164,17 @@ def _read_kilo_session_totals_by_db_path(
         return None, None, None, None
 
     try:
+        # Assistant rows carry data.modelID/providerID (never data.model); the
+        # model is reported only when every assistant row agrees on one.
         row = conn.execute(
             """
             SELECT
                 COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
                 COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
                 COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-                MAX(json_extract(data, '$.model'))                      AS model,
+                CASE WHEN COUNT(DISTINCT json_extract(data, '$.modelID')) = 1
+                          AND COUNT(NULLIF(json_extract(data, '$.modelID'), '')) = COUNT(*)
+                     THEN MAX(json_extract(data, '$.modelID')) END       AS model,
                 COUNT(*)                                                 AS row_count
             FROM message
             WHERE session_id IN (

@@ -58,6 +58,22 @@
   },
   "cases": [
     {
+      "name": "cached-and-multiple-usage-reports",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "Tokens: 1k sent, 100 cache write, 200 cache hit, 50 received.\nTokens: 250 sent, 25 received.\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 1250,
+        "tokensOut": 75,
+        "raw": null
+      }
+    },
+    {
       "name": "fractional-counts",
       "sampleOutput": {
         "exitCode": 0,

@@ -45,8 +45,9 @@ MUST NOT block on long I/O (sqlite reads use `timeout=5.0`).
 
 Adapters use several output shapes; check the adapter and [matrix](../../ADAPTER-MATRIX.md) for exact fields:
 
-- **JSON envelope on stdout** — `claude-code`, `openclaude`, `continue-cli`,
-  `factory-droid`; their usage and cost field names differ.
+- **JSON envelope on stdout** — `claude-code`, `openclaude`, `factory-droid`;
+  available usage fields differ. Continue headless JSON is model output, not
+  telemetry: its token/cost metrics stay null.
 - **JSONL event stream** — `pi`, `codex`; their event names and accumulation
   rules differ, so mirror the existing parser rather than summing every
   usage-bearing event.

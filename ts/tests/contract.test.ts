@@ -54,9 +54,10 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   qwen: ['-y'],
   kilo: ['--auto'],
   omp: ['--auto-approve'],
+  'continue-cli': ['--auto'],
 }
 
-const NO_BYPASS = ['opencode', 'pi', 'crush', 'continue-cli', 'swe-agent']
+const NO_BYPASS = ['opencode', 'pi', 'crush', 'swe-agent']
 
 const ALL_BYPASS_FLAGS = Object.values(BYPASS_FLAGS).flat()
 const SHIPPED = [...Object.keys(BYPASS_FLAGS), ...NO_BYPASS]

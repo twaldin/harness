@@ -11,9 +11,9 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The twenty-one adapters below are registered in **both** implementations and have
+The twenty-two adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
-`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
+`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
@@ -23,7 +23,7 @@ adapters no longer depends on a prior Python build/parse/run call.
 installation identities, headless feasibility, exclusions and deduplicated
 implementation tickets. A catalog entry or ticket is **not** a shipped adapter.
 In particular, the shipped `swe-agent` is a consumer-supplied mini-SWE wrapper
-(see [its command](#swe-agent)), not the planned native mini-SWE-agent CLI adapter.
+(see [its command](#swe-agent)), separate from the native [mini-SWE-agent adapter](#mini-swe-agent).
 
 The bounded repairs and qualification ledger belong to
 [TWA-68](https://linear.app/twaldin/issue/TWA-68). Larger discovered repairs are
@@ -64,6 +64,7 @@ versions below are dated observations, not a supported version range.
 | cline | [`cline`; standalone CLI](https://docs.cline.bot/cli/cli-reference), pinned [cli-v3.0.61](https://github.com/cline/cline/tree/cli-v3.0.61/apps/cli) | 3.0.61, isolated npm prefix | Help/version and real-CLI loopback protocol checked; JSON differs from docs. SIGINT stops ordinary shell tools; SIGTERM does not. Real Cline provider smoke failed without authentication; no successful real-provider coverage. |
 | goose | [`aaif-goose/goose` release binary](https://github.com/aaif-goose/goose/releases/tag/v1.49.0); [CLI reference](https://goose-docs.ai/docs/guides/goose-cli-commands) | isolated Darwin arm64 v1.49.0; not installed on PATH | Help/source-checked; bounded real CLI probes with synthetic localhost provider. No authenticated provider coverage. macOS stdio MCP children can escape group teardown; see below. |
 | cursor | [official binary installer](https://cursor.com/install); [headless reference](https://cursor.com/docs/cli/headless) | 2026.09.02-c22c1a3, isolated Darwin arm64 archive | Help/source-checked; bounded native auth-failure smoke in both languages. No credentialed provider/edit/tool-cleanup coverage. See [limits](#cursor). |
+| mini-swe-agent | [`mini-swe-agent` 2.4.6](https://pypi.org/project/mini-swe-agent/2.4.6/); [official CLI](https://mini-swe-agent.com/latest/usage/mini/) | isolated Python 3.11.15 install, `mini --help` and metadata version checked | Native deterministic-model completion checked on macOS arm64; no external-provider qualification. Local shell actions detach from the CLI group. See [limits](#mini-swe-agent). |
 
 Off-PATH probes used absolute executables; Harness does not add them to PATH.
 No tools were upgraded, credentials switched, global configuration rewritten or
@@ -73,7 +74,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `amp`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `amp`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `mini-swe-agent`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
 upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
@@ -102,10 +103,11 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | amp | unwired | unwired | `session_id` retained in JSONL; no latest-thread discovery or continuation |
 | mistral-vibe | unwired | unwired | completed history entries on stdout; no latest-session discovery |
 | cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
+| mini-swe-agent | unwired | unwired | confirmed one-shot trajectory only; no latest-run discovery |
 
 ## Backend and permission capabilities
 
-All twenty-one support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All twenty-two support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -115,7 +117,7 @@ OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
-Amp, OMP, Cline, Copilot and Cursor add install metadata but no pane or session-log heuristics.
+Amp, OMP, Cline, Copilot, Cursor and mini-SWE-agent add install metadata but no pane or session-log heuristics.
 These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
@@ -133,7 +135,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | gemini, qwen | `-y` |
 | aider | `--yes-always` |
 | kilo | `--auto` |
-| hermes | `--yolo` |
+| hermes, mini-swe-agent | `--yolo` |
 | omp | `--auto-approve` |
 | continue-cli | `--auto` |
 | cline | `--auto-approve true` |
@@ -160,8 +162,9 @@ Configuration selection is also explicit: `executable` selects the binary;
 `configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
 Codex, `HERMES_HOME` for Hermes, `GOOSE_PATH_ROOT` for Goose, `CLINE_DIR` for Cline, `COPILOT_HOME` for Copilot, and
 `PI_CODING_AGENT_DIR` plus `--profile default` for OMP. `configFile` maps to
-Claude Code `--settings`, Amp `--settings-file`, or `--config` for Aider, Continue and OMP.
-Other adapters reject these typed overrides. Existing
+Claude Code `--settings`, Amp `--settings-file`, or `--config` for Aider, Continue, OMP and mini-SWE-agent.
+mini-SWE-agent maps `configHome` to `MSWEA_GLOBAL_CONFIG_DIR`; its config file replaces the built-in config.
+Other adapters reject unsupported typed overrides. Existing
 caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
 official sources, and limits.
@@ -969,6 +972,38 @@ the teardown guarantee. Native provider authentication, billing/model availabili
 Linux upstream behavior, managed-shell rollout and arbitrary extensions are not
 qualified by the synthetic fixture suite.
 
+## mini-swe-agent
+
+- **Identity / setup:** native [mini-SWE-agent](https://mini-swe-agent.com/latest/quickstart/), PyPI `mini-swe-agent`, executable `mini`. Distinct from the existing consumer-supplied `swe-agent` wrapper; neither adapter invokes the full SWE-agent CLI. Qualified distribution: **2.4.6**, Python >=3.10. Install in a caller-selected environment with `uv tool install mini-swe-agent`; update with `uv tool upgrade mini-swe-agent`. `mini --version` is not supported: use `python3 -c "from importlib.metadata import version; print(version('mini-swe-agent'))"` with the Python belonging to that installation. `mini --help` also prints the version banner. Harness does not install or configure globally.
+- **Command:** `mini --task=TEXT --exit-immediately --output <absolute-workdir>/.harness/mini-swe-agent.traj.json`, adding `--yolo` only for explicit bypass, `--config PATH` for a selected config, and `--model PROVIDER/MODEL` only when requested. A leading-dash task is safe in equals form; empty tasks reject. Instructions are prepended to the task with a separator, not written to an instruction file. No default model or provider rewriting: omitted models use native config/environment.
+- **Configuration / authentication:** child `MSWEA_CONFIGURED=true` disables the initial model/key wizard, not permissions. An explicit empty value rejects instead of reopening onboarding. `configHome` selects `MSWEA_GLOBAL_CONFIG_DIR`; native `.env` is loaded there without replacing already-set child variables. `configFile` **replaces** the default `mini.yaml`, so provide a complete upstream configuration, including required templates. Without it, native `MSWEA_MINI_CONFIG_PATH` remains effective. Existing provider keys/model settings remain caller-selected; no credentials are read, copied or harvested by Harness.
+- **Permissions / termination:** `--exit-immediately` prevents the final new-task confirmation loop. Stock `upstream` mode still asks before shell actions; closed stdin fails with EOF instead of approving. Unattended coding therefore requires explicit `permissionPolicy: "bypass"` / `permission_policy="bypass"` or caller-configured approvals. No implicit `--yolo`, budget increase or response to confirmation prompts. Native step/cost limits remain configurable upstream; Harness deadlines are separate.
+- **Environment / ownership:** the native default is local execution in the CLI cwd, unless config selects an environment cwd. A complete config may explicitly select a container/custom environment; those runtimes are not qualified or managed by this adapter. In 2.4.6, [`LocalEnvironment._run`](https://github.com/SWE-agent/mini-SWE-agent/blob/v2.4.6/src/minisweagent/environments/local.py) launches **each shell action with `start_new_session=True`**. These groups can survive cancellation of `mini`, and its normal action timeout cannot fire after the parent is killed. Harness bounds teardown of its owned CLI group only; it does not adopt detached shells, stop shared containers or shut down unrelated processes. Use an isolated environment with caller-owned cleanup when executing untrusted or long-running commands.
+- **Result extraction:** the CLI overwrites the reserved workdir trajectory. The parser reads it only after this invocation's stdout contains the exact native `Saved trajectory to 'PATH'` marker, tolerating ANSI and Rich line wrapping. Missing marker/file, malformed JSON or an unknown trajectory format yields null metrics/raw, even if a prior file exists. Interrupted/provider-exception partial files are deliberately not trusted; partial stdout/stderr remains in the result. stdout truncation that removes the marker also makes metrics unknown. `/dev/stdout` and `/dev/fd/1` output were rejected by native Typer path validation on macOS; no fragile stdout redirect wrapper is used.
+- **Metrics / native status:** `mini-swe-agent-1.1` JSON supplies full `raw`, finite nonnegative `info.model_stats.instance_cost`, and independent safe-integer usage totals from assistant `extra.response.usage` only. Primary prompt/completion fields fall back to input/output fields only when absent/null. Zero is real; malformed/missing dimensions and unsafe totals remain null; no repricing. Native `LimitsExceeded` can exit zero: inspect `raw.info.exit_status` for `Submitted` before declaring the task completed.
+- **Capabilities / exclusions:** common CLI lifecycle, raw console chunk streaming, finite stdin, bounded capture, deadlines and CLI-group cancellation. No structured live events, typed native options, SDK/RPC, controlled/resumable sessions, pane or session-log discovery. Native config is the explicit route for model backend, environment and budget choices; Harness does not silently select an SDK or container.
+
+### Qualification — 2026-09-08
+
+Official distribution/docs, isolated `mini --help`, metadata version and installed
+source were checked with 2.4.6 on macOS arm64 / Python 3.11.15. A bounded native
+CLI run used the package's own deterministic model to write a synthetic file and
+submit, with a complete private config and explicit bypass. Python `run` /
+`run_async` and the built package under Node `run` / `runAsync` all returned
+`Submitted`, a saved trajectory and synthetic cost 0.03; instructions reached
+the native task. Stock confirmation failed with native `EOFError` and no file
+edit in both languages. Python also exercised a native step limit (exit zero,
+`LimitsExceeded`), wall timeout without stale telemetry, and an action that
+survived CLI-group teardown; the smoke stopped only that recorded action group.
+Node callback cancellation returned `cancelled`. Every run released its lease.
+
+These prove native CLI behavior, **not external-provider success or billing**.
+No OpenAI/Anthropic API key was available in the selected process environment;
+no credential stores were searched. Shared fixtures separately cover
+command/capability parity, stale/missing artifacts, native limits, partial/failure
+output and telemetry boundaries. External providers, Linux native execution,
+custom/container environments and arbitrary detached descendants remain unqualified.
+
 ---
 
 ## Cross-cutting: instruction ownership
@@ -985,7 +1020,7 @@ The explicit `projectInstructions` helper uses the same protocol.
 `writeInstructions` now exclusively creates a caller-owned file and never
 overwrites existing content. See [SPEC](SPEC.md#instruction-preparation-and-restoration).
 
-swe-agent folds instructions into its prompt; it still acquires the workdir lease.
+swe-agent and mini-swe-agent fold instructions into their prompts; both still acquire the workdir lease.
 
 ---
 

@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain twenty-one adapters, with shared fixture files:
+After adapter initialization, both registries contain twenty-two adapters, with shared fixture files:
 `aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
-`gemini`, `goose`, `hermes`, `kilo`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
+`gemini`, `goose`, `hermes`, `kilo`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
@@ -42,7 +42,7 @@ upstream compatibility.
   releases. Shipping does not establish that those concerns are resolved or
   approve other forks.
 - `swe-agent` currently invokes a consumer-supplied mini-SWE Python wrapper, not
-  a native SWE-agent CLI. The distinct native mini-SWE CLI is tracked below.
+  a native SWE-agent CLI. The distinct `mini-swe-agent` adapter now invokes native `mini`.
 - `hermes` now ships local quiet chat in both languages ([TWA-73](https://linear.app/twaldin/issue/TWA-73)).
   See its [qualification and smoke limits](ADAPTER-MATRIX.md#hermes); the gateway,
   controlled sessions and machine-readable usage are not part of this adapter.
@@ -130,15 +130,12 @@ See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
 
 ### Native mini-SWE-agent — [TWA-82](https://linear.app/twaldin/issue/TWA-82)
 
-- **Identity / maintenance:** [SWE-agent/mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent),
-  v2.4.6 released July 23; source active September 7.
-  [Installation](https://mini-swe-agent.com/latest/quickstart/):
-  `uv tool install mini-swe-agent` supplies `mini` and `mini-extra`.
-- **Path:** [`mini -t "TASK" -m PROVIDER/MODEL -y --exit-immediately -o trajectory.json`](https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/run/mini.py).
-- **Gate / validation:** `-y` deliberately bypasses confirmation; expose that limitation.
-  First-run configuration must be prepared without an interactive setup wizard.
-  Verify termination, trajectory fields, explicit model/cwd and cleanup. Do not
-  silently replace the shipped `swe-agent` wrapper or conflate it with SWE-agent.
+`mini-swe-agent` now ships in both registries, distinct from the legacy wrapper.
+Official PyPI 2.4.6 supplies `mini` and `mini-extra`; Harness uses the terminating
+`mini --task=TEXT --exit-immediately` path with explicit approval choices.
+Current-run-confirmed trajectory extraction avoids stale results. Local shell
+actions use detached process groups and are outside CLI-group cancellation.
+See [setup, capabilities and qualification](ADAPTER-MATRIX.md#mini-swe-agent).
 
 ### OpenHands CLI — [TWA-83](https://linear.app/twaldin/issue/TWA-83)
 

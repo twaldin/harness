@@ -1,0 +1,651 @@
+{
+  "spec": {
+    "harness": "mini-swe-agent",
+    "prompt": "Fix the synthetic boundary",
+    "model": "openai/gpt-5.4",
+    "instructions": "Be surgical.\n",
+    "permissionPolicy": "bypass"
+  },
+  "expectedCommand": {
+    "cmd": "mini",
+    "args": [
+      "--task=Be surgical.\n\n---\n\nFix the synthetic boundary",
+      "--exit-immediately",
+      "--output",
+      "<workdir>/.harness/mini-swe-agent.traj.json",
+      "--yolo",
+      "--model",
+      "openai/gpt-5.4"
+    ],
+    "cwd": "<workdir>",
+    "env": {
+      "MSWEA_CONFIGURED": "true"
+    },
+    "instructionsFile": null,
+    "directories": [
+      "<workdir>/.harness"
+    ],
+    "model": "openai/gpt-5.4"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": "MSWEA_GLOBAL_CONFIG_DIR",
+    "configFileFlag": "--config",
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 1.2,
+    "timedOut": false,
+    "stdout": "Exit:\nsynthetic completion\nSaved trajectory to \n'<workdir>/.harness/mini-swe-agent.traj.json'\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.03,
+    "tokensIn": 120,
+    "tokensOut": 20,
+    "raw": {
+      "trajectory_format": "mini-swe-agent-1.1",
+      "info": {
+        "mini_version": "2.4.6",
+        "exit_status": "Submitted",
+        "submission": "synthetic completion",
+        "model_stats": {
+          "instance_cost": 0.03,
+          "api_calls": 2
+        }
+      },
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "Synthetic fixture message",
+          "extra": {
+            "response": {
+              "usage": {
+                "prompt_tokens": 0,
+                "input_tokens": 900,
+                "completion_tokens": 0,
+                "output_tokens": 80
+              }
+            }
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Synthetic fixture message",
+          "extra": {
+            "response": {
+              "usage": {
+                "prompt_tokens": null,
+                "input_tokens": 120,
+                "output_tokens": 20
+              }
+            }
+          }
+        },
+        {
+          "role": "tool",
+          "content": "Synthetic fixture message",
+          "extra": {
+            "response": {
+              "usage": {
+                "prompt_tokens": 999,
+                "completion_tokens": 999
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "artifacts": [
+    {
+      "kind": "json",
+      "path": "<workdir>/.harness/mini-swe-agent.traj.json",
+      "content": {
+        "trajectory_format": "mini-swe-agent-1.1",
+        "info": {
+          "mini_version": "2.4.6",
+          "exit_status": "Submitted",
+          "submission": "synthetic completion",
+          "model_stats": {
+            "instance_cost": 0.03,
+            "api_calls": 2
+          }
+        },
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "Synthetic fixture message",
+            "extra": {
+              "response": {
+                "usage": {
+                  "prompt_tokens": 0,
+                  "input_tokens": 900,
+                  "completion_tokens": 0,
+                  "output_tokens": 80
+                }
+              }
+            }
+          },
+          {
+            "role": "assistant",
+            "content": "Synthetic fixture message",
+            "extra": {
+              "response": {
+                "usage": {
+                  "prompt_tokens": null,
+                  "input_tokens": 120,
+                  "output_tokens": 20
+                }
+              }
+            }
+          },
+          {
+            "role": "tool",
+            "content": "Synthetic fixture message",
+            "extra": {
+              "response": {
+                "usage": {
+                  "prompt_tokens": 999,
+                  "completion_tokens": 999
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expectedParsedWithoutArtifacts": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": null
+  },
+  "cases": [
+    {
+      "name": "upstream-preserves-confirmation-policy",
+      "spec": {
+        "permissionPolicy": "upstream"
+      },
+      "expectedCommand": {
+        "cmd": "mini",
+        "args": [
+          "--task=Be surgical.\n\n---\n\nFix the synthetic boundary",
+          "--exit-immediately",
+          "--output",
+          "<workdir>/.harness/mini-swe-agent.traj.json",
+          "--model",
+          "openai/gpt-5.4"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "MSWEA_CONFIGURED": "true"
+        },
+        "instructionsFile": null,
+        "directories": [
+          "<workdir>/.harness"
+        ],
+        "model": "openai/gpt-5.4"
+      }
+    },
+    {
+      "name": "caller-config-without-model-and-leading-dash-task",
+      "spec": {
+        "model": null,
+        "instructions": null,
+        "prompt": "--synthetic-task",
+        "configHome": "<root>/mini-home",
+        "configFile": "<root>/mini.yaml"
+      },
+      "expectedCommand": {
+        "cmd": "mini",
+        "args": [
+          "--task=--synthetic-task",
+          "--exit-immediately",
+          "--output",
+          "<workdir>/.harness/mini-swe-agent.traj.json",
+          "--yolo",
+          "--config",
+          "<root>/mini.yaml"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "MSWEA_CONFIGURED": "true",
+          "MSWEA_GLOBAL_CONFIG_DIR": "<root>/mini-home"
+        },
+        "instructionsFile": null,
+        "directories": [
+          "<workdir>/.harness"
+        ],
+        "model": null
+      }
+    },
+    {
+      "name": "launch-or-provider-failure-ignores-stale-trajectory",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 1.2,
+        "timedOut": false,
+        "stdout": "Building agent config from specs: mini.yaml\n",
+        "stderr": "Synthetic authentication failure\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "partial-output-without-save-marker",
+      "sampleOutput": {
+        "exitCode": -15,
+        "durationSeconds": 1.2,
+        "timedOut": false,
+        "stdout": "mini-swe-agent (step 1):\nSynthetic partial output\nSaved trajectory to ",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "native-limit-is-not-submission-even-with-zero-exit",
+      "artifacts": [
+        {
+          "kind": "json",
+          "path": "<workdir>/.harness/mini-swe-agent.traj.json",
+          "content": {
+            "trajectory_format": "mini-swe-agent-1.1",
+            "info": {
+              "mini_version": "2.4.6",
+              "exit_status": "LimitsExceeded",
+              "submission": "",
+              "model_stats": {
+                "instance_cost": 0.0,
+                "api_calls": 2
+              }
+            },
+            "messages": [
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "prompt_tokens": 0,
+                      "completion_tokens": 0
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expectedParsed": {
+        "costUsd": 0.0,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "raw": {
+          "trajectory_format": "mini-swe-agent-1.1",
+          "info": {
+            "mini_version": "2.4.6",
+            "exit_status": "LimitsExceeded",
+            "submission": "",
+            "model_stats": {
+              "instance_cost": 0.0,
+              "api_calls": 2
+            }
+          },
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Synthetic fixture message",
+              "extra": {
+                "response": {
+                  "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "invalid-metrics-stay-unknown-per-dimension",
+      "artifacts": [
+        {
+          "kind": "json",
+          "path": "<workdir>/.harness/mini-swe-agent.traj.json",
+          "content": {
+            "trajectory_format": "mini-swe-agent-1.1",
+            "info": {
+              "mini_version": "2.4.6",
+              "exit_status": "Submitted",
+              "submission": "synthetic completion",
+              "model_stats": {
+                "instance_cost": true,
+                "api_calls": 2
+              }
+            },
+            "messages": [
+              {
+                "role": "assistant",
+                "extra": null
+              },
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "prompt_tokens": true,
+                      "input_tokens": 90,
+                      "completion_tokens": 1.5
+                    }
+                  }
+                }
+              },
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "input_tokens": -1,
+                      "output_tokens": 7
+                    }
+                  }
+                }
+              },
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "input_tokens": "8"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": 7,
+        "raw": {
+          "trajectory_format": "mini-swe-agent-1.1",
+          "info": {
+            "mini_version": "2.4.6",
+            "exit_status": "Submitted",
+            "submission": "synthetic completion",
+            "model_stats": {
+              "instance_cost": true,
+              "api_calls": 2
+            }
+          },
+          "messages": [
+            {
+              "role": "assistant",
+              "extra": null
+            },
+            {
+              "role": "assistant",
+              "content": "Synthetic fixture message",
+              "extra": {
+                "response": {
+                  "usage": {
+                    "prompt_tokens": true,
+                    "input_tokens": 90,
+                    "completion_tokens": 1.5
+                  }
+                }
+              }
+            },
+            {
+              "role": "assistant",
+              "content": "Synthetic fixture message",
+              "extra": {
+                "response": {
+                  "usage": {
+                    "input_tokens": -1,
+                    "output_tokens": 7
+                  }
+                }
+              }
+            },
+            {
+              "role": "assistant",
+              "content": "Synthetic fixture message",
+              "extra": {
+                "response": {
+                  "usage": {
+                    "input_tokens": "8"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unsafe-token-total-stays-unknown",
+      "artifacts": [
+        {
+          "kind": "json",
+          "path": "<workdir>/.harness/mini-swe-agent.traj.json",
+          "content": {
+            "trajectory_format": "mini-swe-agent-1.1",
+            "info": {
+              "mini_version": "2.4.6",
+              "exit_status": "Submitted",
+              "submission": "synthetic completion",
+              "model_stats": {
+                "instance_cost": 0.03,
+                "api_calls": 2
+              }
+            },
+            "messages": [
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "input_tokens": 9007199254740991,
+                      "output_tokens": 2
+                    }
+                  }
+                }
+              },
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "input_tokens": 1
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expectedParsed": {
+        "costUsd": 0.03,
+        "tokensIn": null,
+        "tokensOut": 2,
+        "raw": {
+          "trajectory_format": "mini-swe-agent-1.1",
+          "info": {
+            "mini_version": "2.4.6",
+            "exit_status": "Submitted",
+            "submission": "synthetic completion",
+            "model_stats": {
+              "instance_cost": 0.03,
+              "api_calls": 2
+            }
+          },
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Synthetic fixture message",
+              "extra": {
+                "response": {
+                  "usage": {
+                    "input_tokens": 9007199254740991,
+                    "output_tokens": 2
+                  }
+                }
+              }
+            },
+            {
+              "role": "assistant",
+              "content": "Synthetic fixture message",
+              "extra": {
+                "response": {
+                  "usage": {
+                    "input_tokens": 1
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrong-trajectory-format-is-not-parsed",
+      "artifacts": [
+        {
+          "kind": "json",
+          "path": "<workdir>/.harness/mini-swe-agent.traj.json",
+          "content": {
+            "trajectory_format": "other-agent-1",
+            "info": {
+              "mini_version": "2.4.6",
+              "exit_status": "Submitted",
+              "submission": "synthetic completion",
+              "model_stats": {
+                "instance_cost": 0.03,
+                "api_calls": 2
+              }
+            },
+            "messages": [
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "prompt_tokens": 0,
+                      "input_tokens": 900,
+                      "completion_tokens": 0,
+                      "output_tokens": 80
+                    }
+                  }
+                }
+              },
+              {
+                "role": "assistant",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "prompt_tokens": null,
+                      "input_tokens": 120,
+                      "output_tokens": 20
+                    }
+                  }
+                }
+              },
+              {
+                "role": "tool",
+                "content": "Synthetic fixture message",
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "prompt_tokens": 999,
+                      "completion_tokens": 999
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "nonobject-trajectory-preserves-process-output",
+      "artifacts": [
+        {
+          "kind": "json",
+          "path": "<workdir>/.harness/mini-swe-agent.traj.json",
+          "content": "{\"info\":"
+        }
+      ],
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "ansi-and-wrapped-completion-marker",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1.2,
+        "timedOut": false,
+        "stdout": "Saved trajectory to \n'\u001b[32m<workdir>/.harness/mini-swe-\nagent.traj.json\u001b[0m'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "name": "empty-prompt-rejected",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "setup-wizard-cannot-be-reenabled",
+      "spec": {
+        "env": {
+          "MSWEA_CONFIGURED": ""
+        }
+      },
+      "expectedError": "invalid-options"
+    }
+  ]
+}

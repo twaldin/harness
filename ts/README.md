@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, or mistral-vibe as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, or mistral-vibe as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mini-swe-agent', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -237,6 +237,12 @@ with null token/cost totals. `nativeOptions: {kind: 'mistral-vibe', agent: 'ask'
 trust: true}` selects the native agent and explicitly trusts workspace config for
 this run. Nonempty instructions require `trust: true`. Model aliases use child
 `VIBE_ACTIVE_MODEL`, not a CLI model flag. See [setup and limits](../ADAPTER-MATRIX.md#mistral-vibe).
+
+`mini-swe-agent` invokes native `mini`, not the legacy `swe-agent` wrapper.
+It preserves native model/config selection and adds `--yolo` only for explicit
+bypass. Current-run-confirmed trajectory JSON supplies metrics and raw output;
+partial unconfirmed artifacts are not reused. Native local shell actions can
+survive CLI-group cancellation. See [setup and limits](../ADAPTER-MATRIX.md#mini-swe-agent).
 
 Cursor uses the standalone `agent` executable with print/stream-JSON output.
 Only explicit bypass adds `--force`; model/auth/config remain caller-selected.

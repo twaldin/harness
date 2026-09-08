@@ -41,9 +41,29 @@ Permission policy defaults to upstream behavior; Harness no longer injects
 approval/bypass flags automatically. Unattended callers intentionally requiring
 the former behavior must set `permissionPolicy: 'bypass'`. Codex bypass also
 disables sandboxing. Unsupported bypass fails rather than being ignored.
-Backend selection defaults to `cli`; selecting `rpc` or `sdk` currently throws
-`HarnessError` with `code === 'unsupported-backend'`, without CLI fallback.
-See the [shared migration and examples](../SPEC.md#permission-policy-and-migration).
+One-shot backend selection defaults to `cli`; selecting `rpc` or `sdk` through
+`RunSpec` throws `unsupported-backend`, without CLI fallback. Controlled Pi RPC
+uses `openSession` below. See the [shared migration](../SPEC.md#permission-policy-and-migration).
+
+## Controlled RPC sessions
+
+`openSession({ harness: 'pi', backend: 'rpc', workdir, model? })` opens a native
+Pi 0.85.1 RPC subprocess. `getSessionCapabilities('pi')` reports session
+operations independently of one-shot capabilities. Install/select the official
+`@earendil-works/pi-coding-agent` executable and configure its provider first;
+the library does neither and does not fall back to OMP or another backend.
+
+`session.startTurn(prompt)` returns `{ id, events, result }`: consume the bounded
+async `events` iterable, then await the terminal `result`. A subsequent turn
+reuses the native session; overlapping turns are rejected. `interrupt()` stops
+the active turn, and `close()` disposes owned resources without deleting history.
+Always close in `finally`. Explicit resume supplies `session.reference` through
+`resume`; the file must exist and match its native ID/workdir.
+
+See the [paired runnable usage](../README.md#controlled-pi-rpc-sessions) and
+[full session contract](../SPEC.md#controlled-rpc-sessions) for typed events,
+errors, bounded output, deadlines, local-only extension limitations, and the
+separate offline/native/provider qualification evidence.
 
 ## API reference
 
@@ -125,9 +145,10 @@ Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'co
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
 Reports implemented support without loading optional SDKs or probing local
-installation/auth. All current adapters use CLI and support cancellation and
-chunk streaming. Controlled sessions remain unsupported; pure pane/session-log
-helpers are not controlled sessions. Native options are typed per agent:
+installation/auth. All one-shot adapters use CLI and support cancellation and
+chunk streaming. Controlled Pi RPC uses `getSessionCapabilities` instead;
+pure pane/session-log helpers are not controlled sessions. Native CLI options
+are typed per agent:
 
 ```typescript
 buildCommand({

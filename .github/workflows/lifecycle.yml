@@ -48,3 +48,6 @@ jobs:
       - name: Built-package subprocess smoke (Node)
         run: node tests/node-lifecycle.mjs
         working-directory: ts
+      - name: Built-package RPC session conformance (Node)
+        run: node tests/node-sessions.mjs
+        working-directory: ts

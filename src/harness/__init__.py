@@ -50,6 +50,18 @@ from harness._instructions import (
     write_instructions,
 )
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
+from harness.sessions import (
+    LiveSession,
+    SessionCapabilities,
+    SessionEvent,
+    SessionReference,
+    SessionSpec,
+    SessionTurn,
+    SessionTurnResult,
+    SessionTurnStatus,
+    get_session_capabilities,
+    open_session,
+)
 from harness.util import last_lines, last_non_empty_join, strip_ansi
 
 import harness.adapters  # noqa: E402,F401 — registers the shipped adapters
@@ -78,6 +90,16 @@ __all__ = [
     "Termination",
     "TimeoutKind",
     "SubprocOutcome",
+    "LiveSession",
+    "SessionCapabilities",
+    "SessionEvent",
+    "SessionReference",
+    "SessionSpec",
+    "SessionTurn",
+    "SessionTurnResult",
+    "SessionTurnStatus",
+    "get_session_capabilities",
+    "open_session",
     "InstructionProjection",
     "PreparedCommand",
     "build_command",
@@ -102,4 +124,4 @@ __all__ = [
     "last_lines",
     "last_non_empty_join",
 ]
-__version__ = "0.3.5"
+__version__ = "0.3.6"

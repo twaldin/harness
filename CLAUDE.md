@@ -72,8 +72,8 @@ Permission policy defaults to upstream behavior; bypass is explicit opt-in.
 Builders plan commands without file writes. Reject unsupported backend, permission,
 native-option and config-override requests before preparation. External drivers
 retain `prepareCommand` ownership until process teardown and then clean up.
-CLI is the only implemented backend; RPC/SDK selection must not silently fall back.
-See SPEC for exact errors, capabilities, migration and subprocess lifecycle limits.
+CLI remains the one-shot backend; controlled Pi RPC uses the separate session API.
+See SPEC for exact errors, capabilities, migration and subprocess/session ownership.
 
 Field naming differs (`cost_usd` ↔ `costUsd`, `tokens_in` ↔ `tokensIn`,
 `timed_out` ↔ `timedOut`). The Python CLI's `harness run --json` emits
@@ -88,8 +88,8 @@ Patch versions MAY diverge for implementation-only fixes (e.g. a Node prebuild
 bump that doesn't apply to the Python wheel). Anything that touches SPEC.md or
 the fixture set bumps both simultaneously.
 
-Current manifests do not meet that alignment: Python is `0.3.5` and
-TypeScript is `0.2.9`. This is recorded skew, not a new release policy.
+Current manifests do not meet that alignment: Python is `0.3.6` and
+TypeScript is `0.2.10`. This is recorded skew, not a new release policy.
 
 ## How parity is enforced
 
@@ -151,9 +151,10 @@ Keep the library narrow while qualifying optional agent SDK/protocol backends:
   accepts cooperative synchronous callbacks; TS's blocking low-level helper
   rejects callbacks. Both runtimes provide finite stdin, bounded capture and
   opt-in inactivity deadlines. See SPEC's streaming contract before changing I/O.
-- Optional SDK/RPC backends are authorized scope but not implemented. They must
-  satisfy SPEC ownership, permission, capability and compatibility requirements
-  without importing SDKs for CLI callers or becoming a fleet/application layer.
+- Controlled Pi RPC ships through `open_session` / `openSession`; read SPEC's
+  controlled-session contract before modifying its protocol or lifecycle.
+  Additional RPC/SDK backends must satisfy the ownership, permission, capability
+  and compatibility requirements without becoming a fleet/application layer.
 
 Alongside command construction, output parsing and headless execution, the
 package includes instruction projection, pricing and session helpers. These

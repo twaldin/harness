@@ -48,11 +48,12 @@ or `harness run --permission-policy bypass` only when that authority is intended
 Codex bypass also disables sandboxing. Unsupported bypass requests fail; no
 tool is silently escalated. Existing upstream config and environment still apply.
 
-The execution backend defaults to `"cli"`. Selecting `"rpc"` or `"sdk"` is an
-explicit unsupported-backend error today, never a fallback to another path.
-`get_capabilities("codex")` / `getCapabilities('codex')` reports support without
-probing installation or auth. Typed native options cover Claude Code effort
-and Codex sandbox selection:
+The one-shot execution backend defaults to `"cli"`. Selecting `"rpc"` or `"sdk"`
+in `RunSpec` is an explicit unsupported-backend error, never a fallback.
+Controlled Pi RPC uses the separate [session API](#controlled-pi-rpc-sessions).
+`get_capabilities("codex")` / `getCapabilities('codex')` reports one-shot support
+without probing installation or auth. Typed native options cover Claude Code
+effort and Codex sandbox selection:
 
 ```python
 from harness import CodexOptions, RunSpec, build_command
@@ -74,7 +75,7 @@ const command = buildCommand({
 
 Combining a selected Codex sandbox with bypass is an error. See
 [SPEC](SPEC.md#permission-policy-and-migration) for migration, supported mappings,
-ownership, errors, telemetry and future SDK/session requirements. These APIs
+ownership, errors, telemetry and session/backend requirements. These APIs
 describe the source tree; published packages are not updated by a documentation
 or implementation merge.
 
@@ -107,6 +108,64 @@ with `callback_error` / `callbackError` or `parse_error` / `parseError`.
 See [streaming, stdin and output limits](SPEC.md#streaming-stdin-and-output-limits)
 for capture controls, callback restrictions, interrupted delivery and migration.
 The [ownership contract](SPEC.md#ownership-and-execution) defines cleanup and OS support.
+
+### Controlled Pi RPC sessions
+
+The asynchronous session API supports the Pi 0.85.1 RPC protocol in both
+languages. Select an installed `@earendil-works/pi-coding-agent` executable and
+your native model/config explicitly. It does not install tools or authenticate
+providers. OMP RPC and other adapters are not silently treated as Pi.
+
+```python
+import asyncio
+from harness import SessionSpec, open_session
+
+async def main():
+    session = await open_session(SessionSpec(
+        harness="pi", backend="rpc", workdir="/tmp/scratch",
+        model="openai-codex/gpt-5.4",
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            print(event.type, event.raw)
+        result = await turn.result
+        print(result.status, session.reference.session_id)
+        # Another start_turn after completion is a follow-up in this session.
+    finally:
+        await session.close()
+
+asyncio.run(main())
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+const session = await openSession({
+  harness: 'pi', backend: 'rpc', workdir: '/tmp/scratch',
+  model: 'openai-codex/gpt-5.4',
+})
+try {
+  const turn = session.startTurn('Review this repository without editing files.')
+  for await (const event of turn.events) console.log(event.type, event.raw)
+  const result = await turn.result
+  console.log(result.status, session.reference.sessionId)
+} finally {
+  await session.close()
+}
+```
+
+`interrupt()` aborts the active native turn without deleting the session.
+Resume passes an explicit `session.reference` to `SessionSpec.resume`; its
+native session file must exist and match both ID and workdir. Overlapping
+turns, queued steering and approval responses are unsupported. Native permission
+defaults remain authoritative; the example prompt is not a sandbox.
+
+Events are bounded and must be consumed; overflow fails explicitly rather than
+silently dropping events. Acknowledgement and intermediate `agent_end` events
+are not completion. See [the session contract](SPEC.md#controlled-rpc-sessions)
+for terminal statuses, deadlines, local-only extension limitations, ownership,
+and the distinction between offline conformance and native/provider smoke.
 
 ---
 

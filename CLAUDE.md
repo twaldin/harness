@@ -38,7 +38,7 @@ harness/
 │   ├── src/subproc.ts
 │   ├── src/instructions.ts      owned instruction projection lifecycle
 │   ├── src/util.ts
-│   └── adapters/                16 adapter modules, one per CLI
+│   └── src/adapters/            16 adapter modules, one per CLI
 ├── tests/                       pytest suite (Python)
 └── ts/tests/                    bun test suite (TypeScript)
 ```

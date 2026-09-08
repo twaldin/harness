@@ -96,8 +96,8 @@ class CopilotOptions:
     """
 
     kind: Literal["copilot"] = field(default="copilot", init=False)
-    allow_tools: tuple[str, ...] | None = None
-    deny_tools: tuple[str, ...] | None = None
+    allow_tools: tuple[str, ...] | list[str] | None = None
+    deny_tools: tuple[str, ...] | list[str] | None = None
 
 
 NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions

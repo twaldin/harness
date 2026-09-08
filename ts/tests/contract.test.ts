@@ -53,6 +53,7 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   hermes: ['--yolo'],
   qwen: ['-y'],
   kilo: ['--auto'],
+  omp: ['--auto-approve'],
 }
 
 const NO_BYPASS = ['opencode', 'pi', 'crush', 'continue-cli', 'swe-agent']
@@ -230,6 +231,7 @@ describe('getCapabilities', () => {
       hermes: ['HERMES_HOME', null],
       aider: [null, '--config'],
       'continue-cli': [null, '--config'],
+      omp: ['PI_CODING_AGENT_DIR', '--config'],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)

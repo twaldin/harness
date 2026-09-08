@@ -2,7 +2,7 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush`, `hermes` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -134,7 +134,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all fourteen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all fifteen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 

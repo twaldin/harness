@@ -44,6 +44,7 @@ BYPASS_ARGS = {
     "continue-cli": ("--auto",),
     "cline": ("--auto-approve", "true"),
     "mistral-vibe": ("--auto-approve",),
+    "kiro": ("--trust-all-tools",),
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
 ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
@@ -286,7 +287,7 @@ CONFIG_MAPPINGS = {
 def test_capabilities_reflect_shipped_support(name: str):
     caps = get_capabilities(name)
     expected_policies = ("upstream", "bypass") if name in BYPASS_ARGS or name in BYPASS_ENVS else ("upstream",)
-    expected_native = name if name in ("claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe") else None
+    expected_native = name if name in ("claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe", "kiro") else None
     home_env, file_flag = CONFIG_MAPPINGS.get(name, (None, None))
     assert caps == Capabilities(
         backend="cli",

@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (22 adapters)
+│   ├── adapters/*.py       (23 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -132,11 +132,16 @@ interface VibeOptions {
   agent?: string                   // exact upstream profile name
   trust?: boolean                  // explicit invocation-only workspace trust
 }
-type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions
+interface KiroOptions {
+  kind: 'kiro'
+  trustTools?: string              // verbatim comma-separated native tool names
+  requireMcpStartup?: boolean      // fail if configured MCP startup fails
+}
+type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
 interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
-  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | 'mistral-vibe' | null
+  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | 'mistral-vibe' | 'kiro' | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -146,7 +151,7 @@ interface Capabilities {
 ```
 
 Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
-`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions`, `AmpOptions` and `VibeOptions` with equivalent values.
+`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions`, `AmpOptions`, `VibeOptions` and `KiroOptions` with equivalent values.
 Construct native options as `ClaudeCodeOptions(effort="high")`,
 `CodexOptions(sandbox="read-only")`,
 `ClineOptions(provider="openai-compatible", auto_approve=False)` or
@@ -254,7 +259,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All twenty-two CLI adapters share these lifecycle capabilities.
+for sessions. All twenty-three CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -288,6 +293,7 @@ approval request by silently escalating.
 | copilot | `--allow-all` |
 | mistral-vibe | `--auto-approve` |
 | cursor | `--force` (native explicit denies and team policy still apply) |
+| kiro | `--trust-all-tools` |
 
 The other five adapters (including Amp) reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
@@ -670,6 +676,34 @@ silently projecting an ignored file or granting trust implicitly. Empty prompts
 reject before preparation. Harness never passes `--worktree`. See the
 [adapter reference](ADAPTER-MATRIX.md#mistral-vibe) for unsupported operations.
 
+### kiro
+
+`kiro-cli chat --no-interactive --agent-engine v2 --output-format stream-json`
+selects the qualified V2 one-shot path, not the legacy V1 or preview V3 engine.
+The prompt follows `--` so leading hyphens remain data; empty prompts reject.
+Omitted model preserves upstream selection and reports null; explicit model
+IDs are trimmed and otherwise preserved as `--model=<value>`.
+
+`KiroOptions(trust_tools="read,grep", require_mcp_startup=True)` /
+`{kind: 'kiro', trustTools: 'read,grep', requireMcpStartup: true}` emits
+`--trust-tools=read,grep --require-mcp-startup`. Tool names are a NUL-free string
+in upstream comma-separated syntax; empty explicitly trusts no tools, while
+whitespace-only values reject. Explicit `trustTools`
+conflicts with bypass, which would broaden the requested trust. Omitted trust
+adds no permission flags; false `requireMcpStartup` adds no flag.
+Instructions use the shared owned `AGENTS.md` projection.
+
+`raw` preserves every complete JSON object line in order, including unknown
+events; malformed, truncated and nonobject lines are ignored. No objects means
+null. Complete events survive failure and timeout. Token and USD totals remain
+null: no aggregate accounting schema is qualified. Native error events do not
+rewrite the observed process exit. Raw stdout/stderr and shared streaming
+callbacks preserve output independently of parsing.
+
+Config home/file overrides, native agent/engine switching, session resume,
+ACP/RPC and SDK execution are unsupported. Unknown native fields reject rather
+than disappear. See [setup and qualification limits](ADAPTER-MATRIX.md#kiro).
+
 ### cursor
 
 `raw` preserves all complete JSON object lines in order, including assistant
@@ -716,7 +750,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe` and `kiro` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -800,6 +834,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | amp | unsupported | `--settings-file` (custom user settings; workspace/managed settings still apply) |
 | mistral-vibe | `VIBE_HOME` | unsupported |
 | cursor | `CURSOR_CONFIG_DIR` (config, not all data/credentials) | unsupported |
+| kiro | unsupported | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -1400,7 +1435,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kiro", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

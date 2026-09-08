@@ -248,7 +248,7 @@
     {
       "name": "partial-output-without-save-marker",
       "sampleOutput": {
-        "exitCode": -15,
+        "exitCode": 1,
         "durationSeconds": 1.2,
         "timedOut": false,
         "stdout": "mini-swe-agent (step 1):\nSynthetic partial output\nSaved trajectory to ",

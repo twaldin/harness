@@ -4,5 +4,6 @@
   {"prompt":"reject","status":"agent-error"},
   {"prompt":"retry","status":"completed","event_types":["response","agent_start","agent_end","auto_retry_start","message_update","agent_end"]},
   {"prompt":"unknown","status":"completed"},
+  {"prompt":"native_settled","status":"completed","event_types":["response","agent_start","agent_settled","message_update","agent_end"]},
   {"prompt":"local","status":"completed","event_types":["response"]}
 ]

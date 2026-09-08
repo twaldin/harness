@@ -181,19 +181,31 @@ Install the optional package in a caller-owned project, for example
 directory and an explicit OMP profile:
 
 ```python
+import asyncio
 from pathlib import Path
 from harness import OmpSdkOptions, SessionSpec, open_session
 
-session = await open_session(SessionSpec(
-    harness="omp", backend="sdk", workdir=Path("/tmp/scratch"),
-    omp_sdk=OmpSdkOptions(
-        package_root=Path("/your/project/node_modules/@oh-my-pi/pi-coding-agent"),
-        agent_dir=Path("/your/omp-profile"),
-        auth="environment",
-    ),
-    model="openai/gpt-4.1",
-    # executable="/absolute/path/to/bun",  # optional, default: "bun"
-))
+async def main():
+    session = await open_session(SessionSpec(
+        harness="omp", backend="sdk", workdir=Path("/tmp/scratch"),
+        omp_sdk=OmpSdkOptions(
+            package_root=Path("/your/project/node_modules/@oh-my-pi/pi-coding-agent"),
+            agent_dir=Path("/your/omp-profile"),
+            auth="environment",
+        ),
+        model="openai/gpt-4.1",
+        # executable="/absolute/path/to/bun",  # optional, default: "bun"
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            print(event.type, event.raw)
+        result = await turn.result
+        print(result.status, session.reference.session_id)
+    finally:
+        await session.close()
+
+asyncio.run(main())
 ```
 
 ```typescript
@@ -208,9 +220,17 @@ const session = await openSession({
   },
   model: 'openai/gpt-4.1',
 })
+try {
+  const turn = session.startTurn('Review this repository without editing files.')
+  for await (const event of turn.events) console.log(event.type, event.raw)
+  const result = await turn.result
+  console.log(result.status, session.reference.sessionId)
+} finally {
+  await session.close()
+}
 ```
 
-Consume turns and close in `finally` as in the examples above. `"local"` auth
+`"local"` auth
 opens the selected profile's credential database; `"environment"` uses an
 in-memory credential database. Both still honor native provider environment,
 dotenv and model configuration. Set child `HOME` through `env` when needed;

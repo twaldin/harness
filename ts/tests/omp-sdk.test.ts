@@ -205,24 +205,6 @@ describe('turn semantics', () => {
     expect((await drain).every((event) => event.turnId === second.id)).toBe(true)
   })
 
-  test('native agent_settled never completes an SDK turn; the bridge settle does', async () => {
-    const box = sandbox()
-    const session = await open(box)
-    const turn = session.startTurn('native_settled')
-    const observed = observe(turn)
-    await observed.seen('agent_settled')
-    let settled = false
-    void turn.result.then(() => { settled = true })
-    await Promise.resolve()
-    expect(settled).toBe(false)
-    // The worker's `sdk_settled` follows the native event on the same pipe; the result must not settle before it.
-    const result = await turn.result
-    expect(result.status).toBe('completed')
-    const types = (await observed.events).map((event) => event.type)
-    expect(types).toContain('agent_settled')
-    expect(types).not.toContain('sdk_settled')
-  })
-
   test('a failing settle is agent-error carrying the bridge frame and leaves the session usable', async () => {
     const box = sandbox()
     const session = await open(box)
@@ -346,7 +328,7 @@ describe('open and resume', () => {
     const empty = join(box.home, 'no-package')
     mkdirSync(empty)
     const err = await expectCode(openSession(spec(box, { ompSdk: options(box, { packageRoot: empty }) })), 'launch-failed')
-    expect(err.message).toContain('stderr')
+    expect(err.message).toContain(join(empty, 'package.json'))
     expectOwnedResourcesReleased(box)
     expect(traceOf(box)).toBe('')
   })

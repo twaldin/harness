@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -299,8 +300,29 @@ async def test_missing_sdk_package_is_launch_failed(sandbox: Sandbox):
     with pytest.raises(HarnessError) as info:
         await open_session(sandbox.spec(omp_sdk=OmpSdkOptions(empty, sandbox.agent_dir, "local"), instructions="X"))
     assert info.value.code == "launch-failed"
-    assert "OMP SDK bridge" in str(info.value) and "exit code 1" in str(info.value)
+    assert str(empty / "package.json") in str(info.value)
     sandbox.assert_no_side_effects()
+
+
+def test_startup_error_diagnostic_is_fully_drained(tmp_path: Path):
+    package = tmp_path / "sdk"
+    package.mkdir()
+    (package / "package.json").write_text((PACKAGE_ROOT / "package.json").read_text())
+    diagnostic = "x" * (512 * 1024) + "native-startup-cause-end"
+    (package / "sdk.mjs").write_text(
+        f"export class Settings {{ static async loadReadOnly() {{ throw new Error({json.dumps(diagnostic)}) }} }}"
+    )
+    options = dict(
+        packageRoot=str(package), agentDir=str(tmp_path / "agent"), auth="environment",
+        cwd=str(tmp_path), model=None, resume=None,
+    )
+    child = subprocess.run(
+        ["bun", "--no-env-file", str(TESTS.parent / "src" / "harness" / "_omp_sdk.mjs"), json.dumps(options)],
+        input=b"", capture_output=True, timeout=5,
+        env={"HOME": str(tmp_path), "PATH": os.environ["PATH"]},
+    )
+    assert child.returncode == 1
+    assert diagnostic.encode() in child.stderr
 
 
 async def test_missing_bun_executable_is_launch_failed(sandbox: Sandbox):
@@ -353,7 +375,7 @@ def _options(**overrides: object) -> OmpSdkOptions:
         ({"env": {"PI_PROFILE": "other"}}, "invalid-options"),
         ({"permission_policy": "bypass"}, "unsupported-capability"),
         ({"executable": "bin/bun"}, "invalid-options"),
-        ({"resume": SessionReference("id", None, Path("/tmp"))}, "invalid-options"),
+        ({"resume": SessionReference("id", None, TESTS)}, "invalid-options"),
     ],
 )
 async def test_open_session_rejects_before_side_effects(sandbox: Sandbox, overrides: dict, code: str):

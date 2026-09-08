@@ -55,8 +55,9 @@ async function initialize() {
   // disposal. This dedicated process gives termination ownership to the bridge,
   // which calls the native disposal API before exiting.
   for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.removeAllListeners(signal)
-    process.on(signal, () => { void shutdown() })
+    for (const listener of process.listeners(signal)) {
+      if (listener !== requestShutdown) process.removeListener(signal, listener)
+    }
   }
   // Read settings without migration/persistence. All process-global SDK state
   // lives in this owned child. Credentials are never discovered or copied.
@@ -99,6 +100,16 @@ function beginClosing() {
   }
 }
 
+function drainOutput(stream) {
+  return new Promise((resolve) => {
+    if (stream.destroyed) { failed = true; resolve(); return }
+    stream.end((error) => {
+      if (error) failed = true
+      resolve()
+    })
+  })
+}
+
 function shutdown(error) {
   if (error) {
     failed = true
@@ -131,15 +142,20 @@ function shutdown(error) {
         process.stderr.write(`OMP SDK auth disposal failed: ${errorText(authError)}\n`)
       }
     }
+    // Drain pipe writes before hard exit; native process-global handles may
+    // otherwise keep the disposed SDK alive. The parent bounds this drain.
+    await Promise.all([drainOutput(process.stdout), drainOutput(process.stderr)])
     process.exit(failed ? 1 : 0)
   })()
   return closing
 }
-process.on('SIGTERM', () => { void shutdown() })
-process.on('SIGINT', () => { void shutdown() })
+function requestShutdown() { void shutdown() }
+process.on('SIGTERM', requestShutdown)
+process.on('SIGINT', requestShutdown)
 process.stdout.on('error', (error) => { void shutdown(error) })
+process.stderr.on('error', () => { failed = true; requestShutdown() })
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
-input.on('close', () => { void shutdown() })
+input.on('close', requestShutdown)
 
 async function command(request) {
   await opening

@@ -691,8 +691,9 @@ against a hostile process rewriting the filesystem between checks.
 `projectInstructions` / `project_instructions` use the same ownership protocol
 for explicit external projections. `replace` writes content plus a newline;
 `prepend` inserts content plus a blank separator before the original UTF-8 text.
-Optional `replaceBetweenMarkers` / `replace_between_markers` selects the first
-well-ordered literal marker pair, otherwise the selected mode applies.
+Optional `replaceBetweenMarkers: {start, end}` / `replace_between_markers=(start, end)`
+replaces the first well-ordered literal marker block, including both delimiters,
+with the content; otherwise the selected mode applies.
 Invalid modes/markers and `backup: false` reject before writes. A handle is
 process-local ownership, not a serializable cleanup recipe.
 

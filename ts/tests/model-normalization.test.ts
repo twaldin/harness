@@ -30,6 +30,12 @@ describe('model normalization', () => {
     expect(normalizeModelForHarness('crush', 'openrouter/google/gemini-2.5-pro')).toBe('openrouter/google/gemini-2.5-pro')
   })
 
+  test('openclaude preserves gateway-namespaced models and bare names', () => {
+    expect(normalizeModelForHarness('openclaude', 'deepseek/deepseek-v4-flash')).toBe('deepseek/deepseek-v4-flash')
+    expect(normalizeModelForHarness('openclaude', 'openrouter/anthropic/claude-sonnet-4-6')).toBe('openrouter/anthropic/claude-sonnet-4-6')
+    expect(normalizeModelForHarness('openclaude', ' gpt-5.4 ')).toBe('gpt-5.4')
+  })
+
   test('factory-droid preserves managed and explicit BYOK model identities', () => {
     expect(normalizeModelForHarness('factory-droid', 'claude-sonnet-4-5-20250929')).toBe('claude-sonnet-4-5-20250929')
     expect(normalizeModelForHarness('factory-droid', 'custom:My-Custom-Model-0')).toBe('custom:My-Custom-Model-0')

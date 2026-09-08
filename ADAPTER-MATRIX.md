@@ -47,19 +47,19 @@ versions below are dated observations, not a supported version range.
 |---|---|---|---|
 | amp | [official native installer](https://ampcode.com/docs/cli); [execute mode](https://ampcode.com/docs/cli/execute-mode) | isolated Darwin arm64 `0.0.1788868861-g921679` (2026-09-08), checksum verified | Help/version and bounded local native run checked. Configured account returned Out of Credits in JSONL with process exit zero; no successful provider coverage. See [limits](#amp). |
 | aider | [`aider-chat`; CLI options](https://aider.chat/docs/config/options.html) (0.86.2; Python >=3.10,<3.13) | not on PATH | Source-checked; cached and multiple-message usage reports repaired against upstream emission. Rounded token scraper only; no session helper/provider qualification. |
-| claude-code | [`@anthropic-ai/claude-code`; CLI reference](https://code.claude.com/docs/en/cli-reference) (registry 2.1.263) | 2.1.220 | Help-checked; JSON usage/cost source documented. Current pane/cutoff/config-root qualification remains TWA-96. |
+| claude-code | [`@anthropic-ai/claude-code`; CLI reference](https://code.claude.com/docs/en/cli-reference) (registry 2.1.263) | 2.1.220 | Embedded installed-binary storage code checked; actual isolated synthetic-provider session captured. Config-root/encoding/cutoff repairs below; other releases and update/approval panes unqualified. |
 | codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | Help-checked; provider smoke **failed**: configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. |
 | continue-cli | [`@continuedev/cli`; headless mode](https://docs.continue.dev/cli/headless-mode) (1.5.47) | not on PATH | Source-checked after command/rule/model repair. Headless JSON is model output, not usage telemetry. Default ask-tier tools are excluded; explicit bypass adds `--auto`. |
 | copilot | [`@github/copilot`; programmatic reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference) | 1.0.83, isolated npm install | Help-checked; bounded no-tool provider success and cancellation on macOS arm64. JSONL records retained; token/USD totals unavailable. See [coverage limits](#copilot). |
 | mistral-vibe | [`mistral-vibe`; official source](https://github.com/mistralai/mistral-vibe/tree/v2.25.0) | 2.25.0, isolated Python 3.12 install | Version/help and programmatic source checked; see [native smoke and provider limits](#mistral-vibe). |
 | crush | [`charmbracelet/tap/crush`; source](https://github.com/charmbracelet/crush) (v0.92.0) | v0.62.0 | Help-checked; upstream-shaped schema reproduction repairs nonexistent `sessions.model`. No provider/actual-run DB qualification. `--yolo` is not a `run` flag. |
 | factory-droid | [`droid`; official headless guide](https://docs.factory.ai/droid-exec/overview) (0.213.0) | 0.132.1, off PATH | Help-checked with explicit executable. Replaces nonexistent `@factory-ai/droid`. Managed/custom model IDs now remain caller-selected. Default is read-only; documented JSON has no usage/cost. |
-| gemini | [`@google/gemini-cli`; headless reference](https://geminicli.com/docs/cli/headless/) (0.58.0) | 0.37.0 | Help-checked; stats schema source-checked. Current docs deprecate `-y` in favor of `--approval-mode yolo`; installed `-y` still exists. Legacy session layout unqualified. |
+| gemini | [`@google/gemini-cli`; headless reference](https://geminicli.com/docs/cli/headless/) (0.58.0) | 0.37.0 | Help-checked; current session registry/JSONL replay source-checked with synthetic fixtures below. Current docs deprecate `-y` in favor of `--approval-mode yolo`; installed `-y` still exists. |
 | kilo | [`@kilocode/cli`; CLI reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference) (7.5.15) | not on PATH | Source-checked; assistant DB model key repaired to `modelID`. Without `--auto`, headless permission requests are rejected; this is upstream policy, not implicit bypass. |
-| openclaude | [`@gitlawb/openclaude`; upstream](https://github.com/Gitlawb/openclaude) (0.30.0) | 0.6.0, off PATH | Legacy help-checked; current source checked separately. npm `openclaude` is an unrelated reservation without a binary. Current upstream moved to `~/.openclaude`; shipped legacy session helper is not qualified for that cutover. |
+| openclaude | [`@gitlawb/openclaude`; upstream](https://github.com/Gitlawb/openclaude) (0.30.0) | 0.6.0, prior off-PATH probe | Current config cutover and provider model namespaces source-checked; discovery now uses only OpenClaude state. No current binary/provider/pane capture. npm `openclaude` is an unrelated reservation. |
 | opencode | [`opencode-ai`; CLI reference](https://opencode.ai/docs/cli/) (1.18.29) | 1.14.46, off PATH | Help-checked; source-shaped DB regression replaces `session.model` with assistant `modelID`. New docs use `--auto`; installed help uses `--dangerously-skip-permissions`. No version-independent bypass mapping added. |
 | pi | [`@earendil-works/pi-coding-agent`; upstream](https://github.com/earendil-works/pi) (0.85.1) | not on PATH | Source-checked CLI JSON contract; old `@mariozechner/pi-coding-agent` 0.73.1 is explicitly deprecated. Install metadata corrected; runtime/RPC acceptance remains TWA-71. |
-| qwen | [`@qwen-code/qwen-code`; headless source](https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/headless.md) (0.23.0) | not on PATH | Source-checked flags/result array. Existing default `qwen3-coder` is not provider-qualified; current upstream also uses `coder-model`. Hash/project session layouts remain TWA-96. |
+| qwen | [`@qwen-code/qwen-code`; headless source](https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/headless.md) (0.23.0) | not on PATH | Source-checked flags/result array and current project/session JSONL layout below. Existing default `qwen3-coder` is not provider-qualified; current upstream also uses `coder-model`. |
 | swe-agent | [`mini-swe-agent`; native CLI docs](https://mini-swe-agent.com/latest/usage/mini/) (registry 2.4.6) plus a **consumer-supplied wrapper** | dependency 2.2.8; wrapper help checked | Wrapper-only, not native SWE-agent/mini support. `mini --version` fails; metadata now queries the dependency via the wrapper's `python3`. Installing the dependency does not install the wrapper. Native mini is TWA-82. |
 | cline | [`cline`; standalone CLI](https://docs.cline.bot/cli/cli-reference), pinned [cli-v3.0.61](https://github.com/cline/cline/tree/cli-v3.0.61/apps/cli) | 3.0.61, isolated npm prefix | Help/version and real-CLI loopback protocol checked; JSON differs from docs. SIGINT stops ordinary shell tools; SIGTERM does not. Real Cline provider smoke failed without authentication; no successful real-provider coverage. |
 | goose | [`aaif-goose/goose` release binary](https://github.com/aaif-goose/goose/releases/tag/v1.49.0); [CLI reference](https://goose-docs.ai/docs/guides/goose-cli-commands) | isolated Darwin arm64 v1.49.0; not installed on PATH | Help/source-checked; bounded real CLI probes with synthetic localhost provider. No authenticated provider coverage. macOS stdio MCP children can escape group teardown; see below. |
@@ -75,23 +75,23 @@ selected account; fixture success cannot qualify it.
 Both languages expose session-path and parsing hooks for the same 12 adapters
 (every adapter except `aider`, `amp`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
-unique live session. Several legacy layouts below are contradicted by current
-upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
-separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
+unique live session. The seven file-based helpers qualified below use current
+source-shaped fixtures; they remain caller-driven artifact helpers, separate
+from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 
 | adapter | TypeScript hooks | Python hooks | notes |
 |---|---|---|---|
-| claude-code | wired | wired | JSONL under `~/.claude/projects/<encoded>/` |
+| claude-code | wired | wired | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded>/`; bounded cwd metadata check |
 | codex | wired | wired | JSONL path + parser |
-| gemini | wired | wired | `logs.json` path; interactive logs without usage return null metrics; stats blobs can supply usage |
+| gemini | wired | wired | `<GEMINI_CLI_HOME or ~>/.gemini/tmp/<registry slug or hash>/chats/session-*.jsonl` (also legacy session JSON); validates projectHash |
 | opencode | wired | wired | explicit native-ID SQLite selector only; workdir discovery returns null |
-| swe-agent | wired | wired | trajectory JSON |
+| swe-agent | wired | wired | workdir-local wrapper trajectory JSON; no global last-run fallback |
 | pi | wired | wired | JSONL event stream |
-| continue-cli | wired | wired | probes `~/.continue/...` + `CONTINUE_SESSION_DIR` override |
+| continue-cli | wired | wired | `<CONTINUE_GLOBAL_DIR or ~/.continue>/sessions/<uuid>.json`; matches workspaceDirectory, reads cumulative usage |
 | crush | wired | wired | explicit native-ID SQLite selector only; workdir discovery returns null |
-| factory-droid | wired | wired | probes `FACTORY_HOME` / `~/.factory/...` |
-| openclaude | wired | wired | claude-code-compatible JSONL path |
-| qwen | wired | wired | `~/.qwen/tmp/<basename>/logs.json` (fallback `.gemini`); stats blobs can supply usage, other logs return null metrics |
+| factory-droid | wired | wired | `<FACTORY_HOME_OVERRIDE or ~>/.factory/sessions/<encoded-cwd>/<uuid>.jsonl` plus `.settings.json`; validates session_start.cwd |
+| openclaude | wired | wired | `<OPENCLAUDE_CONFIG_DIR or ~/.openclaude>/projects/<encoded>/`; never falls back to `.claude` |
+| qwen | wired | wired | `<QWEN_RUNTIME_DIR or QWEN_HOME or ~/.qwen>/projects/<encoded-cwd>/chats/<uuid>.jsonl`; validates cwd, excludes sidecars |
 | kilo | wired | wired | explicit native-ID SQLite selector only; workdir discovery returns null |
 | aider | unwired | unwired | no session-log hooks |
 | hermes | unwired | unwired | no session-log hooks; the headless `raw.session_id` comes from stderr, not a log file |
@@ -102,6 +102,75 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | amp | unwired | unwired | `session_id` retained in JSONL; no latest-thread discovery or continuation |
 | mistral-vibe | unwired | unwired | completed history entries on stdout; no latest-session discovery |
 | cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
+
+### Artifact qualification — 2026-09-08
+
+All seven helpers above honor an inclusive **file mtime** cutoff: Python
+`session_started_after` uses seconds, TypeScript `sessionStartedAfter` uses
+milliseconds. A cutoff is not a session creation timestamp: resuming an older
+conversation updates its mtime, and concurrent sessions in one workdir remain
+ambiguous. Helpers consult the calling process's environment; they do not
+remember `RunSpec.env` or `configHome` from a separate child. Align the selected
+root explicitly or parse an already-known artifact path. No config/auth files
+are migrated or modified by these readers.
+
+- **Claude Code / OpenClaude:** NFC realpath, all non-ASCII-alphanumeric UTF-16
+  units replaced with `-`, 200-character prefix plus upstream hash for long
+  names. Runtime-dependent long-path hash siblings are considered only when
+  the first 64 KiB includes matching cwd metadata; missing/foreign metadata
+  returns no match, including short-name collisions. Claude's explicit empty
+  `CLAUDE_CONFIG_DIR` means the caller's cwd; OpenClaude's empty override is
+  unset. The [OpenClaude cutover](https://github.com/Gitlawb/openclaude/blob/eb3c5902eb742322b437d33307590bdc852d4668/README.md#openclaude-config-cutover)
+  and [storage source](https://github.com/Gitlawb/openclaude/blob/eb3c5902eb742322b437d33307590bdc852d4668/src/utils/sessionStoragePortable.ts)
+  corroborate that fork's layout. Claude's closed-source **installed 2.1.220**
+  bundle and an actual isolated localhost-provider capture establish its
+  observed encoding and 11-input/3-output transcript—not support for every
+  newer release. Shared synthetic transcripts cover repeated assistant message
+  IDs without double counting. Estimates exclude cache pricing and are not
+  billed spend. No actual Claude/OpenClaude update or approval pane was captured;
+  precedence is unchanged.
+- **Factory:** [droid 0.213.0](https://www.npmjs.com/package/droid/v/0.213.0)
+  and [official SDK 0.9.1](https://www.npmjs.com/package/@factory/droid-sdk/v/0.9.1)
+  `session-discovery` source define the encoded-cwd directory and flat legacy
+  JSONL fallback. The SDK cwd-filters only flat legacy files; Harness deliberately
+  requires matching canonical absolute `session_start.cwd` in both layouts to
+  reject encoded-name collisions. Symlinks and trailing slashes are normalized;
+  missing or relative cwd is rejected. Unlike the SDK's live listing, this
+  artifact helper does not filter archived files: cwd and mtime do not establish
+  live-session identity. Underscores remain intact.
+  Cumulative `tokenUsage.inputTokens/outputTokens` and selected model
+  come from the sibling `<uuid>.settings.json`; absent settings yield unknown
+  usage, with assistant `message.modelId` available as a model-only fallback.
+  Credits are not USD: session cost stays null. `FACTORY_HOME_OVERRIDE` replaces
+  the home parent, not `.factory`; the old invented `FACTORY_HOME` probes are
+  removed. Current schema fixtures are synthetic, not a current-runtime capture;
+  no update/approval pane change is claimed.
+- **Gemini:** [storage/registry](https://github.com/google-gemini/gemini-cli/blob/85aca163f6c73ac6ce380b5447359146b8adcae4/packages/core/src/config/storage.ts)
+  selects `projects.json` slugs, `.project_root` markers or the pre-registry
+  SHA-256 path. [Chat recording](https://github.com/google-gemini/gemini-cli/blob/85aca163f6c73ac6ce380b5447359146b8adcae4/packages/core/src/services/chatRecordingService.ts)
+  replays last message snapshots, `$set` checkpoints and `$rewindTo` before
+  summing `tokens.input/output`. Prompt-history `logs.json` is not a session.
+- **Qwen:** [storage](https://github.com/QwenLM/qwen-code/blob/7023bba7600f0f8528809bed85a3ec1bdc2866ae/packages/core/src/config/storage.ts)
+  and [recording](https://github.com/QwenLM/qwen-code/blob/7023bba7600f0f8528809bed85a3ec1bdc2866ae/packages/core/src/services/chatRecordingService.ts)
+  define project JSONL, assistant `usageMetadata.promptTokenCount/candidatesTokenCount`
+  and cumulative UI snapshots (ignored, not added again). Runtime model prefixes
+  are removed for telemetry, not inferred as providers. `runtimeOutputDir` from
+  upstream settings/in-process context is not discovered; select the matching
+  `QWEN_RUNTIME_DIR` or pass a known file. There is no `.gemini` fallback.
+  Gemini/Qwen fixtures are source-shaped, not captured provider runs. Mixed or
+  unknown contributing models leave aggregate model/cost unavailable.
+- **Continue:** [CLI session source](https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/extensions/cli/src/session.ts)
+  persists cumulative `usage.promptTokens/completionTokens/totalCost`; the
+  reported cost may itself be an upstream estimate. It persists no model ID.
+  `sessions.json` is an index, not a session. Discovery requires the exact
+  absolute/real workdir spelling rather than upstream's case-folded history
+  listing, to avoid mixing distinct POSIX workspaces. Old `CONTINUE_SESSION_DIR`
+  and basename/dev-data guesses are removed. Headless JSON remains model output,
+  never telemetry. No current binary/provider capture is claimed.
+
+These repairs implement [TWA-96](https://linear.app/twaldin/issue/TWA-96), not
+native identity or controlled resume from [TWA-69](https://linear.app/twaldin/issue/TWA-69).
+Database correlation remains TWA-95; Pi qualification remains TWA-71.
 
 ## Backend and permission capabilities
 
@@ -269,11 +338,12 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
 - Canonical model names (for example `gpt-5.4`) are accepted where the CLI exposes model selection.
 - Harness normalizes model IDs at `buildCommand` time:
   - **Provider-required CLIs** (`opencode`, `swe-agent`, `aider`, `kilo`) get `provider/model` forms.
-  - **Bare-model CLIs** (`codex`, `claude-code`, `openclaude`, `qwen`, `gemini`) get known provider prefixes stripped.
+  - **Bare-model CLIs** (`codex`, `claude-code`, `qwen`, `gemini`) get known provider prefixes stripped.
   - **continue-cli** preserves explicit `owner/package` Hub slugs; omitted model delegates to upstream config.
   - **pi** prefixes bare `gpt-5*` models with `openai-codex/` and preserves recognized explicit providers.
   - **factory-droid** preserves managed model IDs and explicitly supplied `custom:` IDs; it never invents BYOK configuration.
   - **crush** preserves explicit provider prefixes and passes bare names through.
+  - **openclaude** preserves provider-namespaced model IDs, including gateway routing keys.
   - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
   - **cline** has no library default; model IDs pass through trimmed, without provider-prefix inference. `ClineOptions.provider` selects the provider independently. Omitted choices use upstream configuration.
   - **copilot** preserves explicit model IDs after trimming; omitted model delegates to upstream selection and reports null.
@@ -560,6 +630,22 @@ Tokens: 12.3k sent, 2,145 received
   ]
 }
 ```
+
+Legacy artifact discovery considers only `<workdir>/.harness/swe-traj.json`,
+then `<workdir>/mini-traj.json`, filtering each by the inclusive mtime cutoff
+(Python seconds; TypeScript milliseconds). It no longer reads a global
+`last_mini_run.traj.json` to fill missing metrics: interactive mini normally
+serializes an empty environment cwd, so that file cannot identify this workdir.
+The native wrapper trajectory model comes from `extra.response.model`, then
+`info.config.model.model_name`, not the `api_calls` key in `model_stats`.
+These shapes are checked against mini-swe-agent 2.2.8 and
+[`DefaultAgent.serialize`](https://github.com/SWE-agent/mini-swe-agent/blob/04d809ceab9df28f9adaed044884180159172930/src/minisweagent/agents/default.py)
+and [model serialization](https://github.com/SWE-agent/mini-swe-agent/blob/04d809ceab9df28f9adaed044884180159172930/src/minisweagent/models/litellm_model.py).
+
+An isolated 2.2.8 PTY capture reached `What do you want to do?` and the
+`Submit message: Esc, then Enter` footer without submitting a task. No actual
+spinner/approval pane was captured; pane precedence is unchanged. Native
+mini-SWE support remains [TWA-82](https://linear.app/twaldin/issue/TWA-82).
 
 ---
 

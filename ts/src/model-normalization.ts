@@ -21,7 +21,6 @@ const BARE_MODEL_HARNESSES = new Set([
   'claude-code',
   'codex',
   'gemini',
-  'openclaude',
   'qwen',
 ])
 
@@ -32,8 +31,14 @@ const PROVIDER_MODEL_HARNESSES = new Set([
   'swe-agent',
 ])
 
+// Harnesses that send an explicit `provider/model` string to the backend
+// verbatim. OpenClaude routes gateway model IDs such as
+// `deepseek/deepseek-v4-flash` (LLMTR, Command Code) or
+// `anthropic/claude-sonnet-4-6` (OpenRouter) unchanged, so stripping the
+// namespace would select a different model.
 const PRESERVE_EXPLICIT_PROVIDER_HARNESSES = new Set([
   'crush',
+  'openclaude',
 ])
 
 export function stripKnownProviderPrefixes(model: string): string {

@@ -69,6 +69,16 @@
   telemetry limits, and paired migration examples. Existing results remain
   compatible; these source changes are not yet a package release. Paired
   fixture-update patch bumps follow SPEC and do not publish packages.
+- Repaired Claude Code, OpenClaude, Factory Droid, Gemini, Qwen, Continue and
+  SWE-wrapper artifact helpers in both languages, with shared upstream-shaped
+  fixtures and native cutoff units. Discovery honors qualified config roots and
+  project metadata instead of unrelated latest/basename logs. OpenClaude now
+  uses only its own config root and preserves provider model namespaces.
+  Native session metrics replace guessed schemas; Continue headless output
+  remains non-telemetry. See [sources and runtime limits](ADAPTER-MATRIX.md#artifact-qualification--2026-09-08).
+  Malformed or unsafe Claude token totals and non-finite Continue metrics remain
+  unknown rather than throwing or reporting invalid numeric telemetry.
+  Pane precedence and controlled-session ownership are unchanged.
 
 ## 2026-05-06 (later)
 

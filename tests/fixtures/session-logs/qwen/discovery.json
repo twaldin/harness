@@ -1,0 +1,51 @@
+{
+  "$comment": "Shared by ts/tests/adapters/qwen-sessionlog.test.ts and tests/adapters/test_qwen_session_logs.py. Synthetic transcripts written from the pinned upstream source (no installed-binary capture). Files under chats/ carry the placeholder __WORKDIR__ (the project root as qwen-code records it in every ChatRecord.cwd: path.resolve(process.cwd()), i.e. the physical absolute path).",
+  "sourceQualification": {
+    "repository": "https://github.com/QwenLM/qwen-code",
+    "revision": "7023bba7600f0f8528809bed85a3ec1bdc2866ae",
+    "runtimeDirEnv": "QWEN_RUNTIME_DIR",
+    "homeEnv": "QWEN_HOME",
+    "configDirDefault": ".qwen",
+    "projectDir": "projects/<sanitizeCwd(projectRoot)>",
+    "sanitizeCwd": "replace every [^a-zA-Z0-9] with '-'",
+    "chatsSubdir": "chats",
+    "sessionFilePattern": "^[0-9a-fA-F-]{32,36}\\.jsonl$",
+    "membership": "first record cwd must equal the project root (sanitized dirs collide)",
+    "legacyLogsJson": "tmp/<sha256(projectRoot)>/logs.json holds user prompt history only (no usage)"
+  },
+  "placeholders": ["__WORKDIR__"],
+  "sessions": {
+    "main": {
+      "file": "chats/0f9d1b3c-6a2e-4d7b-9c1a-111111111111.jsonl",
+      "$comment": "Two assistant records with usageMetadata (640+200 prompt, 150+0 candidates); the ui_telemetry snapshot repeats the same totals and must not be aggregated; the second assistant record is re-emitted with the same uuid (counted once); its model carries the $runtime|<auth>| prefix which is stripped.",
+      "telemetry": { "tokensIn": 840, "tokensOut": 150, "model": "qwen3-coder-plus", "costUsd": 0.00144 },
+      "recordUuids": [
+        "a1000000-0000-4000-8000-000000000001",
+        "a1000000-0000-4000-8000-000000000002",
+        "a1000000-0000-4000-8000-000000000003",
+        "a1000000-0000-4000-8000-000000000004",
+        "a1000000-0000-4000-8000-000000000005"
+      ]
+    },
+    "unrelated": {
+      "file": "chats/0f9d1b3c-6a2e-4d7b-9c1a-222222222222.jsonl",
+      "$comment": "cwd belongs to another project that sanitizes into the same chats dir; must be rejected by discovery even when newest.",
+      "telemetry": { "tokensIn": 7777, "tokensOut": 7777, "model": "qwen3-coder-plus", "costUsd": 0.038885 }
+    },
+    "noUsage": {
+      "file": "chats/0f9d1b3c-6a2e-4d7b-9c1a-333333333333.jsonl",
+      "$comment": "No assistant record: usage and model are unknown, not zero.",
+      "telemetry": { "tokensIn": null, "tokensOut": null, "model": null, "costUsd": null },
+      "sessionId": "0f9d1b3c-6a2e-4d7b-9c1a-333333333333"
+    }
+  },
+  "sidecar": {
+    "file": "chats/0f9d1b3c-6a2e-4d7b-9c1a-111111111111.runtime.json",
+    "$comment": "Live-session status sidecar next to the transcript; never a session candidate."
+  },
+  "legacyLayout": {
+    "$comment": "The pre-TWA-96 helper looked for ~/.qwen/tmp/<basename(workdir)>/logs.json with a ~/.gemini fallback. Neither is a session.",
+    "file": "legacy/logs.json",
+    "relativePaths": [".qwen/tmp/<basename>/logs.json", ".gemini/tmp/<basename>/logs.json"]
+  }
+}

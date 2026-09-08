@@ -58,11 +58,11 @@ Both fixture loaders discover names and require them to match the registry.
 Most adapters use the sets at the top of the file:
 
 - `BARE_MODEL_HARNESSES` — pass the model through stripped of any provider
-  prefix (`claude-code`, `codex`, `gemini`, `qwen`, `openclaude`).
+  prefix (`claude-code`, `codex`, `gemini`, `qwen`).
 - `PROVIDER_MODEL_HARNESSES` — require a `provider/model` form
   (`aider`, `kilo`, `opencode`, `swe-agent`).
 - `PRESERVE_EXPLICIT_PROVIDER_HARNESSES` — pass through unchanged when the
-  user supplied a provider prefix (`crush`).
+  user supplied a provider prefix (`crush`, `openclaude`).
 
 `pi` handles provider prefixes explicitly. Factory preserves the caller's exact
 managed or `custom:` model ID. Continue preserves Hub `owner/package` slugs and

@@ -1,4 +1,5 @@
 """Importing this package registers every shipped adapter."""
+from harness.adapters.amp import AmpAdapter
 from harness.adapters.aider import AiderAdapter
 from harness.adapters.claude_code import ClaudeCodeAdapter
 from harness.adapters.cline import ClineAdapter
@@ -39,10 +40,12 @@ register("copilot", CopilotAdapter)
 register("omp", OmpAdapter)
 register("cline", ClineAdapter)
 register("goose", GooseAdapter)
+register("amp", AmpAdapter)
 register("mistral-vibe", MistralVibeAdapter)
 register("cursor", CursorAdapter)
 
 __all__ = [
+    "AmpAdapter",
     "AiderAdapter",
     "ClaudeCodeAdapter",
     "ClineAdapter",

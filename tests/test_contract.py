@@ -47,7 +47,7 @@ BYPASS_ARGS = {
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
 ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
-NO_BYPASS = ["crush", "opencode", "pi", "swe-agent"]
+NO_BYPASS = ["amp", "crush", "opencode", "pi", "swe-agent"]
 
 
 def _spec(harness: str, workdir: Path, **kw) -> RunSpec:
@@ -277,6 +277,7 @@ CONFIG_MAPPINGS = {
     "continue-cli": (None, "--config"),
     "omp": ("PI_CODING_AGENT_DIR", "--config"),
     "cline": ("CLINE_DIR", None),
+    "amp": (None, "--settings-file"),
     "mistral-vibe": ("VIBE_HOME", None),
 }
 
@@ -285,7 +286,7 @@ CONFIG_MAPPINGS = {
 def test_capabilities_reflect_shipped_support(name: str):
     caps = get_capabilities(name)
     expected_policies = ("upstream", "bypass") if name in BYPASS_ARGS or name in BYPASS_ENVS else ("upstream",)
-    expected_native = name if name in ("claude-code", "codex", "cline", "copilot", "mistral-vibe") else None
+    expected_native = name if name in ("claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe") else None
     home_env, file_flag = CONFIG_MAPPINGS.get(name, (None, None))
     assert caps == Capabilities(
         backend="cli",

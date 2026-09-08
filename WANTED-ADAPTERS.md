@@ -25,8 +25,8 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain twenty adapters, with shared fixture files:
-`aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
+After adapter initialization, both registries contain twenty-one adapters, with shared fixture files:
+`aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
 `gemini`, `goose`, `hermes`, `kilo`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
@@ -64,6 +64,9 @@ upstream compatibility.
 - GitHub Copilot CLI now ships in both languages through [TWA-76](https://linear.app/twaldin/issue/TWA-76).
   See [setup, native permissions and dated coverage](ADAPTER-MATRIX.md#copilot);
   this is the current `@github/copilot` agent, not the old `gh copilot` helper.
+- Amp local execute mode now ships in both languages through [TWA-78](https://linear.app/twaldin/issue/TWA-78).
+  See [setup, model limitations and dated coverage](ADAPTER-MATRIX.md#amp);
+  remote orbs and runners are not exposed.
 - Cursor CLI now ships in both languages through [TWA-77](https://linear.app/twaldin/issue/TWA-77).
   See [setup, permissions and dated qualification](ADAPTER-MATRIX.md#cursor).
   Cloud workers, persist/resume, ACP and SDK execution remain unsupported.
@@ -92,18 +95,6 @@ specific checks supplement the [common validation scope](#validation-and-mainten
 
 
 
-
-### Amp — [TWA-78](https://linear.app/twaldin/issue/TWA-78)
-
-- **Identity / maintenance:** [Amp CLI](https://ampcode.com/docs/cli), npm
-  **`@ampcode/cli`** supplies `amp`; package `0.0.1788811227-gce258b` observed.
-  `@sourcegraph/amp` now redirects through a renamed-package stub.
-- **Path:** [`amp -x --stream-json "PROMPT"`](https://ampcode.com/docs/cli/execute-mode).
-- **Gate / validation:** Amp account/access key and mode-driven model selection;
-  do not pretend every caller-selected model is supported. Verify
-  [streaming JSON](https://ampcode.com/docs/cli/streaming-json) usage scope and
-  avoid double-counting assistant plus terminal usage. Tokens are documented,
-  billed USD is not. Remote orbs (`-ox`) and SDKs are distinct backends.
 
 ### Mistral Vibe — shipped — [TWA-79](https://linear.app/twaldin/issue/TWA-79)
 

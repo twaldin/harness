@@ -2,6 +2,10 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added `amp` local execute mode in both languages through the shared subprocess
+  lifecycle. `AmpOptions.mode` selects an upstream mode; direct model selection
+  and bypass reject. JSONL retains native thread identity, errors and optional
+  token usage; USD is unavailable. See [setup and smoke limits](ADAPTER-MATRIX.md#amp).
 - Added `mistral-vibe` in both languages, using native completed-history JSONL
   and the shared lifecycle. `VibeOptions` exposes agent selection and explicit
   invocation-only workspace trust; projected instructions require trust.

@@ -1,116 +1,354 @@
-# Wanted Adapters
+# Wanted adapters
 
-A list of coding CLIs that would make good contributions to harness. Each entry is pre-scoped: if you open a PR adding the adapter, the scope is already agreed. You still need to follow the [adapter contribution guide](CONTRIBUTING.md#adding-a-new-adapter), but the "should harness support this?" question is already answered yes.
+An evidence-backed catalog of upstream coding-agent CLIs and the work needed to
+support them. **Checked 2026-09-07** against official documentation, source and
+package metadata. Commands below establish an executable integration path, not
+an installed-version or real-provider smoke result. No candidate was installed,
+authenticated or run against a provider for this catalog refresh.
 
-If you're looking for a first PR to harness, pick one of these, open an issue saying you're taking it, and the PR review will focus on the implementation — not whether it belongs.
+## Qualification policy
 
-## Shipped
+- Prefer maintained agents with a documented noninteractive executable. Record
+  the upstream project, distribution, binary, headless path, auth/permissions,
+  output limitations and validation scope. A name or SDK alone is not enough.
+- Subscription-only and proprietary CLIs are eligible. Billing/auth requirements
+  are capabilities and prerequisites, not a blanket BYOK-only exclusion. Do not
+  silently substitute providers, models, permission modes or CLI/SDK backends.
+- **Source-qualified** means a plausible implementation can be scoped.
+  **Deferred** means an identified maintenance or integration gap remains.
+  Neither means shipped or provider-tested. Null usage is not zero cost;
+  credits, estimated USD and billed USD are different measurements.
+- Recheck official sources and the installed version when implementation starts.
+  Dates/versions below are observations, not permanent compatibility promises.
+  Vendor documentation without a pinned release is weaker maintenance evidence
+  than a dated release; it is marked accordingly.
 
-See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) for the current thirteen-adapter lineup. `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` and `openclaude` are already implemented alongside the original six.
+## Shipped, not wanted work
 
-### Crush (Charm)
+After adapter initialization, both registries contain thirteen adapters, with shared fixture files:
+`aider`, `claude-code`, `codex`, `continue-cli`, `crush`, `factory-droid`,
+`gemini`, `kilo`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
+See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
+commands, metrics and known language skew. Fixtures do not establish current
+upstream compatibility.
 
-[charmbracelet/crush](https://github.com/charmbracelet/crush) — MIT, Go binary, Charm-family. Modern TUI with split-pane diff view; multi-model via OpenRouter. The earlier headless-mode investigation is resolved in this repository: both adapters construct `crush run` and read sqlite metrics. See [the current adapter reference](ADAPTER-MATRIX.md#crush).
+- `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` and `openclaude`
+  have shipped alongside the original six; do not create duplicate additions.
+- `crush` already constructs `crush run` and reads SQLite metrics. The old
+  question about whether Harness has a headless Crush adapter is resolved;
+  upstream requalification is still separate.
+- `openclaude` is shipped. Earlier concerns about OpenClaude / Claw Code / forks
+  of leaked Claude Code source were legal ambiguity, fragmentation and unstable
+  releases. Shipping does not establish that those concerns are resolved or
+  approve other forks.
+- `swe-agent` currently invokes a consumer-supplied mini-SWE Python wrapper, not
+  a native SWE-agent CLI. The distinct native mini-SWE CLI is tracked below.
+- Refresh the shipped set in [TWA-68](https://linear.app/twaldin/issue/TWA-68).
+  Pi's current upstream advertises `@earendil-works/pi-coding-agent`
+  ([upstream](https://github.com/earendil-works/pi)); the checked-in adapter
+  reference still names `@mariozechner/pi-coding-agent`. Requalification and RPC
+  belong to [TWA-71](https://linear.app/twaldin/issue/TWA-71), not another Pi ticket.
 
-### OpenClaude: shipped, historical caution retained
+## Source-qualified: existing implementation backlog
 
-`openclaude` is implemented in both languages with a shared fixture. The earlier
-caution about OpenClaude / Claw Code / forks of the leaked Claude Code source
-was legal ambiguity, fragmentation and unstable release cycles, with a request
-to wait for legal resolution or consolidation. Shipping this adapter does not
-establish that those concerns are resolved or approve other forks.
+These are unshipped. Reuse the linked ticket; each owns one adapter. Commands
+show the headless entry point, not a universal safe permission configuration.
+Caller-selected auth and configuration must already be available. Each entry's
+specific checks supplement the [common validation scope](#validation-and-maintenance).
 
----
+### Oh My Pi — [TWA-70](https://linear.app/twaldin/issue/TWA-70)
 
-## High-priority — moderate effort (~2-4 hours each)
+- **Identity / maintenance:** [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi),
+  MIT; [v18.1.14](https://github.com/can1357/oh-my-pi/releases/tag/v18.1.14)
+  released September 7. Official `https://omp.sh/install` installer or
+  `@oh-my-pi/pi-coding-agent` distribution supplies `omp`; distinct from Pi.
+- **Path:** `omp -p --mode json "PROMPT"`; provider/model selection is explicit.
+  RPC, ACP and the optional SDK are separate backend work, not extra agents.
+- **Gate / validation:** preserve caller-selected settings/auth and tool policy;
+  this is not a security sandbox. Verify terminal `agent_end` records, actual
+  usage fields, partial output and child cleanup rather than assuming Pi's parser
+  is interchangeable. SDK work: [TWA-85](https://linear.app/twaldin/issue/TWA-85).
 
-These have clear headless mode and credible cost reporting. Good first PRs.
+### Prime Agent — [TWA-72](https://linear.app/twaldin/issue/TWA-72)
 
-### Goose
+- **Identity / maintenance:** [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent),
+  MIT; [v0.9.3](https://github.com/PrimeIntellect-ai/prime-agent/releases/tag/v0.9.3)
+  released September 6. The README's `https://app.primeintellect.ai/prime-agent/install.sh`
+  installs `prime-agent`. Its workspace manifest still uses the Pi npm name/bin;
+  do not mistake that manifest for a supported Prime npm installation.
+- **Path:** [`prime-agent -p --mode json "PROMPT"`](https://github.com/PrimeIntellect-ai/prime-agent/blob/main/packages/coding-agent/docs/usage.md),
+  with explicit provider/model and optional `--no-session`.
+- **Gate / validation:** subscription or API-key provider; model-generated Python
+  runs with user permissions. Verify worker/kernel lifetime and usage aggregation.
+  Do not implement cleanup with global `shutdown` or manage unrelated background
+  agents. Its own subagents do not make the single-run CLI an orchestration API.
 
-[aaif-goose/goose](https://github.com/aaif-goose/goose) — Apache 2.0, Rust binary, maintained by the Agentic AI Foundation (Linux Foundation, forked from Block Dec 2025).
+### Hermes Agent — [TWA-73](https://linear.app/twaldin/issue/TWA-73)
 
-- **Headless** yes, CLI mode.
-- **Cost reporting** JSON session export with full metadata (input/output/cache tokens, model config).
-- **Auth** API key per provider (15+ providers: Anthropic, OpenAI, Ollama, Azure, Bedrock, OpenRouter, etc.).
-- **Adapter-to-copy-from** `opencode` (session export pattern is closest).
+- **Identity / maintenance:** [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent),
+  release `v2026.9.7` published September 7.
+  [Official installation](https://hermes-agent.nousresearch.com/docs/getting-started/installation/)
+  supplies `hermes`; the source project is named `hermes-agent`.
+- **Path:** [`hermes chat -q "PROMPT"`](https://hermes-agent.nousresearch.com/docs/user-guide/cli/),
+  with `--model`, `--provider` and selected toolsets.
+- **Gate / validation:** use preconfigured provider/account access. Verify single-query
+  exit, approval behavior, output/usage schema and state isolation. No machine-readable
+  usage contract is established here. Gateway, schedules and worktree management
+  remain outside this adapter.
 
-Why it's wanted: 15+ provider support + comprehensive cost tracking is uniquely useful. If someone wants Ollama or Bedrock via harness, Goose is the cleanest path.
+### Goose — [TWA-74](https://linear.app/twaldin/issue/TWA-74)
 
-### Plandex
+- **Identity / maintenance:** [aaif-goose/goose](https://github.com/aaif-goose/goose),
+  Apache-2.0; v1.49.0 released September 3. `block/goose` redirects here: this was
+  a repository transfer, not a separate fork. The README's release installer
+  `releases/download/stable/download_cli.sh` supplies `goose`.
+- **Path:** [`goose run -q --output-format json --no-session -t "PROMPT"`](https://goose-docs.ai/docs/guides/goose-cli-commands).
+- **Gate / validation:** provider-specific auth, explicit model/tool extensions and
+  permission configuration. [Output source](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/session/mod.rs)
+  exposes input/output/cache totals and optional `cost_usd`. Verify JSON metadata
+  versus stream-json completion events, absent pricing and accumulation; do not
+  assume session export is JSONL or that an estimate proves billed spend.
 
-[plandex-ai/plandex](https://github.com/plandex-ai/plandex) — Apache 2.0, Go binary, active OSS.
+### Cline CLI — [TWA-75](https://linear.app/twaldin/issue/TWA-75)
 
-- **Headless** yes, CLI-first.
-- **Cost reporting** `plandex usage --log` shows per-call transactions; `plandex show` has token counts.
-- **Auth** API key or self-hosted; Plandex Cloud tracks spend.
-- **Output** CLI tables (token counts need parsing).
-- **Adapter-to-copy-from** `aider` (table-scraping pattern).
+- **Identity / maintenance:** [cline/cline CLI](https://github.com/cline/cline/blob/main/apps/cli/README.md),
+  Apache-2.0; `cli-v3.0.61` released September 2. `npm install -g cline` supplies
+  **`cline`**, not `cn` (the shipped Continue binary). CLI and extension versions differ.
+- **Path:** `cline --json -P PROVIDER -m MODEL "PROMPT"` produces NDJSON;
+  `--yolo` is an explicit approval bypass, not an adapter default to assume.
+- **Gate / validation:** preconfigured OAuth or provider API key; missing OAuth
+  credentials must not trigger interactive login in headless execution. Verify
+  approval denial, `--data-dir` isolation and the NDJSON usage schema. Verbose
+  `-v` stats are documented, but their presence in JSON is unqualified. Avoid
+  detached `--zen` execution. SDK qualification belongs to TWA-86.
 
-Why it's wanted: strongest local-model story (Ollama integration), tree-sitter project maps for context management. Different architecture from the completion-based adapters.
+### GitHub Copilot CLI — [TWA-76](https://linear.app/twaldin/issue/TWA-76)
 
-### Cline CLI 2.0
+- **Identity / maintenance:** [GitHub CLI installation](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli),
+  npm `@github/copilot` supplies `copilot`; package 1.0.83 observed.
+  This is the coding-agent CLI, not the older `gh copilot` command helper.
+- **Path:** [`copilot -p "PROMPT"`](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference)
+  with explicit tool allow/deny policy and model. `-s` suppresses stats/decorations.
+- **Gate / validation:** GitHub-hosted models use Copilot entitlement and selected
+  account auth. **The former “no BYOK” exclusion is obsolete:**
+  [official BYOK docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models)
+  support OpenAI-compatible, Azure and Anthropic endpoints, including local models;
+  tool calling and streaming are required. Preserve provider env/model and optional
+  offline mode explicitly. Verify denied tools, terminal output and any usage
+  source; no JSON or USD schema is established by this catalog.
 
-[cline/cline](https://github.com/cline/cline) — MIT, 5M+ VS Code installs; v3.58+ ships a standalone CLI 2.0 with headless mode.
+### Cursor CLI — [TWA-77](https://linear.app/twaldin/issue/TWA-77)
 
-- **Headless** yes, CLI 2.0.
-- **Cost reporting** not documented; needs investigation against `cn` output.
-- **Auth** model-agnostic; any LLM provider.
-- **Tool use** subagent support (v3.58+) plus Edit/Read/Bash equivalents.
-- **Adapter-to-copy-from** `claude-code`.
+- **Identity / maintenance:** [official CLI docs](https://cursor.com/docs/cli/overview)
+  and `https://cursor.com/install` supply **`agent`**. Current vendor documentation
+  is the maintenance signal; no release version is pinned here. Verify the binary
+  instead of assuming the historical `cursor-agent` name.
+- **Path:** [`agent -p --output-format json "PROMPT"`](https://cursor.com/docs/cli/headless).
+  Docs require `--force` for applying edits; keep that choice explicit.
+- **Gate / validation:** Cursor account/API key and available models. Verify workspace
+  trust, write permission and nonzero/stderr failures. The
+  [documented result schema](https://cursor.com/docs/cli/reference/output-format)
+  has no token/USD fields; do not infer cost from duration or model alone.
+  Cloud workers are not this subprocess adapter.
 
-Why it's wanted: biggest community adoption pool of any entry on this list. If Cline users want to point their dev loop at hone / agentelo / your own tool, harness is how.
+### Amp — [TWA-78](https://linear.app/twaldin/issue/TWA-78)
 
----
+- **Identity / maintenance:** [Amp CLI](https://ampcode.com/docs/cli), npm
+  **`@ampcode/cli`** supplies `amp`; package `0.0.1788811227-gce258b` observed.
+  `@sourcegraph/amp` now redirects through a renamed-package stub.
+- **Path:** [`amp -x --stream-json "PROMPT"`](https://ampcode.com/docs/cli/execute-mode).
+- **Gate / validation:** Amp account/access key and mode-driven model selection;
+  do not pretend every caller-selected model is supported. Verify
+  [streaming JSON](https://ampcode.com/docs/cli/streaming-json) usage scope and
+  avoid double-counting assistant plus terminal usage. Tokens are documented,
+  billed USD is not. Remote orbs (`-ox`) and SDKs are distinct backends.
 
-## Medium-priority — moderate effort (~2-4 hours each)
+### Mistral Vibe — [TWA-79](https://linear.app/twaldin/issue/TWA-79)
 
-Fine to accept, lower leverage.
+- **Identity / maintenance:** [mistralai/mistral-vibe](https://github.com/mistralai/mistral-vibe),
+  Apache-2.0, maintained source/docs; release version not pinned here.
+  [Installation](https://docs.mistral.ai/vibe/code/cli/install-setup):
+  `uv tool install mistral-vibe` supplies `vibe` (Python 3.12+).
+- **Path:** [`vibe --prompt "PROMPT" --max-turns 5 --output json`](https://docs.mistral.ai/vibe/code/cli/work-with-cli).
+- **Gate / validation:** selected provider/model configuration, Mistral account/key
+  or compatible/local provider. Print mode defaults to auto-approve; folder trust
+  still matters. Verify permission/trust rejection and JSON/streaming schemas.
+  Config-derived price limits are indicative, not a reliable billing ceiling.
 
-### Roo Code CLI
+### Kiro CLI — [TWA-80](https://linear.app/twaldin/issue/TWA-80)
 
-[RooVeterinaryInc/Roo-Code](https://github.com/RooVeterinaryInc/Roo-Code) — MIT, `@roo-code/cli` on npm.
+- **Identity / maintenance:** [Kiro CLI docs](https://kiro.dev/docs/cli/),
+  current CLI 3.x documentation; exact release not pinned here.
+  `https://cli.kiro.dev/install` supplies `kiro-cli`.
+- **Path:** [`kiro-cli chat --no-interactive "PROMPT"`](https://kiro.dev/docs/cli/headless/).
+  Stream-json output requires a supported v2/v3 engine; choose engine and trust
+  policy explicitly rather than inheriting an incompatible default.
+- **Gate / validation:** documented headless API-key access requires an eligible
+  paid Kiro plan and may be admin-restricted. Verify `KIRO_API_KEY` prerequisites,
+  tool denial, model restrictions, exit codes and the actual event schema.
+  Usage/USD remains unqualified; subscription gating is not a reason to exclude it.
 
-Role-based modes (Architect, Code, Debug, Ask, Custom) map to tool dispatch. Plain text output. Cost reporting not documented. Adapter-to-copy-from: `claude-code`.
+### Auggie — [TWA-81](https://linear.app/twaldin/issue/TWA-81)
 
-### Neovate Code (Ant Group)
+- **Identity / maintenance:** [Augment CLI docs](https://docs.augmentcode.com/cli/overview),
+  current vendor documentation; exact release not pinned here.
+  `npm install -g @augmentcode/auggie` supplies `auggie` (Node 20+).
+- **Path:** [`auggie --print --output-format json "PROMPT"`](https://docs.augmentcode.com/cli/reference).
+- **Gate / validation:** Augment account/session auth; enterprise agreements can
+  disable noninteractive use. Keep model and tool permissions explicit. Verify
+  JSON schema and `--show-credits` semantics: Augment credits are not tokens or
+  billed USD. `auggie cloud`/Cosmos and Auggie SDKs are separate work.
 
-[neovateai/neovate-code](https://github.com/neovateai/neovate-code) — MIT, open-sourced 2026.
+### Native mini-SWE-agent — [TWA-82](https://linear.app/twaldin/issue/TWA-82)
 
-Plugin system with hooks, custom tools, and output types. Multi-platform (CLI, Web, Desktop). Cost reporting through the plugin interface. Harder to wrap because of plugin model. Adapter-to-copy-from: experimental — no direct analog.
+- **Identity / maintenance:** [SWE-agent/mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent),
+  v2.4.6 released July 23; source active September 7.
+  [Installation](https://mini-swe-agent.com/latest/quickstart/):
+  `uv tool install mini-swe-agent` supplies `mini` and `mini-extra`.
+- **Path:** [`mini -t "TASK" -m PROVIDER/MODEL -y --exit-immediately -o trajectory.json`](https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/run/mini.py).
+- **Gate / validation:** `-y` deliberately bypasses confirmation; expose that limitation.
+  First-run configuration must be prepared without an interactive setup wizard.
+  Verify termination, trajectory fields, explicit model/cwd and cleanup. Do not
+  silently replace the shipped `swe-agent` wrapper or conflate it with SWE-agent.
 
----
+### OpenHands CLI — [TWA-83](https://linear.app/twaldin/issue/TWA-83)
 
-## Not wanted — but here's why so you don't ask
+- **Identity / maintenance:** [current CLI docs](https://docs.openhands.dev/openhands/usage/cli/installation),
+  exact release not pinned here. `uv tool install openhands --python 3.12`
+  supplies `openhands`; select the CLI distribution, not Agent Canvas.
+- **Path:** [`openhands --headless --json -t "TASK"`](https://docs.openhands.dev/openhands/usage/cli/headless)
+  emits JSONL events.
+- **Gate / validation:** preconfigured provider/key or OpenHands account;
+  headless mode always approves actions. Expose that limitation. Verify actual
+  event/usage schema, settings/conversation isolation, exit and cancellation;
+  no usage totals are established here. Agent Canvas is a control center for
+  agents, while SDK qualification is tracked in TWA-86.
 
-### GPT Pilot
+## New source-qualified discoveries
 
-Multi-agent orchestration (7 specialized agents, human review gates). Not a CLI-first headless tool. Harness wraps agents, not orchestrators that call agents.
+Workspace and repository backlog searches found no existing Qoder or Kimi Code
+adapter tickets. Both follow-ups remain in Backlog, are children of
+[TWA-87](https://linear.app/twaldin/issue/TWA-87), and depend on shared conformance
+[TWA-67](https://linear.app/twaldin/issue/TWA-67), which carries the contract and
+lifecycle prerequisites. No new runtime adapter is shipped by this catalog PR.
 
-### Mentat (original CLI)
+### Qoder CLI — [TWA-92](https://linear.app/twaldin/issue/TWA-92)
 
-Archived by AbanteAI. Cloud variant sparse docs. If the cloud CLI gets proper docs + a confirmed headless mode, this becomes tier-2.
+- **Identity / maintenance:** npm [`@qoder-ai/qodercli`](https://www.npmjs.com/package/@qoder-ai/qodercli)
+  1.1.46, registry modified September 7; bins `qoder` and `qodercli`.
+  Install with `npm install -g @qoder-ai/qodercli`.
+- **Path:** [`qoder -p "PROMPT" --output-format json --permission-mode accept_edits --max-turns 20`](https://docs.qoder.com/cli/run-in-scripts).
+- **Gate / validation:** caller-selected Qoder
+  [account/PAT](https://docs.qoder.com/cli/authentication), model and `QODER_CONFIG_DIR`;
+  BYOK is not established here. `accept_edits` still denies shell commands;
+  text-mode confirmation defaults to deny, while host-driven stream-json approvals
+  are a separate protocol path. Verify edit versus shell denial, JSON metadata,
+  partial streams and cleanup. Unknown token/USD fields stay null.
 
-### CodeMachine-CLI
+### Kimi Code CLI — [TWA-93](https://linear.app/twaldin/issue/TWA-93)
 
-Meta-orchestrator that spawns Claude Code / Codex / Cursor. Architecturally harness's consumer, not its adapter target.
+- **Identity / maintenance:** [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code),
+  MIT; npm [`@moonshot-ai/kimi-code`](https://www.npmjs.com/package/@moonshot-ai/kimi-code)
+  0.41.0, registry modified September 4, supplies `kimi`. Official binary installer
+  is also supported. The winding-down Python `kimi-cli` is a different distribution.
+- **Path:** [`kimi -p "PROMPT" --output-format stream-json`](https://moonshotai.github.io/kimi-code/en/reference/kimi-command.html).
+- **Gate / validation:** Kimi OAuth/API key or a configured compatible provider;
+  preserve explicit model alias and `KIMI_CODE_HOME`. Print mode implies `auto`
+  permissions and rejects `--yolo`, `--auto`, `--plan`; static denies still apply.
+  Verify stderr versus JSONL, tool messages, exit/partial output and cancellation.
+  Do not inherit predecessor exit codes or assume usage fields. Avoid automatic
+  migration of the user's legacy config/sessions; ACP/web are separate surfaces.
 
-### smol-ai/developer, smol-ai/smolagents
+## Deferred or unsupported candidates
 
-Python libraries. Wrap your own CLI around them first, then submit that.
+These are not permanent name-based bans. Reopen qualification when the stated
+blocker changes; do not create an implementation ticket solely to collect a name.
 
-### GitHub Copilot CLI
+### Neovate Code — deferred: maintenance signal is stale
 
-Proprietary. GitHub Copilot subscription only. No BYOK. Harness is BYOK-only by design.
+[neovateai/neovate-code](https://github.com/neovateai/neovate-code) is not archived,
+but its last observed push was March 24, 2026; npm `@neovate/code` 0.28.5 was
+published February 26 (registry metadata was modified July 1).
+It has a concrete executable path: `npm install -g @neovate/code` supplies
+`neovate`, and [CLI source](https://github.com/neovateai/neovate-code/blob/master/src/index.ts)
+defines `neovate -q --output-format stream-json "PROMPT"`, `--approval-mode`
+and `--cwd`. The plugin system is **not** a headless blocker. Provider keys are
+supported; usage payload remains unverified. Recheck maintenance first, then
+scope permission/output/isolation validation before promoting one adapter ticket.
 
----
+### Plandex — deferred: dormant upstream and cloud wind-down
 
-## Opening a PR
+[plandex-ai/plandex](https://github.com/plandex-ai/plandex) is MIT, not Apache-2.0.
+Its [latest commits](https://github.com/plandex-ai/plandex/commits/main/) are from
+October 3, 2025; the README says Plandex Cloud is winding down from that date and
+accepts no new users. It is not a maintained high-priority first contribution.
 
-1. Comment on [this file's GitHub view](https://github.com/twaldin/harness/blob/main/WANTED-ADAPTERS.md) or open an issue saying you're taking a specific entry. This avoids double work.
-2. Follow [CONTRIBUTING.md §"Adding a new adapter"](CONTRIBUTING.md#adding-a-new-adapter) — Python + TypeScript + fixture + ADAPTER-MATRIX row in a single PR.
-3. Link to this file in the PR description so the scope is obvious.
+The official `https://plandex.ai/install.sh` installs `plandex`/`pdx`;
+self-hosted/local Docker mode with provider keys remains documented. The
+[`tell` command](https://github.com/plandex-ai/plandex/blob/main/app/cli/cmd/tell.go)
+has automation flags, but requires server/project/plan setup: “CLI-first” alone
+was insufficient qualification. [`usage --log`](https://github.com/plandex-ai/plandex/blob/main/app/cli/cmd/usage.go)
+queries a credits ledger, not a verified per-run BYOK usage schema. Its exact
+local-mode behavior was not run; no claim is made that the command necessarily
+fails there. Reconsider only with a maintained release/fork, a provisioned
+noninteractive edit path and independently verified per-run output/usage.
 
-## Help with harder entries
+### Roo Code CLI — unsupported archived target
 
-If you're picking Neovate (plugin system), open an issue before the PR and confirm the approach. The review will be easier if the architectural question is resolved upfront.
+[RooCodeInc/Roo-Code](https://github.com/RooCodeInc/Roo-Code) is archived; its
+README announces the extension shutdown on May 15, 2026. The old catalog's
+`@roo-code/cli` npm install claim is not supported: npm returned 404 and the
+[CLI manifest](https://github.com/RooCodeInc/Roo-Code/blob/main/apps/cli/package.json)
+is `private: true` (source binary name `roo`). This does not prove source builds
+are impossible, but there is no maintained published CLI path qualified here.
+Community forks need their own maintenance/install/headless evidence.
+
+### Other former exclusions: distinguish product boundaries
+
+| Project | Classification and current decision |
+| --- | --- |
+| [GPT Pilot](https://github.com/Pythagora-io/gpt-pilot) | Multi-agent application-development workflow with human review, not a qualified single coding-agent headless run here. A bounded executable contract would need separate evidence. |
+| [Mentat original CLI](https://github.com/AbanteAI/archive-old-cli-mentat) | Upstream explicitly archived and unsupported. The hosted successor is not evidence that this CLI is maintained. |
+| [CodeMachine-CLI](https://github.com/moazbuilds/CodeMachine-CLI) | Orchestrates other coding agents into workflows: a Harness consumer/control plane, not another agent adapter. |
+| [smol-ai/developer](https://github.com/smol-ai/developer) | Older Python developer-agent project; last observed push April 7, 2024. No maintained headless coding integration qualified here. |
+| [Hugging Face smolagents](https://github.com/huggingface/smolagents) | Maintained agent-building library, **not** `smol-ai/smolagents`. Its [manifest](https://github.com/huggingface/smolagents/blob/main/pyproject.toml) does expose `smolagent`/`webagent` drivers; their existence is not a qualified coding-agent contract. SDK/library integration is a separate decision, not an absence-of-CLI claim. |
+| [Kimi CLI predecessor](https://github.com/MoonshotAI/kimi-cli) | Upstream announces gradual wind-down in favor of Kimi Code CLI. Qualify the successor above; do not create both by accident. |
+
+SDKs and protocols are **backend options**, not duplicate adapter identities.
+Pi SDK ([TWA-84](https://linear.app/twaldin/issue/TWA-84)), OMP SDK (TWA-85), and
+[other SDK/protocol qualification](https://linear.app/twaldin/issue/TWA-86)
+are separate from the CLI additions. This catalog does not change the current
+public API or implement the proposed backend contract
+([TWA-63](https://linear.app/twaldin/issue/TWA-63)). Cloud worker fleets, Amp orbs,
+Augment Cosmos and OpenHands Agent Canvas are orchestration surfaces, not local
+one-shot adapters; Harness does not take ownership of those control planes.
+
+## Validation and maintenance
+
+1. **Deduplicate before intake.** Search the linked Linear project and GitHub
+   issues/PRs by upstream, old/new package names and executable. Reuse an existing
+   ticket; new discoveries get one adapter ticket with official sources and
+   actual dependencies. Backlog is not authorization to start implementation.
+2. **Refresh evidence.** Record checked date, upstream release/source revision,
+   exact installed binary/package, platform and auth prerequisites. Recheck
+   renamed, archived and subscription-only entries rather than copying this
+   snapshot's flags or treating an active website as a successful smoke test.
+3. **Prove both languages.** Follow the
+   [adapter contribution guide](CONTRIBUTING.md#adding-a-new-adapter): Python and
+   TypeScript command/parser behavior, shared redacted fixtures, fixture-loader
+   coverage, matrix row and any public API changes in one PR. Keep the common
+   interface small and unsupported capabilities explicit.
+4. **Separate deterministic from provider evidence.** Use the shared conformance
+   work in TWA-67 for stdin EOF, spawn/auth failures, permissions, nonzero exits,
+   malformed/partial output, cancellation and owned-child cleanup. Verify model,
+   config and instruction isolation. Do not read unrelated sessions to fill in
+   missing telemetry or turn unknown usage into zero.
+5. **Smoke only with authorized prerequisites.** In a disposable working directory,
+   demonstrate a bounded edit/test task and relevant failure/cleanup behavior;
+   record exact versions and missing auth/platform coverage. Do not install tools,
+   create accounts, switch credentials or rewrite global configuration merely to
+   qualify a candidate. Never publish private conversation logs or credentials.
+6. **Promote only what lands.** Move an entry to shipped after registration in both
+   languages and relevant validation, linking its matrix section. Keep upstream
+   qualification separate from the fuller capability guide (TWA-88) and
+   installed-package/provider acceptance (TWA-89).

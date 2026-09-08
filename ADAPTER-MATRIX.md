@@ -4,6 +4,33 @@ Per-CLI reference for current command construction, instruction files and token/
 
 Audited against the Python and TypeScript source on 2026-09-06. Sources: `src/harness/adapters/*.py` and `ts/src/adapters/*.ts`.
 
+## Shipped versus planned
+
+The thirteen adapters below are registered in **both** implementations and have
+shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `crush`,
+`factory-droid`, `gemini`, `kilo`, `openclaude`, `opencode`, `pi`, `qwen`,
+`swe-agent`. Registration and fixtures are not proof of current upstream
+compatibility or real-provider smoke coverage.
+Python registration requires importing `harness.adapters` (also done by
+build/parse/run dispatch); `import harness` alone leaves `list_adapters()` empty.
+TypeScript's package root imports its adapter modules.
+
+[WANTED-ADAPTERS.md](WANTED-ADAPTERS.md) is the dated upstream candidate catalog:
+installation identities, headless feasibility, exclusions and deduplicated
+implementation tickets. A catalog entry or ticket is **not** a shipped adapter.
+In particular, the shipped `swe-agent` is a consumer-supplied mini-SWE wrapper
+(see [its command](#swe-agent)), not the planned native mini-SWE-agent CLI adapter.
+
+Current qualification work is tracked in
+[TWA-68](https://linear.app/twaldin/issue/TWA-68) (all shipped adapters) and
+[TWA-71](https://linear.app/twaldin/issue/TWA-71) (Pi CLI/RPC).
+The broader capability/API guide belongs to
+[TWA-88](https://linear.app/twaldin/issue/TWA-88); installed-package and
+real-provider validation belongs to
+[TWA-89](https://linear.app/twaldin/issue/TWA-89).
+Until those changes land, the source-derived commands and known language skew
+below describe the implementation, not promised upstream behavior.
+
 ## Session telemetry coverage
 
 TypeScript wires session-path and parsing hooks for 12 of 13 adapters; Python

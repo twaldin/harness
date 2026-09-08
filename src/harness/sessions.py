@@ -1594,7 +1594,6 @@ __all__ = [
     "SessionTurn",
     "SessionTurnResult",
     "SessionTurnStatus",
-    "SUPPORTED_OPENCODE_SERVER_VERSION",
     "get_session_capabilities",
     "open_session",
 ]

@@ -59,7 +59,6 @@ from harness._instructions import (
 )
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.sessions import (
-    SUPPORTED_OPENCODE_SERVER_VERSION,
     LiveSession,
     OmpSdkOptions,
     OpenCodeApprovalResponse,
@@ -114,7 +113,6 @@ __all__ = [
     "RunResult",
     "RunSpec",
     "ScrollKeys",
-    "SUPPORTED_OPENCODE_SERVER_VERSION",
     "SessionCapabilities",
     "SessionEvent",
     "SessionReference",

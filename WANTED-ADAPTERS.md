@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain twenty-five adapters, with shared fixture files:
+After adapter initialization, both registries contain twenty-six adapters, with shared fixture files:
 `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
-`gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qoder`, `qwen`, `swe-agent`.
+`gemini`, `goose`, `hermes`, `kilo`, `kimi-code`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qoder`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.

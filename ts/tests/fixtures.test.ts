@@ -34,7 +34,7 @@ const FIXTURE_KEYS = ['spec', 'expectedCommand', 'capabilities', 'sampleOutput',
 const ARTIFACT_KEYS = [...FIXTURE_KEYS, 'artifacts', 'expectedParsedWithoutArtifacts']
 const LOCK = '.harness-run.lock'
 /** Ambient state that would change a command plan or a parser result. */
-const AMBIENT_ENV = ['OPENCODE_DB', 'KILO_DB', 'KILO_CONFIG_CONTENT', 'CRUSH_DATA_DIR', 'SWE_WRAPPER', 'XDG_DATA_HOME']
+const AMBIENT_ENV = ['HOME', 'OPENCODE_DB', 'KILO_DB', 'KILO_CONFIG_CONTENT', 'CRUSH_DATA_DIR', 'SWE_WRAPPER', 'XDG_DATA_HOME']
 
 type FixtureSpec = Omit<RunSpec, 'workdir' | 'cancel' | 'onOutput'>
 
@@ -234,6 +234,9 @@ beforeAll(() => {
     savedEnv[key] = process.env[key]
     delete process.env[key]
   }
+  const home = mkdtempSync(join(tmpdir(), 'harness-fixture-home-'))
+  ROOTS.push(home)
+  process.env.HOME = home
 })
 
 afterAll(() => {

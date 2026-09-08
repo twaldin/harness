@@ -75,6 +75,33 @@
   },
   "cases": [
     {
+      "name": "caller-home-selects-db",
+      "spec": {
+        "env": {"HOME": "<root>/selected-home"}
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": ["run", "--dir", "<workdir>", "--model", "openai/gpt-5.4", "split the big function"],
+        "cwd": "<workdir>",
+        "env": {"HOME": "<root>/selected-home"},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/selected-home/.local/share/opencode/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL, model TEXT)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, directory, time_updated, model) VALUES ('latest', '<workdir>', 200, 'openai/gpt-5.4')",
+            "INSERT INTO message (id, session_id, data) VALUES ('latest-1', 'latest', '{\"tokens\":{\"input\":823,\"output\":210},\"cost\":0.0123}')"
+          ]
+        }
+      ]
+    },
+    {
       "name": "xdg-data-home-selects-db",
       "spec": {
         "env": {

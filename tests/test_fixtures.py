@@ -173,6 +173,7 @@ def case(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.Mon
     """A fixture resolved against a fresh root/workdir pair with ambient state cleared."""
     for key in AMBIENT_ENV:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "ambient-home"))
     workdir = tmp_path / "repo"
     workdir.mkdir()
     fixture = _load_fixture(request.param, tmp_path, workdir)

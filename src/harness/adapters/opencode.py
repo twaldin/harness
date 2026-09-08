@@ -135,7 +135,7 @@ def _opencode_db_path(extra_env: dict[str, str] | None = None) -> Path:
     if explicit:
         return Path(explicit).expanduser()
     data_home = env.get("XDG_DATA_HOME")
-    base = Path(data_home) if data_home else Path.home() / ".local" / "share"
+    base = Path(data_home) if data_home else Path(env.get("HOME") or Path.home()) / ".local" / "share"
     return base / "opencode" / "opencode.db"
 
 

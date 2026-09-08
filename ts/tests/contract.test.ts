@@ -58,6 +58,7 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   cline: ['--auto-approve', 'true'],
   copilot: ['--allow-all'],
   'mistral-vibe': ['--auto-approve'],
+  cursor: ['--force'],
 }
 const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MODE: 'auto' } }
 /** Native knobs `specFor`'s projected instructions need before the adapter accepts them. */
@@ -249,6 +250,7 @@ describe('getCapabilities', () => {
       cline: ['CLINE_DIR', null],
       copilot: ['COPILOT_HOME', null],
       'mistral-vibe': ['VIBE_HOME', null],
+      cursor: ['CURSOR_CONFIG_DIR', null],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)

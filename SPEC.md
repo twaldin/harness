@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (18 adapters)
+│   ├── adapters/*.py       (19 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "cline" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "copilot" | "goose"
+  harness: string                  // "claude-code" | "cline" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "copilot" | "goose" | "cursor"
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -242,7 +242,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All eighteen CLI adapters share these lifecycle capabilities.
+for sessions. All nineteen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -274,6 +274,7 @@ approval request by silently escalating.
 | cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
+| cursor | `--force` (native explicit denies and team policy still apply) |
 
 The other four adapters reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
@@ -611,6 +612,24 @@ exit code or Harness termination cause. Omitted model leaves upstream selection
 in charge and reports null. See the [adapter reference](ADAPTER-MATRIX.md#copilot)
 for setup, explicit permissions and qualification limits.
 
+### cursor
+
+`raw` preserves all complete JSON object lines in order, including assistant
+deltas, duplicate buffered flushes, tool events and terminal results. Malformed,
+truncated and non-object lines are ignored by parsing, not removed from stdout.
+The last `type: "result"` object's optional `usage.inputTokens` and
+`usage.outputTokens` supply independent nonnegative safe-integer counts (at most
+2^53 - 1); invalid or missing fields are null. Qualified Cursor 2026.09.02-c22c1a3 already subtracts
+cache reads/writes from `inputTokens`; Harness does not add them back or sum
+message events. No USD metric is reported. Older documented results without
+usage remain valid and report null counts. Process exit/termination remains
+authoritative even if a native event describes an error.
+
+The command is local print/stream-JSON with partial output, native model
+selection when omitted, explicit `--force` only for bypass, and SIGINT graceful
+teardown. No native mode/sandbox/trust/MCP approval or persist/resume/worker
+mapping is exposed. See [setup and qualification limits](ADAPTER-MATRIX.md#cursor).
+
 ---
 
 ## Adapter contract
@@ -621,7 +640,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `hermes`, `goose` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `hermes`, `goose`, `copilot` and `cursor` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -702,6 +721,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | cline | `CLINE_DIR` | unsupported |
 | goose | `GOOSE_PATH_ROOT` | unsupported |
 | copilot | `COPILOT_HOME` | unsupported |
+| cursor | `CURSOR_CONFIG_DIR` (config, not all data/credentials) | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -1298,7 +1318,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

@@ -6,6 +6,7 @@ from harness.adapters.codex import CodexAdapter
 from harness.adapters.copilot import CopilotAdapter
 from harness.adapters.continue_cli import ContinueCliAdapter
 from harness.adapters.crush import CrushAdapter
+from harness.adapters.cursor import CursorAdapter
 from harness.adapters.factory_droid import FactoryDroidAdapter
 from harness.adapters.gemini import GeminiAdapter
 from harness.adapters.goose import GooseAdapter
@@ -37,6 +38,7 @@ register("copilot", CopilotAdapter)
 register("omp", OmpAdapter)
 register("cline", ClineAdapter)
 register("goose", GooseAdapter)
+register("cursor", CursorAdapter)
 
 __all__ = [
     "AiderAdapter",
@@ -46,6 +48,7 @@ __all__ = [
     "ContinueCliAdapter",
     "CopilotAdapter",
     "CrushAdapter",
+    "CursorAdapter",
     "FactoryDroidAdapter",
     "GeminiAdapter",
     "GooseAdapter",

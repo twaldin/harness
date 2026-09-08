@@ -24,12 +24,16 @@ try {
     assert.equal(normal.exitCode, 7)
     assert.equal(normal.stdout, 'synthetic λ')
 
+    // A CI shell may inherit unrelated FIFOs. Check duplicates of our two
+    // capture pipes by device/inode, not all FIFO descriptors in the process.
     const descriptors = await run(['python3', '-c', [
-      'import json, os, stat',
+      'import json, os',
+      'owned = {(os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in (1, 2)}',
       'pipes = []',
       'for fd in range(256):',
       '    try:',
-      '        if stat.S_ISFIFO(os.fstat(fd).st_mode): pipes.append(fd)',
+      '        info = os.fstat(fd)',
+      '        if (info.st_dev, info.st_ino) in owned: pipes.append(fd)',
       '    except OSError: pass',
       'print(json.dumps(pipes))',
     ].join('\n')], { cwd })

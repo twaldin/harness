@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -45,7 +45,6 @@ class OpenClaudeAdapter(Adapter):
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
         model = resolved.model
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         args = [
             "-p",
@@ -68,13 +67,7 @@ class OpenClaudeAdapter(Adapter):
         else:
             args += ["--model", model]
 
-        return BuildCommand(
-            cmd="openclaude",
-            args=args,
-            cwd=spec.workdir,
-            env=env,
-            instructions_file=instructions_file,
-        )
+        return self.finalize_command(spec, cmd="openclaude", args=args, env=env)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw = _parse_last_json_object(outcome.stdout)

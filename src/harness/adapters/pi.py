@@ -21,7 +21,7 @@ import json
 import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -64,9 +64,8 @@ class PiAdapter(Adapter):
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = ["--mode", "json", "--no-session", "--model", resolved.model, spec.prompt]
-        return BuildCommand(cmd="pi", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        return self.finalize_command(spec, cmd="pi", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, raw = _parse_pi_events(outcome.stdout)

@@ -67,10 +67,11 @@ see `src/harness/__init__.py`, `src/harness/base.py`, `ts/src/index.ts` and
 `ts/src/base.ts`.
 
 Permission policy defaults to upstream behavior; bypass is explicit opt-in.
-Reject unsupported backends, capabilities and conflicting native options
-before command-build side effects. CLI is the only implemented backend;
-RPC/SDK selection must not silently fall back. See SPEC for exact error codes,
-capabilities, migration and the remaining subprocess lifecycle limitations.
+Builders plan commands without file writes. Reject unsupported backend, permission,
+native-option and config-override requests before preparation. External drivers
+retain `prepareCommand` ownership until process teardown and then clean up.
+CLI is the only implemented backend; RPC/SDK selection must not silently fall back.
+See SPEC for exact errors, capabilities, migration and subprocess lifecycle limits.
 
 Field naming differs (`cost_usd` ↔ `costUsd`, `tokens_in` ↔ `tokensIn`,
 `timed_out` ↔ `timedOut`). The Python CLI's `harness run --json` emits

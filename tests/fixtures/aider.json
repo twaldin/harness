@@ -4,19 +4,19 @@
     "prompt": "add type hints to utils.py",
     "workdir": "/tmp/harness-fixture-aider",
     "model": "openrouter/anthropic/claude-sonnet-4.6",
-    "instructions": "# yaml config\n",
+    "instructions": "Preserve existing behavior when adding type hints.\n",
     "timeoutSeconds": 900
   },
   "expectedCommand": {
     "cmd": "aider",
     "args": [
-      "--config",
-      "/tmp/harness-fixture-aider/.agentelo-aider.yml",
+      "--read",
+      "/tmp/harness-fixture-aider/.harness-aider-instructions.md",
       "--no-restore-chat-history",
       "--chat-history-file",
-      "/tmp/harness-fixture-aider/.agentelo-aider-chat.history.md",
+      "/dev/null",
       "--input-history-file",
-      "/tmp/harness-fixture-aider/.agentelo-aider-input.history",
+      "/dev/null",
       "--model",
       "openrouter/anthropic/claude-sonnet-4.6",
       "--message",
@@ -25,7 +25,7 @@
       "--no-analytics",
       "--no-show-model-warnings"
     ],
-    "instructionsFile": "/tmp/harness-fixture-aider/.aider.conf.yml"
+    "instructionsFile": "/tmp/harness-fixture-aider/.harness-aider-instructions.md"
   },
   "sampleOutput": {
     "exitCode": 0,

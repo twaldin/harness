@@ -6,6 +6,7 @@ snake_case here so the Python types stay idiomatic.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,8 @@ def test_claude_code_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == fx["expectedCommand"]["args"]
     assert bc.instructions_file == tmp_path / "CLAUDE.md"
-    assert (tmp_path / "CLAUDE.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_claude_code_parse_output():
@@ -223,6 +225,8 @@ def test_opencode_parse_output_no_db(tmp_path, monkeypatch):
 
 
 def test_aider_build_command(tmp_path):
+    # The shared fixture still records the pre-TWA-66 argv (agentelo config and
+    # history files); the planned argv is asserted here until Main updates it.
     fx = _load_fixture("aider")
     spec = _make_spec(fx["spec"])
     spec = RunSpec(
@@ -237,15 +241,22 @@ def test_aider_build_command(tmp_path):
     adapter = get_adapter("aider")
     bc = adapter.build_command(spec)
 
-    fixture_workdir = fx["spec"]["workdir"]
-    expected_args = [str(tmp_path) if a == fixture_workdir else a for a in fx["expectedCommand"]["args"]]
-    # Remap all fixture workdir occurrences within arg values
-    expected_args = [a.replace(fixture_workdir, str(tmp_path)) for a in fx["expectedCommand"]["args"]]
-
+    instructions_file = tmp_path / ".harness-aider-instructions.md"
     assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == expected_args
-    assert bc.instructions_file == tmp_path / ".aider.conf.yml"
-    assert (tmp_path / ".agentelo-aider.yml").read_text().strip() == "{}"
+    assert bc.args == [
+        "--read", str(instructions_file),
+        "--no-restore-chat-history",
+        "--chat-history-file", os.devnull,
+        "--input-history-file", os.devnull,
+        "--model", spec.model,
+        "--message", spec.prompt,
+        "--no-auto-commits",
+        "--no-analytics",
+        "--no-show-model-warnings",
+    ]
+    assert bc.instructions_file == instructions_file
+    assert bc.instruction_content == spec.instructions
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_aider_parse_output():
@@ -290,7 +301,8 @@ def test_swe_agent_build_command(tmp_path):
     assert fx["spec"]["instructions"].rstrip() in task
     assert fx["spec"]["prompt"] in task
     assert bc.instructions_file is None
-    assert (tmp_path / ".harness").is_dir()
+    assert bc.directories == (tmp_path / ".harness",)
+    assert list(tmp_path.iterdir()) == [wrapper]
 
 
 def test_swe_agent_parse_output(tmp_path):
@@ -340,7 +352,8 @@ def test_qwen_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == fx["expectedCommand"]["args"]
     assert bc.instructions_file == tmp_path / "QWEN.md"
-    assert (tmp_path / "QWEN.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_qwen_parse_output():
@@ -377,7 +390,8 @@ def test_continue_cli_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == fx["expectedCommand"]["args"]
     assert bc.instructions_file == tmp_path / "CONTINUE.md"
-    assert (tmp_path / "CONTINUE.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_continue_cli_parse_output():
@@ -412,7 +426,8 @@ def test_pi_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == fx["expectedCommand"]["args"]
     assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_pi_parse_output():
@@ -449,7 +464,8 @@ def test_factory_droid_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == fx["expectedCommand"]["args"]
     assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_factory_droid_parse_output():
@@ -486,7 +502,8 @@ def test_openclaude_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == fx["expectedCommand"]["args"]
     assert bc.instructions_file == tmp_path / "CLAUDE.md"
-    assert (tmp_path / "CLAUDE.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert list(tmp_path.iterdir()) == []
     assert bc.env["CLAUDE_CODE_USE_OPENAI"] == "1"
     assert bc.env["OPENAI_MODEL"] == "gpt-5.4"
 
@@ -530,7 +547,9 @@ def test_crush_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == expected_args
     assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert bc.directories == (tmp_path / ".harness" / "crush-data",)
+    assert list(tmp_path.iterdir()) == []
     assert bc.args[bc.args.index("--model") + 1] == bc.args[bc.args.index("--small-model") + 1]
 
 
@@ -579,7 +598,9 @@ def test_kilo_build_command(tmp_path):
     assert bc.cmd == fx["expectedCommand"]["cmd"]
     assert bc.args == expected_args
     assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert (tmp_path / "AGENTS.md").read_text() == spec.instructions
+    assert bc.instruction_content == spec.instructions
+    assert bc.directories == (tmp_path / ".harness" / "kilo",)
+    assert list(tmp_path.iterdir()) == []
     assert bc.env["KILO_DB"] == str(tmp_path / ".harness" / "kilo" / "kilo.db")
     cfg = json.loads(bc.env["KILO_CONFIG_CONTENT"])
     assert cfg["model"] == "openai/gpt-5.4"

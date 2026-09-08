@@ -1,8 +1,8 @@
 import { register } from '../registry.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
-import { HarnessError, validateRunSpec } from '../base.js'
+import { HarnessError, finalizeCommand, validateRunSpec } from '../base.js'
 import { homedir } from 'os'
-import { existsSync, mkdirSync, readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { resolve, join } from 'path'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
@@ -78,29 +78,27 @@ const sweAgentAdapter: Adapter = {
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model } = validateRunSpec(this, spec)
+    const validated = validateRunSpec(this, spec)
+    const { model, workdir } = validated
     const wrapper = resolveWrapper(spec.env)
 
-    const trajDir = `${spec.workdir}/.harness`
-    mkdirSync(trajDir, { recursive: true })
-    const trajFile = `${trajDir}/swe-traj.json`
+    const trajDir = join(workdir, '.harness')
+    const trajFile = join(trajDir, 'swe-traj.json')
 
     let prompt = spec.prompt
     if (spec.instructions) {
       prompt = `${spec.instructions.trimEnd()}\n\n---\n\n${prompt}`
     }
 
-    return {
+    return finalizeCommand(this, spec, validated, {
       cmd: 'python3',
-      args: [wrapper, '--model', model, '--task', prompt, '--cwd', spec.workdir, '--cost-limit', DEFAULT_COST_LIMIT_USD.toFixed(1), '--output', trajFile],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile: null,
-    }
+      args: [wrapper, '--model', model, '--task', prompt, '--cwd', workdir, '--cost-limit', DEFAULT_COST_LIMIT_USD.toFixed(1), '--output', trajFile],
+      directories: [trajDir],
+    })
   },
 
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
-    const trajFile = `${spec.workdir}/.harness/swe-traj.json`
+    const trajFile = join(resolve(spec.workdir), '.harness', 'swe-traj.json')
     const { tokensIn, tokensOut, costUsd, raw } = readSweTrajectory(trajFile)
     return { costUsd, tokensIn, tokensOut, raw }
   },

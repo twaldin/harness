@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { buildCommand, parseOutput } from '../src/registry.js'
@@ -144,6 +144,20 @@ for (const adapterName of ADAPTER_NAMES) {
       expect(result.cmd).toBe(fixture.expectedCommand.cmd)
       expect(result.args).toEqual(fixture.expectedCommand.args)
       expect(result.instructionsFile).toBe(fixture.expectedCommand.instructionsFile)
+      expect(result.cwd).toBe(spec.workdir)
+    })
+
+    test('buildCommand plans the projection without writing anything', () => {
+      const before = readdirSync(spec.workdir).sort()
+      const result = buildCommand(spec)
+      expect(readdirSync(spec.workdir).sort()).toEqual(before)
+      if (result.instructionsFile === null) {
+        expect(result.instructionContent).toBeUndefined()
+      } else {
+        expect(existsSync(result.instructionsFile)).toBe(false)
+        expect(result.instructionContent).toBe(spec.instructions)
+      }
+      for (const dir of result.directories ?? []) expect(existsSync(dir)).toBe(false)
     })
 
     test('parseOutput matches fixture', () => {

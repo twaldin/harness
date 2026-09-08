@@ -10,7 +10,7 @@ import os
 import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -48,6 +48,8 @@ class ClaudeCodeAdapter(Adapter):
     scroll_ownership = "fullscreen-aware"
     permission_bypass_args = ("--dangerously-skip-permissions",)
     native_options_kind = "claude-code"
+    config_home_env = "CLAUDE_CONFIG_DIR"
+    config_file_flag = "--settings"
     submit_keys = ("Enter",)
     install_meta = InstallMeta(
         package_manager="npm",
@@ -69,19 +71,19 @@ class ClaudeCodeAdapter(Adapter):
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = [
             "-p", spec.prompt,
             "--model", resolved.model,
             *resolved.native_args,
             "--output-format", "json",
             *resolved.permission_args,
+            *resolved.config_args,
         ]
         # -p mode does not auto-walk workdir for CLAUDE.md; inject explicitly so
         # the instructions are always visible to the model.
         if spec.instructions:
             args += ["--append-system-prompt", spec.instructions]
-        return BuildCommand(cmd="claude", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        return self.finalize_command(spec, cmd="claude", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw: dict | None = None

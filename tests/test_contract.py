@@ -243,11 +243,20 @@ def test_native_kind_is_fixed():
 # ── capabilities ────────────────────────────────────────────────────────────
 
 
+CONFIG_MAPPINGS = {
+    "claude-code": ("CLAUDE_CONFIG_DIR", "--settings"),
+    "codex": ("CODEX_HOME", None),
+    "aider": (None, "--config"),
+    "continue-cli": (None, "--config"),
+}
+
+
 @pytest.mark.parametrize("name", list_adapters())
 def test_capabilities_reflect_shipped_support(name: str):
     caps = get_capabilities(name)
     expected_policies = ("upstream", "bypass") if name in BYPASS_FLAGS else ("upstream",)
     expected_native = name if name in ("claude-code", "codex") else None
+    home_env, file_flag = CONFIG_MAPPINGS.get(name, (None, None))
     assert caps == Capabilities(
         backend="cli",
         permission_policies=expected_policies,
@@ -255,6 +264,8 @@ def test_capabilities_reflect_shipped_support(name: str):
         streaming=False,
         cancellation=False,
         sessions=False,
+        config_home_env=home_env,
+        config_file_flag=file_flag,
     )
 
 
@@ -286,6 +297,7 @@ def test_run_result_model_reports_request_or_default(workdir: Path, monkeypatch:
     monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _outcome())
     assert run(_spec("codex", workdir, model="")).model == "gpt-5.3-codex"
     assert run(_spec("codex", workdir, model="openai/o3")).model == "openai/o3"
+    assert build_command(_spec("codex", workdir, model="openai/o3")).model == "openai/o3"
 
 
 def test_harness_error_default_code():

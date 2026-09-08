@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -44,7 +44,6 @@ class FactoryDroidAdapter(Adapter):
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
         model = resolved.model
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
         # Keep strict same-model fairness by pinning spec generation to the
         # same model as execution.
@@ -59,7 +58,7 @@ class FactoryDroidAdapter(Adapter):
             model,
             spec.prompt,
         ]
-        return BuildCommand(cmd="droid", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        return self.finalize_command(spec, cmd="droid", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw = _parse_last_json_object(outcome.stdout)

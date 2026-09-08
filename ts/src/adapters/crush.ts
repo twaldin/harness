@@ -1,11 +1,10 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { createRequire } from 'module'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync } from 'fs'
 import { basename, join, resolve } from 'path'
 import { homedir } from 'os'
 
@@ -47,9 +46,11 @@ function openDb(dbPath: string): SqliteDriver | null {
   }
 }
 
-function crushDataDir(workdir: string, extraEnv: Record<string, string> | undefined): string {
+/** Caller-selected data dir (spec env, then inherited env) is upstream state; otherwise the harness default under the workdir. */
+function crushDataDir(workdir: string, extraEnv: Record<string, string> | undefined): { dir: string; harnessOwned: boolean } {
   const envPath = (extraEnv ?? {})['CRUSH_DATA_DIR'] ?? process.env['CRUSH_DATA_DIR']
-  return envPath ? envPath.replace(/^~/, homedir()) : join(workdir, '.harness', 'crush-data')
+  if (envPath) return { dir: envPath.replace(/^~/, homedir()), harnessOwned: false }
+  return { dir: join(workdir, '.harness', 'crush-data'), harnessOwned: true }
 }
 
 function readCrushSessionTotalsByDbPath(
@@ -87,7 +88,7 @@ function readCrushSessionTotals(
   workdir: string,
   extraEnv: Record<string, string> | undefined,
 ): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
-  return readCrushSessionTotalsByDbPath(join(crushDataDir(workdir, extraEnv), 'crush.db'))
+  return readCrushSessionTotalsByDbPath(join(crushDataDir(workdir, extraEnv).dir, 'crush.db'))
 }
 
 const crushAdapter: Adapter = {
@@ -96,27 +97,24 @@ const crushAdapter: Adapter = {
   defaultModel: 'gpt-5.4',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-    const dataDir = crushDataDir(spec.workdir, spec.env)
-    mkdirSync(dataDir, { recursive: true })
-
-    return {
+    const validated = validateRunSpec(this, spec)
+    const { model, workdir } = validated
+    const data = crushDataDir(workdir, spec.env)
+    return finalizeCommand(this, spec, validated, {
       cmd: 'crush',
-      args: ['run', '--data-dir', dataDir, '--model', model, '--small-model', model, spec.prompt],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile,
-    }
+      args: ['run', '--data-dir', data.dir, '--model', model, '--small-model', model, spec.prompt],
+      // Caller-selected data dirs are upstream state; only the harness default is created at prepare time.
+      directories: data.harnessOwned ? [data.dir] : [],
+    })
   },
 
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
-    const { tokensIn, tokensOut, costUsd } = readCrushSessionTotals(spec.workdir, spec.env)
+    const { tokensIn, tokensOut, costUsd } = readCrushSessionTotals(resolve(spec.workdir), spec.env)
     return { costUsd, tokensIn, tokensOut, raw: null }
   },
 
   sessionLogPath(workdir: string, _since?: number): string | null {
-    const dbPath = join(crushDataDir(workdir, undefined), 'crush.db')
+    const dbPath = join(crushDataDir(workdir, undefined).dir, 'crush.db')
     if (!existsSync(dbPath)) return null
     let wd = workdir
     try { wd = basename(resolve(workdir)) } catch { wd = basename(workdir) }

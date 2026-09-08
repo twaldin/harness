@@ -1,7 +1,6 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { basename, join } from 'path'
@@ -80,10 +79,9 @@ const factoryDroidAdapter: Adapter = {
   permissionBypassArgs: ['--skip-permissions-unsafe'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model, permissionArgs } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-
-    return {
+    const validated = validateRunSpec(this, spec)
+    const { model, permissionArgs } = validated
+    return finalizeCommand(this, spec, validated, {
       cmd: 'droid',
       args: [
         'exec',
@@ -96,10 +94,7 @@ const factoryDroidAdapter: Adapter = {
         model,
         spec.prompt,
       ],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile,
-    }
+    })
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {

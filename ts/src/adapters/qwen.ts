@@ -1,7 +1,6 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -51,15 +50,12 @@ const qwenAdapter: Adapter = {
   permissionBypassArgs: ['-y'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model, permissionArgs } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-    return {
+    const validated = validateRunSpec(this, spec)
+    const { model, permissionArgs } = validated
+    return finalizeCommand(this, spec, validated, {
       cmd: 'qwen',
       args: ['-p', spec.prompt, ...permissionArgs, '-m', model, '--output-format', 'json'],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile,
-    }
+    })
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {

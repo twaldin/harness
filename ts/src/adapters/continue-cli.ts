@@ -1,51 +1,11 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { validateRunSpec } from '../base.js'
+import { HarnessError, finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { basename, join } from 'path'
 import { homedir } from 'os'
-
-/**
- * continue-cli adapter — invokes the `cn` CLI (Continue) in print mode.
- *
- * When OPENAI-style env vars are present, this adapter writes a minimal
- * Continue config YAML and runs `cn -p --config <file> --format json ...` so
- * bare model IDs like `gpt-5.4` work against an OpenAI-compatible endpoint.
- */
-function writeContinueConfig(
-  workdir: string,
-  model: string,
-  apiKey: string,
-  apiBase: string | undefined,
-  instructions: string | undefined,
-): string {
-  const continueDir = join(workdir, '.harness', 'continue')
-  mkdirSync(continueDir, { recursive: true })
-  const configPath = join(continueDir, 'config.yaml')
-  const lines: string[] = [
-    'name: Harness Continue',
-    'version: 1.0.0',
-    'schema: v1',
-    'models:',
-    '  - name: harness-model',
-    `    model: ${model}`,
-    '    provider: openai',
-    `    apiKey: ${apiKey}`,
-  ]
-  if (apiBase) {
-    lines.push(`    apiBase: ${apiBase}`)
-  }
-  lines.push('    roles:', '      - chat', '      - edit', '      - apply')
-  if (instructions) {
-    const escaped = instructions.replace(/\s+$/, '').replace(/\n/g, '\\n')
-    lines.push('rules:', `  - '${escaped}'`)
-  }
-  writeFileSync(configPath, lines.join('\n') + '\n', 'utf-8')
-  return configPath
-}
 
 function continueSessionPath(workdir: string): string | null {
   const envDir = process.env['CONTINUE_SESSION_DIR']
@@ -91,35 +51,52 @@ function numberOrNull(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+/**
+ * continue-cli adapter — invokes the `cn` CLI (Continue) in print mode.
+ *
+ * With `spec.configFile` the run delegates model selection to that
+ * caller-owned Continue config (`cn -p --config <file> --format json`);
+ * Continue's `--model` is a Hub slug, so an explicit model cannot be honored
+ * alongside it. Without a config file the default `--model` branch is used;
+ * OpenAI-compatible endpoints need a caller-selected config file because the
+ * harness never serializes credentials into generated configs.
+ */
 const continueCliAdapter: Adapter = {
   name: 'continue-cli',
   instructionsFilename: 'CONTINUE.md',
   defaultModel: 'claude-sonnet-4-6',
+  configFileFlag: '--config',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
+    const validated = validateRunSpec(this, spec)
+    const { model, configArgs, configFile } = validated
 
-    const openaiKey = (spec.env ?? {})['OPENAI_API_KEY']
-    const openaiBase = (spec.env ?? {})['OPENAI_BASE_URL']
-    if (openaiKey || openaiBase) {
-      const configPath = writeContinueConfig(spec.workdir, model, openaiKey ?? 'dummy', openaiBase, spec.instructions)
-      return {
-        cmd: 'cn',
-        args: ['-p', '--config', configPath, '--format', 'json', spec.prompt],
-        cwd: spec.workdir,
-        env: {},
-        instructionsFile,
+    if (configFile !== null) {
+      if ((spec.model ?? '').trim() !== '') {
+        throw new HarnessError(
+          'continue-cli configFile selects the model itself (cn --model is a Hub slug); omit spec.model or drop configFile',
+          'unsupported-capability',
+        )
       }
+      return finalizeCommand(this, spec, validated, {
+        cmd: 'cn',
+        args: ['-p', ...configArgs, '--format', 'json', spec.prompt],
+        model: null,
+      })
     }
 
-    return {
+    const env = spec.env ?? {}
+    if (env['OPENAI_API_KEY'] !== undefined || env['OPENAI_BASE_URL'] !== undefined) {
+      throw new HarnessError(
+        'continue-cli OpenAI-compatible endpoints need a caller-selected configFile; the harness no longer generates Continue configs from OPENAI_API_KEY/OPENAI_BASE_URL',
+        'unsupported-capability',
+      )
+    }
+
+    return finalizeCommand(this, spec, validated, {
       cmd: 'cn',
       args: ['-p', spec.prompt, '--model', model, '--json'],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile,
-    }
+    })
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {

@@ -84,20 +84,37 @@ const [r1, r2] = await Promise.all([
 
 ### `buildCommand(spec: RunSpec): BuildCommand`
 
-Builds the command **without executing**. Writes the instructions file to `workdir` as a side effect. Use this when you manage subprocess execution yourself (e.g. flt's tmux integration).
+Plans the command **without executing or writing files**. External host drivers
+must prepare the command and retain its ownership handle until execution stops.
 
 ```typescript
-import { buildCommand } from '@twaldin/harness-ts'
+import { buildCommand, prepareCommand, cleanupCommand, runSubprocessAsync } from '@twaldin/harness-ts'
 
-const { cmd, args, cwd, env, instructionsFile } = buildCommand({
+const command = buildCommand({
   harness: 'claude-code',
   model: 'sonnet',
   prompt: 'Fix the failing tests.',
   workdir: '/tmp/repo',
   instructions: 'You are a careful engineer.',
 })
-// cmd = 'claude', args = ['-p', 'Fix the failing tests.', '--model', 'sonnet', ...]
+const prepared = prepareCommand(command)
+try {
+  const { cmd, args, cwd, env } = prepared.command
+  await runSubprocessAsync([cmd, ...args], { cwd, extraEnv: env })
+} finally {
+  cleanupCommand(prepared)
+}
 ```
+
+`run` and `runAsync` prepare and clean up automatically. Same-workdir overlap,
+unsafe symlinks, or changed projected files raise `instruction-conflict`.
+Cleanup preserves changed user content and the original backup for manual recovery;
+it never takes over an existing lease. Use distinct workdirs for concurrent runs.
+
+`executable` selects a binary name or absolute executable path. `configHome`
+and `configFile` select supported absolute upstream paths without reading/copying
+configuration or credentials. Unsupported mappings reject; see
+[SPEC](../SPEC.md#supported-configuration-overrides) for support and migration.
 
 ### `parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutput`
 
@@ -132,15 +149,18 @@ a mismatched native option kind is an error, not a dropped option.
 interface RunSpec {
   harness: string            // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "crush" | "kilo"
   prompt: string
-  workdir: string            // absolute path; cwd for the subprocess
+  workdir: string            // normalized absolute cwd; must exist when prepared
   model?: string             // canonical or adapter-specific (normalized per harness; see ADAPTER-MATRIX.md)
-  instructions?: string      // written to per-harness file in workdir
+  instructions?: string      // temporarily projected while the prepared command is owned
   timeoutSeconds?: number    // default 1800
   env?: Record<string, string>
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
   permissionPolicy?: 'upstream' | 'bypass' // default upstream
   nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions
+  executable?: string       // bare name or absolute path
+  configHome?: string       // caller-selected absolute upstream state home
+  configFile?: string       // caller-selected absolute upstream config file
 }
 
 interface RunResult {

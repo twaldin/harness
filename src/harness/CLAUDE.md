@@ -35,9 +35,11 @@ class MyCLIAdapter(Adapter):
 ```
 
 Wire it in by adding an `import` and a `register("name", AdapterCls)` call to
-`src/harness/adapters/__init__.py`. `build_command` MAY write instructions/config
-files but MUST NOT spawn a subprocess. `parse_output` MAY read post-exit
-artifacts but MUST NOT block on long I/O (sqlite reads use `timeout=5.0`).
+`src/harness/adapters/__init__.py`. `build_command` plans argv/env/cwd and optional
+instruction projection without filesystem writes or subprocesses. Execution uses
+`prepare_command` / `cleanup_command`; external drivers retain that handle until
+their process tree has stopped. `parse_output` MAY read post-exit artifacts but
+MUST NOT block on long I/O (sqlite reads use `timeout=5.0`).
 
 ## Output parsing strategies
 

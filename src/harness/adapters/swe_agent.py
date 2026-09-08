@@ -31,6 +31,7 @@ from harness.base import (
     ReadyState,
     RunSpec,
     SessionTelemetry,
+    absolute_workdir,
 )
 from harness.pricing import derive_cost
 from harness.util import last_non_empty_join
@@ -63,9 +64,8 @@ class SweAgentAdapter(Adapter):
         resolved = self.resolve_run_spec(spec)
         wrapper = _resolve_wrapper(spec.env)
 
-        workdir = Path(spec.workdir)
+        workdir = absolute_workdir(spec.workdir)
         traj_dir = workdir / ".harness"
-        traj_dir.mkdir(parents=True, exist_ok=True)
         traj_file = traj_dir / "swe-traj.json"
 
         prompt = spec.prompt
@@ -80,7 +80,7 @@ class SweAgentAdapter(Adapter):
             "--cost-limit", str(self.DEFAULT_COST_LIMIT_USD),
             "--output", str(traj_file),
         ]
-        return BuildCommand(cmd="python3", args=args, cwd=workdir, env={}, instructions_file=None)
+        return self.finalize_command(spec, cmd="python3", args=args, directories=(traj_dir,))
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         traj_file = Path(spec.workdir) / ".harness" / "swe-traj.json"

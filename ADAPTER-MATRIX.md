@@ -83,6 +83,14 @@ Only Claude Code and Codex currently have typed native options:
 Sandbox plus bypass is a conflict, not a precedence rule. See
 [SPEC permission migration](SPEC.md#permission-policy-and-migration).
 
+Configuration selection is also explicit: `executable` selects the binary;
+`configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code and `CODEX_HOME` for
+Codex. `configFile` maps to Claude Code `--settings`, Aider `--config`, or
+Continue `--config`. Other adapters reject these typed overrides. Existing
+caller-selected env remains inherited; no configuration or credential is copied.
+See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
+official sources, and limits.
+
 ---
 
 ## Cost + token reporting at a glance
@@ -122,7 +130,7 @@ Headless cost is null for codex, aider and qwen. Gemini estimates cost from toke
   - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
   - `crush`: `--model == --small-model`
-  - `kilo`: `model == small_model` via `KILO_CONFIG_CONTENT`
+  - `kilo`: default `model == small_model` via `KILO_CONFIG_CONTENT`; an existing caller-selected config is preserved
   - `openclaude`: no `--fallback-model`
   - `factory-droid`: `--model == --spec-model`
 
@@ -254,13 +262,13 @@ The parameter is `%<resolved-workdir-basename>%`. No matching message rows retur
 ## aider
 
 - **CLI**: `aider`
-- **Instructions file**: `.aider.conf.yml` (treated as YAML config, not free-form prompt — consumers who want system instructions should fold into `prompt`)
+- **Instructions file**: `.harness-aider-instructions.md`, supplied as text through `--read`
 - **Default model**: `openrouter/anthropic/claude-sonnet-4.6`
-- **Command**: `aider --config <workdir>/.agentelo-aider.yml --no-restore-chat-history --chat-history-file <workdir>/.agentelo-aider-chat.history.md --input-history-file <workdir>/.agentelo-aider-input.history --model <model> --message <prompt> --no-auto-commits --no-analytics --no-show-model-warnings`
-- **Side effect**: writes `<workdir>/.agentelo-aider.yml` with content `{}\n` before exec (empty config → pure CLI flags)
+- **Command**: `aider --no-restore-chat-history --chat-history-file <null-device> --input-history-file <null-device> --model <model> --message <prompt> --no-auto-commits --no-analytics --no-show-model-warnings`; adds `--read <instructions-file>` when instructions are supplied
+- **Config**: uses upstream configuration by default; explicit `configFile` adds `--config <path>`. No empty `.agentelo-aider.yml` is generated.
 - **Token source**: regex on combined stdout+stderr: `/Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i` — numeric `k` suffix → ×1000
 - **Cost source**: not reported by aider — always `null`
-- **Env**: for OpenAI models, consumer sets `--openai-api-base` + `--openai-api-key` (via agentelo's OAuth proxy). Harness doesn't own that shim.
+- **Env**: caller-selected provider authentication is inherited; Harness does not select a proxy or inject a credential
 
 ### Example log line
 ```
@@ -276,7 +284,7 @@ Tokens: 12.3k sent, 2,145 received
 - **Default model**: `gpt-5.4` (normalized to `openai/gpt-5.4` for wrapper invocation)
 - **Wrapper resolution**: `env.SWE_WRAPPER` → `~/agentelo/bin/run-mini-swe.py` → error
 - **Command**: `python3 <wrapper> --model <model> --task <combined-prompt> --cwd <workdir> --cost-limit 10.0 --output <workdir>/.harness/swe-traj.json`
-- **Side effect**: creates `<workdir>/.harness/` before exec
+- **Preparation**: creates `<workdir>/.harness/` after acquiring the workdir lease; building only plans the directory
 - **Token source**: post-exit read of `swe-traj.json` → sum `messages[*].extra.response.usage.{prompt_tokens|input_tokens, completion_tokens|output_tokens}`
 - **Cost source**: `swe-traj.json` → `info.model_stats.instance_cost`
 - **Env**: may set `SWE_WRAPPER` to override default wrapper path
@@ -321,6 +329,8 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `[`
 - **Instructions file**: `CONTINUE.md`
 - **Default model**: `claude-sonnet-4-6`
 - **Command**: `cn -p <prompt> --model <model> --json`
+- **Explicit config**: `configFile` uses `cn -p --config <path> --format json <prompt>`. Omit `model` for this path: the file selects it; an explicit model rejects rather than being silently discarded. Current Continue `--model` is a Hub slug, so the legacy default branch remains subject to upstream qualification.
+- **Credential safety**: no generated YAML. The former explicit OpenAI-compatible env branch now requires a caller-selected `configFile`.
 - **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
 - **Cost source**: JSON envelope → `total_cost_usd`
 - **Env**: `CONTINUE_API_KEY` (consumer sets; harness does not require or inject it)
@@ -393,7 +403,7 @@ LIMIT 1
   - `KILO_CONFIG_CONTENT={"model":"<provider/model>","small_model":"<provider/model>","default_agent":"build"}`
 - **Token source**: sqlite `message.data.tokens.{input,output}` summed over assistant rows for latest matching session
 - **Cost source**: sqlite `message.data.cost` summed over assistant rows for latest matching session
-- **Fairness**: `model == small_model`, with `default_agent=build` to avoid planner-mode model drift
+- **Model default**: generated `KILO_CONFIG_CONTENT` pins `model == small_model` and `default_agent=build` only when that variable is absent from both inherited and explicit env; selected configuration is not rewritten
 
 ### Post-exit DB query
 
@@ -414,14 +424,21 @@ AND json_extract(data, '$.role') = 'assistant'
 
 ---
 
-## Cross-cutting: write_instructions helper
+## Cross-cutting: instruction ownership
 
-All adapters except swe-agent call a shared `writeInstructions(workdir, filename, content)`:
-- If `content` is null/undefined → no-op, returns null
-- Else: create workdir if missing, write `<workdir>/<filename>` (overwrite), return the path
-- Used as a side effect during `buildCommand()` so the file exists before the CLI reads it
+Builders return a side-effect-free plan. `run` / `runAsync` acquire a workdir
+lease, prepare the instruction file, and restore it after execution and parsing.
+External drivers call `prepareCommand` and retain its handle until their process
+tree stops, then call `cleanupCommand` (snake_case in Python).
 
-swe-agent doesn't write a file; it prepends instructions to prompt.
+Same-workdir overlap and unsafe symlinks reject. Cleanup restores only unchanged,
+still-owned projections; edits or replacements produce `instruction-conflict`
+and retain the current file plus original backup for manual recovery.
+The explicit `projectInstructions` helper uses the same protocol.
+`writeInstructions` now exclusively creates a caller-owned file and never
+overwrites existing content. See [SPEC](SPEC.md#instruction-preparation-and-restoration).
+
+swe-agent folds instructions into its prompt; it still acquires the workdir lease.
 
 ---
 

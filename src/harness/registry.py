@@ -65,6 +65,8 @@ def get_capabilities(name: str, backend: Backend = "cli") -> Capabilities:
         streaming=False,
         cancellation=False,
         sessions=False,
+        config_home_env=adapter_cls.config_home_env,
+        config_file_flag=adapter_cls.config_file_flag,
     )
 
 
@@ -80,8 +82,10 @@ def _validated_adapter(spec: RunSpec) -> Adapter:
 
 
 def build_command(spec: RunSpec) -> BuildCommand:
-    """Build the subprocess command without executing it."""
-    return _validated_adapter(spec).build_command(spec)
+    """Build the subprocess command without executing it. Pure: nothing is
+    written; `prepare_command` applies the plan."""
+    adapter = _validated_adapter(spec)
+    return adapter._finalized(spec, adapter.build_command(spec))
 
 
 def parse_output(spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:

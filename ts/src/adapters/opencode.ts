@@ -1,18 +1,20 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
 import { homedir } from 'os'
 import { existsSync } from 'fs'
-import { resolve, basename } from 'path'
+import { basename, join, resolve } from 'path'
 import { createRequire } from 'module'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 
-function openCodeDbPath(): string {
-  const envPath = process.env['OPENCODE_DB']
-  if (envPath) return envPath.replace(/^~/, homedir())
-  return `${homedir()}/.local/share/opencode/opencode.db`
+/** DB location as the CLI run would see it: caller env first, then inherited env, then the platform default. */
+function openCodeDbPath(extraEnv: Record<string, string> | undefined): string {
+  const env = { ...process.env, ...(extraEnv ?? {}) }
+  const explicit = env['OPENCODE_DB']
+  if (explicit) return explicit.replace(/^~/, homedir())
+  const dataHome = env['XDG_DATA_HOME'] || join(env['HOME'] || homedir(), '.local', 'share')
+  return join(dataHome, 'opencode', 'opencode.db')
 }
 
 // Opencode writes token/cost totals to a sqlite DB post-exit. Runtime detection:
@@ -61,7 +63,7 @@ function openDb(dbPath: string): SqliteDriver | null {
 
 function readOpenCodeSessionTotals(
   workdir: string,
-  dbPath = openCodeDbPath(),
+  dbPath: string,
 ): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
   if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
@@ -117,19 +119,16 @@ const openCodeAdapter: Adapter = {
   scrollOwnership: 'app',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-    return {
+    const validated = validateRunSpec(this, spec)
+    const { model, workdir } = validated
+    return finalizeCommand(this, spec, validated, {
       cmd: 'opencode',
-      args: ['run', '--dir', spec.workdir, '--model', model, spec.prompt],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile,
-    }
+      args: ['run', '--dir', workdir, '--model', model, spec.prompt],
+    })
   },
 
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
-    const { tokensIn, tokensOut, costUsd } = readOpenCodeSessionTotals(spec.workdir)
+    const { tokensIn, tokensOut, costUsd } = readOpenCodeSessionTotals(spec.workdir, openCodeDbPath(spec.env))
     return { costUsd, tokensIn, tokensOut, raw: null }
   },
 }
@@ -173,7 +172,7 @@ openCodeAdapter.detectStatus = function (pane: string) {
 // opencode telemetry already lives in SQLite; re-use the existing reader.
 openCodeAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
   // Path is shared SQLite — return DB path so consumer knows where to look.
-  const dbPath = process.env['OPENCODE_DB']?.replace(/^~/, homedir()) ?? `${homedir()}/.local/share/opencode/opencode.db`
+  const dbPath = openCodeDbPath(undefined)
   return existsSync(dbPath) ? `${dbPath}#session(${basename(resolve(workdir))})` : null
 }
 

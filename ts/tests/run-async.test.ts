@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { runAsync } from '../src/registry.js'
 import { runSubprocessAsync } from '../src/subproc.js'
@@ -56,6 +56,7 @@ describe('runAsync (integration via fake CLI)', () => {
     const result = await runAsync(spec)
 
     expect(result.harness).toBe('claude-code')
+    expect(result.model).toBe('sonnet')
     expect(result.exitCode).toBe(0)
     expect(result.timedOut).toBe(false)
     expect(result.stdout).toBe(sample.stdout)
@@ -64,6 +65,9 @@ describe('runAsync (integration via fake CLI)', () => {
     }
     expect(result.tokensIn).toBe(expected.tokensIn)
     expect(result.tokensOut).toBe(expected.tokensOut)
+    // The projected CLAUDE.md and the workdir lease are gone once the run returns.
+    expect(existsSync(join(TMP_DIR, 'CLAUDE.md'))).toBe(false)
+    expect(existsSync(join(TMP_DIR, '.harness-run.lock'))).toBe(false)
   })
 })
 

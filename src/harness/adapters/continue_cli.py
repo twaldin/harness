@@ -1,8 +1,11 @@
 """continue-cli adapter — invokes the `cn` CLI (Continue) in print mode.
 
-When OPENAI-style env vars are present, this adapter writes a minimal Continue
-config YAML and runs `cn -p --config <file> --format json ...` so bare model
-IDs like `gpt-5.4` work against an OpenAI-compatible endpoint.
+Default: `cn -p <prompt> --model <model> --json`. With `RunSpec.config_file`
+the caller-selected Continue config drives model/provider selection:
+`cn -p --config <file> --format json <prompt>` (no `--model`, since Continue's
+`--model` expects a Hub slug rather than a native model id, an explicit model
+is rejected on this path). OPENAI_API_KEY/OPENAI_BASE_URL in `spec.env`
+require such a config file; harness no longer generates one.
 """
 from __future__ import annotations
 
@@ -11,11 +14,12 @@ import os
 import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
     BuildCommand,
+    HarnessError,
     InstallMeta,
     ParsedOutput,
     ReadyState,
@@ -37,6 +41,7 @@ class ContinueCliAdapter(Adapter):
     name = "continue-cli"
     instructions_filename = "CONTINUE.md"
     submit_keys = ("Enter",)
+    config_file_flag = "--config"
     install_meta = InstallMeta(
         package_manager="npm",
         install_command=("npm", "install", "-g", "@continuedev/cli"),
@@ -46,20 +51,32 @@ class ContinueCliAdapter(Adapter):
 
     DEFAULT_MODEL = "claude-sonnet-4-6"
 
+    def reported_model(self, spec: RunSpec) -> str | None:
+        # With a caller-selected config the model comes from that file.
+        return None if spec.config_file is not None else super().reported_model(spec)
+
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
-        model = resolved.model
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
-        openai_key = spec.env.get("OPENAI_API_KEY")
-        openai_base = spec.env.get("OPENAI_BASE_URL")
-        if openai_key or openai_base:
-            config_path = _write_continue_config(Path(spec.workdir), model, openai_key or "dummy", openai_base, spec.instructions)
-            args = ["-p", "--config", str(config_path), "--format", "json", spec.prompt]
-            return BuildCommand(cmd="cn", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        if spec.config_file is not None:
+            if spec.model:
+                raise HarnessError(
+                    "continue-cli cannot honor both config_file and an explicit model (cn --model expects a Continue Hub "
+                    "slug); select the model inside the config file and leave model unset",
+                    code="unsupported-capability",
+                )
+            args = ["-p", *resolved.config_args, "--format", "json", spec.prompt]
+            return self.finalize_command(spec, cmd="cn", args=args)
 
-        args = ["-p", spec.prompt, "--model", model, "--json"]
-        return BuildCommand(cmd="cn", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        if "OPENAI_API_KEY" in spec.env or "OPENAI_BASE_URL" in spec.env:
+            raise HarnessError(
+                "continue-cli with OPENAI_API_KEY/OPENAI_BASE_URL in env requires a caller-selected config_file; harness "
+                "does not generate Continue config",
+                code="unsupported-capability",
+            )
+
+        args = ["-p", spec.prompt, "--model", resolved.model, "--json"]
+        return self.finalize_command(spec, cmd="cn", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         raw: dict | None = None
@@ -150,32 +167,3 @@ class ContinueCliAdapter(Adapter):
         if _ASK_ANYTHING_RE.search(last10):
             return "idle"
         return "unknown"
-
-
-def _write_continue_config(workdir: Path, model: str, api_key: str, api_base: str | None, instructions: str | None) -> Path:
-    continue_dir = workdir / ".harness" / "continue"
-    continue_dir.mkdir(parents=True, exist_ok=True)
-    config_path = continue_dir / "config.yaml"
-    lines = [
-        "name: Harness Continue",
-        "version: 1.0.0",
-        "schema: v1",
-        "models:",
-        "  - name: harness-model",
-        f"    model: {model}",
-        "    provider: openai",
-        f"    apiKey: {api_key}",
-    ]
-    if api_base:
-        lines.append(f"    apiBase: {api_base}")
-    lines += [
-        "    roles:",
-        "      - chat",
-        "      - edit",
-        "      - apply",
-    ]
-    if instructions:
-        escaped = instructions.rstrip().replace("\n", "\\n")
-        lines += ["rules:", f"  - '{escaped}'"]
-    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return config_path

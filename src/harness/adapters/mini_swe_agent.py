@@ -85,7 +85,7 @@ class MiniSweAgentAdapter(Adapter):
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         traj_file = _trajectory_file(absolute_workdir(spec.workdir))
-        if not _saved_marker_present(outcome.stdout, traj_file):
+        if outcome.exit_code != 0 or outcome.timed_out or not _saved_marker_present(outcome.stdout, traj_file):
             return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
         traj = _read_trajectory(traj_file)
         if traj is None:
@@ -101,8 +101,8 @@ def _trajectory_file(workdir: Path) -> Path:
 def _saved_marker_present(stdout: str, traj_file: Path) -> bool:
     """Upstream prints `Saved trajectory to '<path>'` through Rich, which wraps
     long paths across lines; compare after stripping ANSI and line breaks."""
-    flat = strip_ansi(stdout).replace("\r", "").replace("\n", "")
-    return f"Saved trajectory to '{traj_file}'" in flat
+    flat = strip_ansi(stdout).replace("\r", "").replace("\n", "").rstrip()
+    return flat.endswith(f"Saved trajectory to '{traj_file}'")
 
 
 def _read_trajectory(traj_file: Path) -> dict | None:

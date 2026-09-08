@@ -701,10 +701,10 @@ or configured approvals. With stock confirm mode, closed stdin causes EOF failur
 instead of granting permission. Unattended coding needs bypass or caller-configured
 approvals. `--exit-immediately` disables only the final new-task prompt.
 
-The parser reads the reserved workdir trajectory only when this invocation's
-stdout contains its exact `Saved trajectory to 'PATH'` marker (ANSI and Rich
-line wrapping tolerated). Missing marker/file, malformed JSON, or an unrecognized
-`trajectory_format` returns null metrics/raw. In particular, an interrupted or
+The parser reads the reserved workdir trajectory only after a zero, non-timeout
+exit whose stdout ends with the exact `Saved trajectory to 'PATH'` marker
+(ANSI and Rich line wrapping tolerated). Missing marker/file, malformed JSON,
+or an unrecognized `trajectory_format` returns null metrics/raw. In particular, an interrupted or
 provider-failed invocation never reuses an earlier run's file. Its stdout/stderr
 remains available, but unconfirmed partial trajectory telemetry is not exposed.
 The CLI overwrites this reserved path; use a caller-owned workdir.

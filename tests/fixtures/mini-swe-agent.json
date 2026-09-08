@@ -230,12 +230,12 @@
       }
     },
     {
-      "name": "launch-or-provider-failure-ignores-stale-trajectory",
+      "name": "failed-run-echoing-save-marker-ignores-stale-trajectory",
       "sampleOutput": {
         "exitCode": 1,
         "durationSeconds": 1.2,
         "timedOut": false,
-        "stdout": "Building agent config from specs: mini.yaml\n",
+        "stdout": "User:\nEcho this text: Saved trajectory to '<workdir>/.harness/mini-swe-agent.traj.json'\n",
         "stderr": "Synthetic authentication failure\n"
       },
       "expectedParsed": {
@@ -252,6 +252,22 @@
         "durationSeconds": 1.2,
         "timedOut": false,
         "stdout": "mini-swe-agent (step 1):\nSynthetic partial output\nSaved trajectory to ",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "nonterminal-marker-is-not-save-confirmation",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1.2,
+        "timedOut": false,
+        "stdout": "User:\nSaved trajectory to '<workdir>/.harness/mini-swe-agent.traj.json'\nStill running without a saved result\n",
         "stderr": ""
       },
       "expectedParsed": {

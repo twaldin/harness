@@ -40,11 +40,11 @@ function isJsonObject(value: unknown): value is JsonObject {
  * Whether stdout carries upstream's completion line `Saved trajectory to
  * '<path>'`, printed only after the trajectory file is completely written.
  * Rich wraps long lines, so ANSI is stripped and every CR/LF removed before
- * the substring test. Without the marker the artifact may be stale or
+ * the terminal-marker check. Without the marker the artifact may be stale or
  * partial (interrupted run, provider exception) and is never read.
  */
 function hasSavedMarker(stdout: string, trajFile: string): boolean {
-  return stripAnsi(stdout).replace(/[\r\n]/g, '').includes(`Saved trajectory to '${trajFile}'`)
+  return stripAnsi(stdout).replace(/[\r\n]/g, '').trimEnd().endsWith(`Saved trajectory to '${trajFile}'`)
 }
 
 /** Strict UTF-8 JSON read: missing, undecodable or malformed content is not an artifact. */
@@ -115,7 +115,7 @@ const miniSweAgentAdapter: Adapter = {
 
   parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
     const trajFile = join(resolve(spec.workdir), TRAJECTORY_DIR, TRAJECTORY_FILE)
-    const trajectory = hasSavedMarker(outcome.stdout, trajFile) ? readTrajectory(trajFile) : null
+    const trajectory = outcome.exitCode === 0 && !outcome.timedOut && hasSavedMarker(outcome.stdout, trajFile) ? readTrajectory(trajFile) : null
     if (trajectory === null) return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
     // `info.exit_status` in `raw` is the semantic outcome (Submitted,
     // LimitsExceeded, ...); a zero process exit does not imply Submitted.

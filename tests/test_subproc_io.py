@@ -9,6 +9,7 @@ rather than timing.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import sys
 import threading
 import time
@@ -100,6 +101,38 @@ async def test_sync_callback_in_run_async_executes_on_the_loop_thread(tmp_path: 
     )
     assert outcome.callback_error is None
     assert threads == {threading.get_ident()}
+
+
+@pytest.mark.parametrize("reject", [False, True])
+async def test_completed_callback_is_collected_before_next_delivery(monkeypatch, tmp_path: Path, reject: bool):
+    schedule = asyncio.run_coroutine_threadsafe
+    seen: list[tuple[str, str]] = []
+
+    def complete_before_return(coro, loop):
+        future = schedule(coro, loop)
+        # Force completion before the reader can observe the returned future.
+        concurrent.futures.wait((future,), timeout=5)
+        assert future.done()
+        return future
+
+    def on_output(chunk: str, stream: str) -> None:
+        seen.append((stream, chunk))
+        if reject:
+            raise ValueError("callback rejected")
+
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", complete_before_return)
+    outcome = await run_subprocess_async(
+        ["sh", "-c", "echo out; echo err >&2"], cwd=tmp_path,
+        timeout_seconds=5, max_output_bytes=0, on_output=on_output,
+    )
+    assert (outcome.stdout, outcome.stderr) == ("", "")
+    assert (outcome.stdout_truncated, outcome.stderr_truncated) == (True, True)
+    if reject:
+        assert outcome.callback_error is not None
+        assert len(seen) == 1  # Failure disables further delivery, not pipe draining.
+    else:
+        assert (outcome.termination, outcome.exit_code, outcome.callback_error) == ("exited", 0, None)
+        assert sorted(seen) == [("stderr", "err\n"), ("stdout", "out\n")]
 
 
 async def test_async_backpressure_serializes_callbacks_and_pauses_inactivity(tmp_path: Path):

@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (19 adapters)
+│   ├── adapters/*.py       (20 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -249,7 +249,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All nineteen CLI adapters share these lifecycle capabilities.
+for sessions. All twenty CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -281,6 +281,7 @@ approval request by silently escalating.
 | cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
+| cursor | `--force` (native explicit denies and team policy still apply) |
 
 The other five adapters (including Amp) reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
@@ -644,6 +645,24 @@ Native provider failures can emit `result.is_error: true` and still exit zero.
 Callers must inspect the terminal event; Harness preserves the process exit
 and termination status rather than converting a native error into a parse failure.
 
+### cursor
+
+`raw` preserves all complete JSON object lines in order, including assistant
+deltas, duplicate buffered flushes, tool events and terminal results. Malformed,
+truncated and non-object lines are ignored by parsing, not removed from stdout.
+The last `type: "result"` object's optional `usage.inputTokens` and
+`usage.outputTokens` supply independent nonnegative safe-integer counts (at most
+2^53 - 1); invalid or missing fields are null. Qualified Cursor 2026.09.02-c22c1a3 already subtracts
+cache reads/writes from `inputTokens`; Harness does not add them back or sum
+message events. No USD metric is reported. Older documented results without
+usage remain valid and report null counts. Process exit/termination remains
+authoritative even if a native event describes an error.
+
+The command is local print/stream-JSON with partial output, native model
+selection when omitted, explicit `--force` only for bypass, and SIGINT graceful
+teardown. No native mode/sandbox/trust/MCP approval or persist/resume/worker
+mapping is exposed. See [setup and qualification limits](ADAPTER-MATRIX.md#cursor).
+
 ---
 
 ## Adapter contract
@@ -654,7 +673,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `amp`, `hermes`, `goose` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `hermes`, `goose`, `copilot` and `cursor` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -736,6 +755,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | goose | `GOOSE_PATH_ROOT` | unsupported |
 | copilot | `COPILOT_HOME` | unsupported |
 | amp | unsupported | `--settings-file` (custom user settings; workspace/managed settings still apply) |
+| cursor | `CURSOR_CONFIG_DIR` (config, not all data/credentials) | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -1332,7 +1352,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "amp", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

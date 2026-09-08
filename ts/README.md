@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, or copilot as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, or cursor as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -231,6 +231,10 @@ Amp runs local execute mode, not remote orbs. Omit `model`; use
 `{kind: 'amp', mode: 'low'}` for upstream mode selection and `configFile` for
 custom user settings. `raw` retains native thread identity and failures, which
 can accompany process exit zero. See [permissions, accounting and coverage](../ADAPTER-MATRIX.md#amp).
+
+Cursor uses the standalone `agent` executable with print/stream-JSON output.
+Only explicit bypass adds `--force`; model/auth/config remain caller-selected.
+See [optional usage, permissions and qualification limits](../ADAPTER-MATRIX.md#cursor).
 
 ### Streaming and bounded capture
 

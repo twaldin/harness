@@ -25,8 +25,8 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain nineteen adapters, with shared fixture files:
-`aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `factory-droid`,
+After adapter initialization, both registries contain twenty adapters, with shared fixture files:
+`aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
 `gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
@@ -67,6 +67,9 @@ upstream compatibility.
 - Amp local execute mode now ships in both languages through [TWA-78](https://linear.app/twaldin/issue/TWA-78).
   See [setup, model limitations and dated coverage](ADAPTER-MATRIX.md#amp);
   remote orbs and runners are not exposed.
+- Cursor CLI now ships in both languages through [TWA-77](https://linear.app/twaldin/issue/TWA-77).
+  See [setup, permissions and dated qualification](ADAPTER-MATRIX.md#cursor).
+  Cloud workers, persist/resume, ACP and SDK execution remain unsupported.
 
 ## Source-qualified: existing implementation backlog
 
@@ -92,19 +95,6 @@ specific checks supplement the [common validation scope](#validation-and-mainten
 
 
 
-### Cursor CLI — [TWA-77](https://linear.app/twaldin/issue/TWA-77)
-
-- **Identity / maintenance:** [official CLI docs](https://cursor.com/docs/cli/overview)
-  and `https://cursor.com/install` supply **`agent`**. Current vendor documentation
-  is the maintenance signal; no release version is pinned here. Verify the binary
-  instead of assuming the historical `cursor-agent` name.
-- **Path:** [`agent -p --output-format json "PROMPT"`](https://cursor.com/docs/cli/headless).
-  Docs require `--force` for applying edits; keep that choice explicit.
-- **Gate / validation:** Cursor account/API key and available models. Verify workspace
-  trust, write permission and nonzero/stderr failures. The
-  [documented result schema](https://cursor.com/docs/cli/reference/output-format)
-  has no token/USD fields; do not infer cost from duration or model alone.
-  Cloud workers are not this subprocess adapter.
 
 ### Mistral Vibe — [TWA-79](https://linear.app/twaldin/issue/TWA-79)
 

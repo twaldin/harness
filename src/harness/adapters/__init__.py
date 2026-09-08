@@ -14,6 +14,7 @@ from harness.adapters.gemini import GeminiAdapter
 from harness.adapters.goose import GooseAdapter
 from harness.adapters.hermes import HermesAdapter
 from harness.adapters.kilo import KiloAdapter
+from harness.adapters.kiro import KiroAdapter
 from harness.adapters.mistral_vibe import MistralVibeAdapter
 from harness.adapters.omp import OmpAdapter
 from harness.adapters.openclaude import OpenClaudeAdapter
@@ -44,6 +45,7 @@ register("goose", GooseAdapter)
 register("amp", AmpAdapter)
 register("mistral-vibe", MistralVibeAdapter)
 register("cursor", CursorAdapter)
+register("kiro", KiroAdapter)
 register("auggie", AuggieAdapter)
 
 __all__ = [
@@ -62,6 +64,7 @@ __all__ = [
     "GooseAdapter",
     "HermesAdapter",
     "KiloAdapter",
+    "KiroAdapter",
     "MistralVibeAdapter",
     "OmpAdapter",
     "OpenClaudeAdapter",

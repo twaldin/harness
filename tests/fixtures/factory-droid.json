@@ -2,7 +2,7 @@
   "spec": {
     "harness": "factory-droid",
     "prompt": "fix flaky test retries",
-    "model": "custom:gpt-5.4",
+    "model": "claude-sonnet-4-5-20250929",
     "instructions": "Keep changes minimal.\n",
     "timeoutSeconds": 600
   },
@@ -13,16 +13,16 @@
       "--output-format",
       "json",
       "--model",
-      "custom:gpt-5.4",
+      "claude-sonnet-4-5-20250929",
       "--spec-model",
-      "custom:gpt-5.4",
+      "claude-sonnet-4-5-20250929",
       "fix flaky test retries"
     ],
     "cwd": "<workdir>",
     "env": {},
     "instructionsFile": "<workdir>/AGENTS.md",
     "directories": [],
-    "model": "custom:gpt-5.4"
+    "model": "claude-sonnet-4-5-20250929"
   },
   "capabilities": {
     "backend": "cli",
@@ -41,21 +41,21 @@
     "exitCode": 0,
     "durationSeconds": 9.1,
     "timedOut": false,
-    "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"usage\":{\"input_tokens\":420,\"output_tokens\":133},\"total_cost_usd\":0.0061}",
+    "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":9100,\"num_turns\":1,\"result\":\"Reviewed retry behavior.\",\"session_id\":\"synthetic-session\"}",
     "stderr": ""
   },
   "expectedParsed": {
-    "costUsd": 0.0061,
-    "tokensIn": 420,
-    "tokensOut": 133,
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
     "raw": {
       "type": "result",
       "subtype": "success",
-      "usage": {
-        "input_tokens": 420,
-        "output_tokens": 133
-      },
-      "total_cost_usd": 0.0061
+      "is_error": false,
+      "duration_ms": 9100,
+      "num_turns": 1,
+      "result": "Reviewed retry behavior.",
+      "session_id": "synthetic-session"
     }
   },
   "cases": [

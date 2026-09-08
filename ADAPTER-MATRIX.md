@@ -2,7 +2,12 @@
 
 Per-CLI reference for current command construction, instruction files and token/cost parsing. [SPEC.md](SPEC.md) defines the shared contract; [fixture coverage notes](SPEC.md#json-fixture-driven-verification) describe what the two suites actually assert.
 
-The command/policy contract below is source-derived; the explicit native option flags were also checked against installed Claude Code 2.1.220 and Codex 0.153.4 help, and the Hermes headless flags against installed Hermes Agent v0.20.0 (2026.8.3) plus the current upstream parser. This is not a full current-upstream qualification or provider smoke.
+**Qualification refreshed 2026-09-08 for TWA-68's thirteen named adapters.**
+The ledger below separates primary-source checks, installed help/version probes,
+synthetic conformance and provider smoke. None has a successful provider smoke
+recorded by this audit. Hermes and OMP landed separately; their entries retain
+their own qualification evidence. Hermes headless flags were checked against
+installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
@@ -20,23 +25,53 @@ implementation tickets. A catalog entry or ticket is **not** a shipped adapter.
 In particular, the shipped `swe-agent` is a consumer-supplied mini-SWE wrapper
 (see [its command](#swe-agent)), not the planned native mini-SWE-agent CLI adapter.
 
-Current qualification work is tracked in
-[TWA-68](https://linear.app/twaldin/issue/TWA-68) (all shipped adapters) and
-[TWA-71](https://linear.app/twaldin/issue/TWA-71) (Pi CLI/RPC).
-The broader capability/API guide belongs to
-[TWA-88](https://linear.app/twaldin/issue/TWA-88); installed-package and
-real-provider validation belongs to
-[TWA-89](https://linear.app/twaldin/issue/TWA-89).
-Until those changes land, the source-derived commands below describe the
-implementation, not promised upstream behavior.
+The bounded repairs and qualification ledger belong to
+[TWA-68](https://linear.app/twaldin/issue/TWA-68). Larger discovered repairs are
+linked separately: [TWA-95](https://linear.app/twaldin/issue/TWA-95) for native
+database run correlation/path/cost semantics; [TWA-96](https://linear.app/twaldin/issue/TWA-96)
+for legacy session discovery, parsing and pane evidence. Pi CLI/RPC remains
+[TWA-71](https://linear.app/twaldin/issue/TWA-71). The API guide is
+[TWA-88](https://linear.app/twaldin/issue/TWA-88); installed-package/provider
+acceptance is [TWA-89](https://linear.app/twaldin/issue/TWA-89).
+
+## Dated qualification ledger
+
+**Help-checked** means the named installed executable accepted its version/help
+probe and exposed the emitted flags, not that its provider authenticated or
+completed a task. **Source-checked** means official docs/source corroborate the
+listed command/output contract; an unavailable executable is not provider-tested.
+All shared executable/SQLite/JSON fixtures remain synthetic. Latest package
+versions below are dated observations, not a supported version range.
+
+| Adapter | Primary installation / source | Installed observation | Qualification and material limit |
+|---|---|---|---|
+| aider | [`aider-chat`; CLI options](https://aider.chat/docs/config/options.html) (0.86.2; Python >=3.10,<3.13) | not on PATH | Source-checked; cached and multiple-message usage reports repaired against upstream emission. Rounded token scraper only; no session helper/provider qualification. |
+| claude-code | [`@anthropic-ai/claude-code`; CLI reference](https://code.claude.com/docs/en/cli-reference) (registry 2.1.263) | 2.1.220 | Help-checked; JSON usage/cost source documented. Current pane/cutoff/config-root qualification remains TWA-96. |
+| codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | Help-checked; provider smoke **failed**: configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. |
+| continue-cli | [`@continuedev/cli`; headless mode](https://docs.continue.dev/cli/headless-mode) (1.5.47) | not on PATH | Source-checked after command/rule/model repair. Headless JSON is model output, not usage telemetry. Default ask-tier tools are excluded; explicit bypass adds `--auto`. |
+| crush | [`charmbracelet/tap/crush`; source](https://github.com/charmbracelet/crush) (v0.92.0) | v0.62.0 | Help-checked; upstream-shaped schema reproduction repairs nonexistent `sessions.model`. No provider/actual-run DB qualification. `--yolo` is not a `run` flag. |
+| factory-droid | [`droid`; official headless guide](https://docs.factory.ai/droid-exec/overview) (0.213.0) | 0.132.1, off PATH | Help-checked with explicit executable. Replaces nonexistent `@factory-ai/droid`. Managed/custom model IDs now remain caller-selected. Default is read-only; documented JSON has no usage/cost. |
+| gemini | [`@google/gemini-cli`; headless reference](https://geminicli.com/docs/cli/headless/) (0.58.0) | 0.37.0 | Help-checked; stats schema source-checked. Current docs deprecate `-y` in favor of `--approval-mode yolo`; installed `-y` still exists. Legacy session layout unqualified. |
+| kilo | [`@kilocode/cli`; CLI reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference) (7.5.15) | not on PATH | Source-checked; assistant DB model key repaired to `modelID`. Without `--auto`, headless permission requests are rejected; this is upstream policy, not implicit bypass. |
+| openclaude | [`@gitlawb/openclaude`; upstream](https://github.com/Gitlawb/openclaude) (0.30.0) | 0.6.0, off PATH | Legacy help-checked; current source checked separately. npm `openclaude` is an unrelated reservation without a binary. Current upstream moved to `~/.openclaude`; shipped legacy session helper is not qualified for that cutover. |
+| opencode | [`opencode-ai`; CLI reference](https://opencode.ai/docs/cli/) (1.18.29) | 1.14.46, off PATH | Help-checked; source-shaped DB regression replaces `session.model` with assistant `modelID`. New docs use `--auto`; installed help uses `--dangerously-skip-permissions`. No version-independent bypass mapping added. |
+| pi | [`@earendil-works/pi-coding-agent`; upstream](https://github.com/earendil-works/pi) (0.85.1) | not on PATH | Source-checked CLI JSON contract; old `@mariozechner/pi-coding-agent` 0.73.1 is explicitly deprecated. Install metadata corrected; runtime/RPC acceptance remains TWA-71. |
+| qwen | [`@qwen-code/qwen-code`; headless source](https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/headless.md) (0.23.0) | not on PATH | Source-checked flags/result array. Existing default `qwen3-coder` is not provider-qualified; current upstream also uses `coder-model`. Hash/project session layouts remain TWA-96. |
+| swe-agent | [`mini-swe-agent`; native CLI docs](https://mini-swe-agent.com/latest/usage/mini/) (registry 2.4.6) plus a **consumer-supplied wrapper** | dependency 2.2.8; wrapper help checked | Wrapper-only, not native SWE-agent/mini support. `mini --version` fails; metadata now queries the dependency via the wrapper's `python3`. Installing the dependency does not install the wrapper. Native mini is TWA-82. |
+
+Off-PATH probes used absolute executables; Harness does not add them to PATH.
+No tools were upgraded, credentials switched, global configuration rewritten or
+packages published. Provider/model availability must be verified for the caller's
+selected account; fixture success cannot qualify it.
 
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `hermes` and `omp`). "Wired" means the hooks exist, not
-that every log contains usage or that discovery identifies a unique live
-session. No controlled-session backend is shipped; these are caller-driven
-artifact helpers.
+(every adapter except `aider`, `hermes` and `omp`). "Wired" means the hooks exist,
+not that the current upstream layout is recognized or discovery identifies a
+unique live session. Several legacy layouts below are contradicted by current
+upstreams and tracked in TWA-96. These are caller-driven artifact helpers, not
+controlled sessions.
 
 | adapter | TypeScript hooks | Python hooks | notes |
 |---|---|---|---|
@@ -84,7 +119,8 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | kilo | `--auto` |
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
-| continue-cli, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
+| continue-cli | `--auto` |
+| crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
 Only Claude Code and Codex currently have typed native options:
 `ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
@@ -112,14 +148,14 @@ helpers. "Populated" requires the expected output or database to be available.
 | ------------ | ----------------- | ----------------------------- | --------------------------------- |
 | claude-code  | populated         | populated                     | `--output-format json` envelope   |
 | openclaude   | populated         | populated                     | `--output-format json` envelope   |
-| factory-droid| populated         | populated                     | `--output-format json` envelope   |
+| factory-droid| optional fields only | optional fields only     | documented JSON omits usage/cost; extended-field parsing is fixture-only |
 | opencode     | populated         | populated                     | sqlite session DB post-exit       |
 | codex        | **null**          | populated (summed from JSONL) | JSONL turn events on stdout       |
 | gemini       | estimated         | populated (summed)            | `stats.models` tokens + built-in pricing |
 | aider        | **null**          | populated (regex parse)       | "Tokens: N sent, M received" log  |
 | swe-agent    | populated         | populated                     | trajectory JSON post-exit         |
 | qwen         | **null**          | populated                     | JSON array, last `type:'result'` item `usage` |
-| continue-cli | populated         | populated                     | `--json` envelope `usage`         |
+| continue-cli | **null**          | **null**                    | `--format json` contains model-generated output, not trusted usage |
 | pi           | populated         | populated                     | `--mode json` event stream, summed from `agent_end.messages[].usage` |
 | omp          | populated when reported | populated when reported | JSONL completed-cycle usage, with partial-message fallback |
 | crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
@@ -135,9 +171,10 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
 - Canonical model names (for example `gpt-5.4`) are accepted across adapters.
 - Harness normalizes model IDs at `buildCommand` time:
   - **Provider-required CLIs** (`opencode`, `swe-agent`, `aider`, `kilo`) get `provider/model` forms.
-  - **Bare-model CLIs** (`codex`, `claude-code`, `openclaude`, `continue-cli`, `qwen`, `gemini`) get known provider prefixes stripped.
+  - **Bare-model CLIs** (`codex`, `claude-code`, `openclaude`, `qwen`, `gemini`) get known provider prefixes stripped.
+  - **continue-cli** preserves explicit `owner/package` Hub slugs; omitted model delegates to upstream config.
   - **pi** prefixes bare `gpt-5*` models with `openai-codex/` and preserves recognized explicit providers.
-  - **factory-droid** strips known provider prefixes and adds `custom:` for a configured BYOK model.
+  - **factory-droid** preserves managed model IDs and explicitly supplied `custom:` IDs; it never invents BYOK configuration.
   - **crush** preserves explicit provider prefixes and passes bare names through.
   - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
   - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
@@ -239,9 +276,8 @@ synthetic success fixtures do not fill that gap.
 - **CLI**: `droid`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `droid exec --output-format json --model <model> --spec-model <model> <prompt>`; normalization turns the default into `custom:gpt-5.4`.
-- **Token source**: JSON envelope on stdout → `usage.{input_tokens,output_tokens}` (fallbacks: `usage.{input,output}`)
-- **Cost source**: JSON envelope → `total_cost_usd` (fallbacks to `usage.cost[.total]`)
+- **Command**: `droid exec --output-format json --model <model> --spec-model <model> <prompt>`. A managed model stays unchanged; BYOK requires the caller's exact configured `custom:` ID.
+- **Token/cost source**: the documented JSON envelope omits usage and cost, so ordinary output returns null metrics. Extended `usage` / `total_cost_usd` fields are parsed if present, but only synthetic fixtures cover those fields here.
 - **Fairness**: harness pins `--model` and `--spec-model` to the same normalized model
 
 ---
@@ -298,7 +334,7 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4` (normalized to `openai/gpt-5.4` for CLI invocation)
 - **Command**: `opencode run --dir <workdir> --model <model> <prompt>`
-- **Token source**: sqlite read from `~/.local/share/opencode/opencode.db` (override via `OPENCODE_DB` env var) — find session where `directory LIKE %<workdir-basename>%`, sum `message.data.tokens.{input,output}`
+- **Token source**: sqlite read from `~/.local/share/opencode/opencode.db` (override via `OPENCODE_DB` env var) — find session where `directory LIKE %<workdir-basename>%`, sum assistant `message.data.tokens.{input,output}`.
 - **Cost source**: same sqlite — sum `message.data.cost`
 - **Env**: none required
 
@@ -309,7 +345,7 @@ SELECT
   COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
   COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
   COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-  MAX(s.model)                                         AS model,
+  -- Model comes from assistant message.data.modelID, not session.model.
   COUNT(*)                                             AS row_count
 FROM message m
 JOIN session s ON s.id = m.session_id
@@ -318,7 +354,13 @@ WHERE m.session_id IN (
 )
 ```
 
-The parameter is `%<resolved-workdir-basename>%`. No matching message rows returns null metrics; a matching session can legitimately total zero. TypeScript selects `bun:sqlite` under Bun and `better-sqlite3` under Node; driver-load failure returns null metrics rather than throwing.
+The parameter is `%<resolved-workdir-basename>%`. This is a discovery heuristic,
+not native run correlation. No matching assistant rows returns null metrics;
+a matching session can legitimately total zero. Model extraction uses assistant
+`modelID` only when all contributing rows identify one model; session estimates
+use that model, never an invented `gpt-5.4`. TypeScript selects `bun:sqlite` under
+Bun and `better-sqlite3` under Node; driver-load failure returns null metrics.
+Relative DB overrides, release-channel storage and cost provenance remain TWA-95.
 
 ---
 
@@ -329,8 +371,8 @@ The parameter is `%<resolved-workdir-basename>%`. No matching message rows retur
 - **Default model**: `openrouter/anthropic/claude-sonnet-4.6`
 - **Command**: `aider --no-restore-chat-history --chat-history-file <null-device> --input-history-file <null-device> --model <model> --message <prompt> --no-auto-commits --no-analytics --no-show-model-warnings`; adds `--read <instructions-file>` when instructions are supplied
 - **Config**: uses upstream configuration by default; explicit `configFile` adds `--config <path>`. No empty `.agentelo-aider.yml` is generated.
-- **Token source**: regex on combined stdout+stderr: `/Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i` — numeric `k` suffix → ×1000
-- **Cost source**: not reported by aider — always `null`
+- **Token source**: sum rounded `sent`/`received` counts across combined stdout+stderr reports; optional `cache write`/`cache hit` fields do not suppress the report. The numeric `k` suffix scales by 1000. [Upstream emission](https://github.com/Aider-AI/aider/blob/v0.86.2/aider/coders/base_coder.py#L2023-L2030).
+- **Cost source**: Aider emits a textual message/session cost report, but Harness does not parse it; always `null`.
 - **Env**: caller-selected provider authentication is inherited; Harness does not select a proxy or inject a credential
 
 ### Example log line
@@ -389,25 +431,25 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `[`
 ## continue-cli
 
 - **CLI**: `cn`
-- **Instructions file**: `CONTINUE.md`
-- **Default model**: `claude-sonnet-4-6`
-- **Command**: `cn -p <prompt> --model <model> --json`
-- **Explicit config**: `configFile` uses `cn -p --config <path> --format json <prompt>`. Omit `model` for this path: the file selects it; an explicit model rejects rather than being silently discarded. Current Continue `--model` is a Hub slug, so the legacy default branch remains subject to upstream qualification.
-- **Credential safety**: no generated YAML. The former explicit OpenAI-compatible env branch now requires a caller-selected `configFile`.
-- **Token source**: JSON envelope on stdout → `usage.input_tokens`, `usage.output_tokens`
-- **Cost source**: JSON envelope → `total_cost_usd`
-- **Env**: `CONTINUE_API_KEY` (consumer sets; harness does not require or inject it)
+- **Instructions file**: `CONTINUE.md`, explicitly passed through `--rule <absolute-path>`; Continue does not discover this root filename itself.
+- **Default model**: none; existing upstream configuration selects it. Adapter metadata uses an empty string for no default; reported command/result model is null.
+- **Command**: `cn -p <prompt> [--model <owner/package>] [--rule <instructions-file>] --format json`.
+- **Explicit config**: `configFile` uses `cn -p --config <path> [--rule <instructions-file>] --format json <prompt>`. Leave `model` unset: the file selects it. Without a config file, an explicit model must be a Continue Hub `owner/package` slug, not a bare provider model ID.
+- **Permissions**: default preserves upstream exclusion of ask-tier tools in headless mode. Explicit bypass adds `--auto`; no permission flag is inserted otherwise.
+- **Credential safety**: no generated YAML. Explicit OpenAI-compatible env selection requires a caller-selected `configFile`.
+- **Token/cost source**: none in headless stdout. `--format json` emits model-authored JSON verbatim or wraps text in `{response,status,note}`. Even usage-shaped model output is not billing telemetry; metrics remain null.
+- **Env**: caller-selected provider/Continue authentication is inherited; Harness does not require or inject it.
 
 ### Output shape
 ```json
-{ "type": "result", "result": "...", "usage": { "input_tokens": N, "output_tokens": M }, "total_cost_usd": 0.019 }
+{ "response": "added docstrings", "status": "success", "note": "Response was not valid JSON, so it was wrapped in a JSON object" }
 ```
 
 ---
 
 ## pi
 
-- **CLI**: `pi` (from `@mariozechner/pi-coding-agent`, see [pi.dev](https://pi.dev))
+- **CLI**: `pi` from `@earendil-works/pi-coding-agent` (Node >=22.19.0 for 0.85.1). Official npm installation recommends `--ignore-scripts`.
 - **Instructions file**: `AGENTS.md` (pi also auto-reads `CLAUDE.md` via context-file discovery)
 - **Default model**: `sonnet`
 - **Command**: `pi --mode json --no-session --model <model> <prompt>`
@@ -428,7 +470,7 @@ pi emits one JSON object per stdout line:
 
 The adapter prefers `agent_end.messages` (authoritative final state) over per-turn events.
 
-Full event reference: [pi-mono/packages/coding-agent/docs/json.md](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/json.md).
+Full event reference: [Pi JSON event contract](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md). `--mode json` is noninteractive; no built-in permission popup/sandbox is implied. Project trust is a separate upstream setting, not Harness bypass.
 
 ---
 
@@ -446,12 +488,16 @@ Full event reference: [pi-mono/packages/coding-agent/docs/json.md](https://githu
 ### Post-exit DB query
 
 ```sql
-SELECT prompt_tokens, completion_tokens, cost, model
+SELECT id, prompt_tokens, completion_tokens, cost
 FROM sessions
 WHERE parent_session_id IS NULL
 ORDER BY updated_at DESC
 LIMIT 1
 ```
+
+The session table has no `model` column. The reader obtains a consistent model
+from assistant rows in `messages` for the selected session. Fixtures use this
+upstream shape rather than inventing `sessions.model`.
 
 ---
 
@@ -465,7 +511,7 @@ LIMIT 1
   - `KILO_DB=<workdir>/.harness/kilo/kilo.db`
   - `KILO_CONFIG_CONTENT={"model":"<provider/model>","small_model":"<provider/model>","default_agent":"build"}`
 - **Token source**: sqlite `message.data.tokens.{input,output}` summed over assistant rows for latest matching session
-- **Cost source**: sqlite `message.data.cost` summed over assistant rows for latest matching session
+- **Cost source**: sqlite `message.data.cost` summed over assistant rows for latest matching session. Session model comes from `message.data.modelID`, not the user-message `model` object; unknown/mixed models do not select an arbitrary fallback price.
 - **Model default**: generated `KILO_CONFIG_CONTENT` pins `model == small_model` and `default_agent=build` only when that variable is absent from both inherited and explicit env; selected configuration is not rewritten
 
 ### Post-exit DB query
@@ -550,5 +596,5 @@ Shared across adapters:
 - Merges `extra_env` onto `process.env` (os.environ for py)
 - Closes stdin (`DEVNULL`) by default
 - Captures stdout + stderr separately
-- Enforces `timeout_seconds`; on timeout, returns `{exit_code: -1, timed_out: true, stdout, stderr}` with captured output. Python's runners and TypeScript's synchronous runner terminate the direct child; TypeScript's async runner creates and kills a process group.
-- Returns `{exit_code, duration_seconds, stdout, stderr, timed_out}` — never throws on non-zero exit
+- Enforces wall/inactivity deadlines, finite stdin, bounded capture and owned process-tree teardown on supported POSIX runtimes. Python sync/async and TypeScript Bun/Node behavior is covered by the shared lifecycle scenarios.
+- Returns structured exit/termination/timeout/launch/parse information; nonzero child exits remain results, not exceptions. See [SPEC](SPEC.md#ownership-and-execution) for the current contract and limits.

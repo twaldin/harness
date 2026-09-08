@@ -10,7 +10,7 @@ import { join } from 'node:path'
 // has { input, output, cacheRead, cacheWrite, totalTokens, cost: { total, ... } }.
 // Prefer agent_end.messages (authoritative); fall back to summing turn_end events
 // if the stream was cut off.
-// Docs: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/json.md
+// Docs: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md
 
 interface PiUsage {
   input?: number
@@ -224,8 +224,8 @@ piAdapter.parseSessionLog = function (path: string): SessionTelemetry {
 
 piAdapter.installMeta = {
   packageManager: 'npm',
-  installCommand: ['npm', 'install', '-g', '@mariozechner/pi-coding-agent'],
-  updateCommand: ['npm', 'install', '-g', '@mariozechner/pi-coding-agent@latest'],
+  installCommand: ['npm', 'install', '-g', '--ignore-scripts', '@earendil-works/pi-coding-agent'],
+  updateCommand: ['npm', 'install', '-g', '--ignore-scripts', '@earendil-works/pi-coding-agent@latest'],
   versionCommand: ['pi', '--version'],
 }
 

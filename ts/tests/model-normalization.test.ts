@@ -30,9 +30,13 @@ describe('model normalization', () => {
     expect(normalizeModelForHarness('crush', 'openrouter/google/gemini-2.5-pro')).toBe('openrouter/google/gemini-2.5-pro')
   })
 
-  test('factory-droid auto-prefixes custom: for BYOK models', () => {
-    expect(normalizeModelForHarness('factory-droid', 'gpt-5.4')).toBe('custom:gpt-5.4')
-    expect(normalizeModelForHarness('factory-droid', 'custom:gpt-5.4')).toBe('custom:gpt-5.4')
+  test('factory-droid preserves managed and explicit BYOK model identities', () => {
+    expect(normalizeModelForHarness('factory-droid', 'claude-sonnet-4-5-20250929')).toBe('claude-sonnet-4-5-20250929')
+    expect(normalizeModelForHarness('factory-droid', 'custom:My-Custom-Model-0')).toBe('custom:My-Custom-Model-0')
+  })
+
+  test('continue-cli preserves Hub slugs even when owner names match providers', () => {
+    expect(normalizeModelForHarness('continue-cli', 'openai/gpt-5')).toBe('openai/gpt-5')
   })
 
   test('modelNoResolve escape hatch returns raw model', () => {

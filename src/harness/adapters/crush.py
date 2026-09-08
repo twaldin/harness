@@ -108,8 +108,10 @@ class CrushAdapter(Adapter):
     def parse_session_log(self, path: str) -> SessionTelemetry:
         db_raw = path.split("#", 1)[0]
         tokens_in, tokens_out, cost, model = _read_crush_session_totals_by_db_path(Path(db_raw))
+        # sessions.cost is NOT NULL DEFAULT 0.0 upstream, so 0 may be a genuine
+        # zero-cost run; without a session model there is nothing to price it with.
         if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
-            cost = derive_cost(model or "gpt-5.4", tokens_in, tokens_out) or cost
+            cost = derive_cost(model, tokens_in, tokens_out) or cost
         return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
@@ -142,7 +144,7 @@ def _read_crush_session_totals_by_db_path(
     try:
         row = conn.execute(
             """
-            SELECT prompt_tokens, completion_tokens, cost, model
+            SELECT id, prompt_tokens, completion_tokens, cost
             FROM sessions
             WHERE parent_session_id IS NULL
             ORDER BY updated_at DESC
@@ -153,14 +155,33 @@ def _read_crush_session_totals_by_db_path(
         conn.close()
         return None, None, None, None
 
-    conn.close()
     if not row:
+        conn.close()
         return None, None, None, None
 
-    tokens_in = int(row[0]) if isinstance(row[0], (int, float)) else None
-    tokens_out = int(row[1]) if isinstance(row[1], (int, float)) else None
-    cost = float(row[2]) if isinstance(row[2], (int, float)) else None
-    model = row[3] if isinstance(row[3], str) else None
+    tokens_in = int(row[1]) if isinstance(row[1], (int, float)) else None
+    tokens_out = int(row[2]) if isinstance(row[2], (int, float)) else None
+    cost = float(row[3]) if isinstance(row[3], (int, float)) else None
+
+    # sessions has no model column upstream; the model lives on messages.model.
+    # Report it only when every assistant turn of the session agrees on one.
+    model = None
+    try:
+        model_row = conn.execute(
+            """
+            SELECT CASE WHEN COUNT(DISTINCT model) = 1 AND COUNT(NULLIF(model, '')) = COUNT(*)
+                        THEN MAX(model) END
+            FROM messages
+            WHERE session_id = ? AND role = 'assistant'
+            """,
+            (row[0],),
+        ).fetchone()
+        if model_row and isinstance(model_row[0], str):
+            model = model_row[0]
+    except sqlite3.Error:
+        pass
+
+    conn.close()
     return tokens_in, tokens_out, cost, model
 
 

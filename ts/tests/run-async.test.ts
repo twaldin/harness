@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { runAsync } from '../src/registry.js'
 import { runSubprocessAsync } from '../src/subproc.js'
@@ -111,23 +111,23 @@ describe('runSubprocessAsync', () => {
     expect(outcome.stdout.trim()).toBe('async_ok')
   })
 
-  test('two parallel runs finish in ~max(A,B) not A+B', async () => {
-    const delay = 0.3
-
-    const job = () =>
-      runSubprocessAsync(['sh', '-c', `sleep ${delay} && echo done`], {
-        cwd: TMP_DIR,
-        timeoutSeconds: 10,
-      })
-
-    const start = Date.now()
-    const results = await Promise.all([job(), job()])
-    const elapsed = (Date.now() - start) / 1000
-
-    // Sequential would take ~0.6s; parallel should finish in ~0.3s (allow 2x slack)
-    expect(elapsed).toBeLessThan(delay * 2 + 0.1)
-    for (const r of results) {
-      expect(r.stdout).toContain('done')
+  test('parallel children can rendezvous before either exits', async () => {
+    const directory = mkdtempSync(join(TMP_DIR, 'concurrent-'))
+    const markers = [join(directory, 'first'), join(directory, 'second')]
+    try {
+      const results = await Promise.all(markers.map((marker, index) =>
+        runSubprocessAsync([
+          'sh', '-c',
+          'touch "$1"; until [ -f "$2" ]; do sleep 0.01; done; printf concurrent',
+          'rendezvous', marker, markers[1 - index]!,
+        ], { cwd: directory, timeoutSeconds: 10 }),
+      ))
+      for (const result of results) {
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout).toBe('concurrent')
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
     }
-  })
+  }, 15000)
 })

@@ -60,14 +60,15 @@
       "kind": "sqlite",
       "path": "<workdir>/.harness/kilo/kilo.db",
       "sql": [
-        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL)",
-        "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
-        "INSERT INTO session (id, directory, time_updated) VALUES ('stale', '<workdir>', 10)",
-        "INSERT INTO message (id, session_id, data) VALUES ('stale-1', 'stale', '{\"role\":\"assistant\",\"tokens\":{\"input\":99999,\"output\":99999},\"cost\":99.0}')",
-        "INSERT INTO session (id, directory, time_updated) VALUES ('latest', '<workdir>', 200)",
-        "INSERT INTO message (id, session_id, data) VALUES ('latest-1', 'latest', '{\"role\":\"assistant\",\"model\":\"openai/gpt-5.4\",\"tokens\":{\"input\":600,\"output\":150},\"cost\":0.006}')",
-        "INSERT INTO message (id, session_id, data) VALUES ('latest-2', 'latest', '{\"role\":\"assistant\",\"model\":\"openai/gpt-5.4\",\"tokens\":{\"input\":210,\"output\":60},\"cost\":0.0021}')",
-        "INSERT INTO message (id, session_id, data) VALUES ('latest-3', 'latest', '{\"role\":\"user\",\"tokens\":{\"input\":99999,\"output\":99999},\"cost\":99.0}')"
+        "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+        "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+        "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '7.2.24', 9, 10)",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+        "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'fix broken unit tests', '7.2.24', 199, 200)",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'latest', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":600,\"output\":150,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.006}')",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'latest', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":210,\"output\":60,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0021}')",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-3', 'latest', 202, 202, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"},\"tokens\":{\"input\":99999,\"output\":99999},\"cost\":99.0}')"
       ]
     }
   ],

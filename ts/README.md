@@ -11,7 +11,7 @@ npm install @twaldin/harness-ts
 
 The package ships ESM only. Use a Node version supported by the installed `better-sqlite3` dependency. The `better-sqlite3@12.9.0` package selected by `bun.lock` declares `engines.node` as `20.x || 22.x || 23.x || 24.x || 25.x`, not Node 18. Bun is used for the repository's build and test commands.
 
-For frontier adapters in containers, prefer Node `>=20` (`openclaude`, `factory-droid`, `kilo` upstream CLIs require modern Node runtimes).
+Upstream CLI runtime requirements are independent of this package. Current OpenClaude requires Node >=22; check the selected version in the [qualification ledger](../ADAPTER-MATRIX.md#dated-qualification-ledger), which distinguishes installed help checks from provider smoke and synthetic fixtures.
 
 ## First example
 

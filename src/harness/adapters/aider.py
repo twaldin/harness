@@ -26,7 +26,11 @@ class AiderAdapter(Adapter):
 
     DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.6"
 
-    TOKEN_RE = re.compile(r"Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received", re.IGNORECASE)
+    TOKEN_RE = re.compile(
+        r"Tokens:\s+([\d,.]+k?)\s+sent(?:,\s+[\d,.]+k?\s+cache (?:write|hit))*"
+        r",\s+([\d,.]+k?)\s+received",
+        re.IGNORECASE,
+    )
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
@@ -52,10 +56,16 @@ class AiderAdapter(Adapter):
 
 
 def _scrape_aider_tokens(text: str, pattern: re.Pattern) -> tuple[int | None, int | None]:
-    match = pattern.search(text)
-    if not match:
-        return None, None
-    return _parse_aider_num(match.group(1)), _parse_aider_num(match.group(2))
+    tokens_in: int | None = 0
+    tokens_out: int | None = 0
+    found = False
+    for match in pattern.finditer(text):
+        found = True
+        sent = _parse_aider_num(match.group(1))
+        received = _parse_aider_num(match.group(2))
+        tokens_in = tokens_in + sent if tokens_in is not None and sent is not None else None
+        tokens_out = tokens_out + received if tokens_out is not None and received is not None else None
+    return (tokens_in, tokens_out) if found else (None, None)
 
 
 def _parse_aider_num(s: str) -> int | None:

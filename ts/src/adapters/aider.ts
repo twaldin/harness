@@ -4,7 +4,7 @@ import { finalizeCommand, validateRunSpec } from '../base.js'
 import { devNull } from 'node:os'
 import { join } from 'node:path'
 
-const TOKEN_RE = /Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i
+const TOKEN_RE = /Tokens:\s+([\d,.]+k?)\s+sent(?:,\s+[\d,.]+k?\s+cache (?:write|hit))*,\s+([\d,.]+k?)\s+received/gi
 
 function parseAiderNum(s: string): number | null {
   const cleaned = s.replace(/,/g, '').trim().toLowerCase()
@@ -51,12 +51,20 @@ const aiderAdapter: Adapter = {
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
     const combined = outcome.stdout + '\n' + outcome.stderr
-    const match = TOKEN_RE.exec(combined)
-    if (!match) return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
+    let tokensIn: number | null = 0
+    let tokensOut: number | null = 0
+    let found = false
+    for (const match of combined.matchAll(TOKEN_RE)) {
+      found = true
+      const sent = parseAiderNum(match[1]!)
+      const received = parseAiderNum(match[2]!)
+      tokensIn = tokensIn !== null && sent !== null ? tokensIn + sent : null
+      tokensOut = tokensOut !== null && received !== null ? tokensOut + received : null
+    }
     return {
       costUsd: null,
-      tokensIn: parseAiderNum(match[1]!),
-      tokensOut: parseAiderNum(match[2]!),
+      tokensIn: found ? tokensIn : null,
+      tokensOut: found ? tokensOut : null,
       raw: null,
     }
   },

@@ -121,9 +121,9 @@ class OpenCodeAdapter(Adapter):
             return SessionTelemetry(path, None, None, None, None, None)
         tokens_in, tokens_out, cost, model = _read_opencode_session_totals(Path(hint or "/"), None, db_path=db_path)
         # SQLite cost can be 0 when opencode used a custom provider (no upstream
-        # pricing): fall back to derive_cost from tokens if we have any.
+        # pricing): fall back to derive_cost from tokens when the session model is known.
         if (cost is None or cost == 0) and tokens_in is not None and (tokens_in > 0 or (tokens_out or 0) > 0):
-            cost = derive_cost("gpt-5.4", tokens_in, tokens_out) or cost
+            cost = derive_cost(model, tokens_in, tokens_out) or cost
         return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
@@ -170,22 +170,26 @@ def _read_opencode_session_totals(
         # Match latest session whose directory contains workdir basename.
         # agentelo uses LIKE %basename% — same heuristic. Tolerates symlinks
         # and tmpdir prefixes (/private/var/folders/...).
+        # Only assistant messages contribute usage. A model estimate requires
+        # every contributing row to identify the same nonempty model.
         row = conn.execute(
             """
             SELECT
                 COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
                 COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
                 COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-                MAX(s.model)                                             AS model,
+                CASE WHEN COUNT(DISTINCT json_extract(data, '$.modelID')) = 1
+                          AND COUNT(NULLIF(json_extract(data, '$.modelID'), '')) = COUNT(*)
+                     THEN MAX(json_extract(data, '$.modelID')) END       AS model,
                 COUNT(*)                                                 AS row_count
-            FROM message m
-            JOIN session s ON s.id = m.session_id
-            WHERE m.session_id IN (
+            FROM message
+            WHERE session_id IN (
                 SELECT id FROM session
                 WHERE directory LIKE ?
                 ORDER BY time_updated DESC
                 LIMIT 1
             )
+            AND json_extract(data, '$.role') = 'assistant'
             """,
             (f"%{workdir_basename}%",),
         ).fetchone()

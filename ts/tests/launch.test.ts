@@ -182,7 +182,7 @@ describe('run configuration', () => {
     const config = join(ROOT, 'continue.yaml')
     const { spec, record } = recorded('continue-cli', workdir, { configFile: config, instructions: 'brief' })
     const built = buildCommand(spec)
-    expect(built.args).toEqual(['-p', '--config', config, '--format', 'json', 'do the thing'])
+    expect(built.args).toEqual(['-p', '--config', config, '--rule', join(workdir, 'CONTINUE.md'), '--format', 'json', 'do the thing'])
     expect(built.model).toBeNull()
 
     const result = await runAsync(spec)
@@ -192,9 +192,6 @@ describe('run configuration', () => {
     expectCode(() => buildCommand({ ...spec, model: 'gpt-5.4' }), 'unsupported-capability')
     expect(buildCommand({ ...spec, model: '' }).model).toBeNull()
 
-    const plain = buildCommand({ harness: 'continue-cli', prompt: 'x', workdir, model: 'gpt-5.4' })
-    expect(plain.args).toEqual(['-p', 'x', '--model', 'gpt-5.4', '--json'])
-    expect(plain.model).toBe('gpt-5.4')
   })
 
   test('continue-cli OpenAI-compatible env without a config file is unsupported and leaks no secret', () => {

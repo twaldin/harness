@@ -177,8 +177,8 @@ factoryDroidAdapter.detectStatus = function (pane: string): AgentStatus {
 }
 factoryDroidAdapter.installMeta = {
   packageManager: 'npm',
-  installCommand: ['npm', 'install', '-g', '@factory-ai/droid'],
-  updateCommand: ['npm', 'install', '-g', '@factory-ai/droid@latest'],
+  installCommand: ['npm', 'install', '-g', 'droid'],
+  updateCommand: ['npm', 'install', '-g', 'droid@latest'],
   versionCommand: ['droid', '--version'],
 }
 

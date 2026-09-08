@@ -37,9 +37,10 @@ BYPASS_FLAGS = {
     "qwen": "-y",
     "kilo": "--auto",
     "omp": "--auto-approve",
+    "continue-cli": "--auto",
 }
 ALL_KNOWN_BYPASS_FLAGS = set(BYPASS_FLAGS.values())
-NO_BYPASS = ["continue-cli", "crush", "opencode", "pi", "swe-agent"]
+NO_BYPASS = ["crush", "opencode", "pi", "swe-agent"]
 
 
 def _spec(harness: str, workdir: Path, **kw) -> RunSpec:

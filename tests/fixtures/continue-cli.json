@@ -2,7 +2,7 @@
   "spec": {
     "harness": "continue-cli",
     "prompt": "add docstrings to all public functions",
-    "model": "claude-sonnet-4-6",
+    "model": "anthropic/claude-sonnet-4-6",
     "instructions": "Keep it brief.\n",
     "timeoutSeconds": 600
   },
@@ -12,19 +12,23 @@
       "-p",
       "add docstrings to all public functions",
       "--model",
-      "claude-sonnet-4-6",
-      "--json"
+      "anthropic/claude-sonnet-4-6",
+      "--rule",
+      "<workdir>/CONTINUE.md",
+      "--format",
+      "json"
     ],
     "cwd": "<workdir>",
     "env": {},
     "instructionsFile": "<workdir>/CONTINUE.md",
     "directories": [],
-    "model": "claude-sonnet-4-6"
+    "model": "anthropic/claude-sonnet-4-6"
   },
   "capabilities": {
     "backend": "cli",
     "permissionPolicies": [
-      "upstream"
+      "upstream",
+      "bypass"
     ],
     "nativeOptions": null,
     "configHomeEnv": null,
@@ -37,24 +41,129 @@
     "exitCode": 0,
     "durationSeconds": 7.1,
     "timedOut": false,
-    "stdout": "{\"type\":\"result\",\"result\":\"added docstrings\",\"usage\":{\"input_tokens\":950,\"output_tokens\":380},\"total_cost_usd\":0.0187}",
+    "stdout": "{\"response\":\"added docstrings\",\"status\":\"success\",\"note\":\"Response was not valid JSON, so it was wrapped in a JSON object\"}\n",
     "stderr": ""
   },
   "expectedParsed": {
-    "costUsd": 0.0187,
-    "tokensIn": 950,
-    "tokensOut": 380,
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
     "raw": {
-      "type": "result",
-      "result": "added docstrings",
-      "usage": {
-        "input_tokens": 950,
-        "output_tokens": 380
-      },
-      "total_cost_usd": 0.0187
+      "response": "added docstrings",
+      "status": "success",
+      "note": "Response was not valid JSON, so it was wrapped in a JSON object"
     }
   },
   "cases": [
+    {
+      "name": "normalized-command-retains-requested-reporting-label",
+      "spec": {
+        "model": " anthropic/claude-sonnet-4-6 "
+      },
+      "expectedCommand": {
+        "cmd": "cn",
+        "args": [
+          "-p",
+          "add docstrings to all public functions",
+          "--model",
+          "anthropic/claude-sonnet-4-6",
+          "--rule",
+          "<workdir>/CONTINUE.md",
+          "--format",
+          "json"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/CONTINUE.md",
+        "directories": [],
+        "model": " anthropic/claude-sonnet-4-6 "
+      }
+    },
+    {
+      "name": "caller-config-rejects-explicit-Hub-model",
+      "spec": {
+        "configFile": "<root>/continue.yaml"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "default-model-delegates-to-upstream-config",
+      "spec": {
+        "model": ""
+      },
+      "expectedCommand": {
+        "cmd": "cn",
+        "args": [
+          "-p",
+          "add docstrings to all public functions",
+          "--rule",
+          "<workdir>/CONTINUE.md",
+          "--format",
+          "json"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/CONTINUE.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "bypass-maps-to-auto",
+      "spec": {
+        "permissionPolicy": "bypass"
+      },
+      "expectedCommand": {
+        "cmd": "cn",
+        "args": [
+          "-p",
+          "add docstrings to all public functions",
+          "--auto",
+          "--model",
+          "anthropic/claude-sonnet-4-6",
+          "--rule",
+          "<workdir>/CONTINUE.md",
+          "--format",
+          "json"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/CONTINUE.md",
+        "directories": [],
+        "model": "anthropic/claude-sonnet-4-6"
+      }
+    },
+    {
+      "name": "bare-native-model-is-not-a-hub-slug",
+      "spec": {
+        "model": "claude-sonnet-4-6"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "model-text-usage-fields-are-not-telemetry",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 9.4,
+        "timedOut": false,
+        "stdout": "{\"status\":\"info\",\"message\":\"Auto-compacting triggered\",\"contextUsage\":\"91%\"}\n{\"status\":\"success\",\"message\":\"Auto-compacted successfully\"}\n{\"type\":\"result\",\"result\":\"added docstrings\",\"usage\":{\"input_tokens\":950,\"output_tokens\":380},\"total_cost_usd\":0.0187}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "type": "result",
+          "result": "added docstrings",
+          "usage": {
+            "input_tokens": 950,
+            "output_tokens": 380
+          },
+          "total_cost_usd": 0.0187
+        }
+      }
+    },
     {
       "name": "config-file-rejects-whitespace-model",
       "spec": {
@@ -75,6 +184,8 @@
           "-p",
           "--config",
           "<root>/continue.yaml",
+          "--rule",
+          "<workdir>/CONTINUE.md",
           "--format",
           "json",
           "add docstrings to all public functions"

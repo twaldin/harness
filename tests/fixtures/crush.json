@@ -56,10 +56,13 @@
       "kind": "sqlite",
       "path": "<workdir>/.harness/crush-data/crush.db",
       "sql": [
-        "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, cost REAL, model TEXT, updated_at INTEGER)",
-        "INSERT INTO sessions VALUES ('stale-root', NULL, 99999, 99999, 99.0, 'gpt-5.4', 10)",
-        "INSERT INTO sessions VALUES ('child', 'stale-root', 88888, 88888, 88.0, 'gpt-5.4', 300)",
-        "INSERT INTO sessions VALUES ('latest-root', NULL, 742, 198, 0.0114, 'gpt-5.4', 200)"
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, title TEXT NOT NULL, message_count INTEGER NOT NULL DEFAULT 0, prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, cost REAL NOT NULL DEFAULT 0.0, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+        "CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, parts TEXT NOT NULL DEFAULT '[]', model TEXT, provider TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, finished_at INTEGER)",
+        "INSERT INTO sessions (id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at) VALUES ('stale-root', NULL, 'stale', 2, 99999, 99999, 99.0, 10, 9)",
+        "INSERT INTO sessions (id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at) VALUES ('child', 'stale-root', 'child', 2, 88888, 88888, 88.0, 300, 299)",
+        "INSERT INTO sessions (id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at) VALUES ('latest-root', NULL, 'fix lint warnings', 2, 742, 198, 0.0114, 200, 199)",
+        "INSERT INTO messages (id, session_id, role, parts, model, provider, created_at, updated_at) VALUES ('latest-user', 'latest-root', 'user', '[]', 'gpt-5.4', 'openai', 199, 199)",
+        "INSERT INTO messages (id, session_id, role, parts, model, provider, created_at, updated_at, finished_at) VALUES ('latest-assistant', 'latest-root', 'assistant', '[]', 'gpt-5.4', 'openai', 200, 200, 200)"
       ]
     }
   ],

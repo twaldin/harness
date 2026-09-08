@@ -35,8 +35,8 @@ class OpenClaudeAdapter(Adapter):
     submit_keys = ("Enter",)
     install_meta = InstallMeta(
         package_manager="npm",
-        install_command=("npm", "install", "-g", "openclaude"),
-        update_command=("npm", "install", "-g", "openclaude@latest"),
+        install_command=("npm", "install", "-g", "@gitlawb/openclaude"),
+        update_command=("npm", "install", "-g", "@gitlawb/openclaude@latest"),
         version_command=("openclaude", "--version"),
     )
 

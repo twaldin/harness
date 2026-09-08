@@ -12,6 +12,11 @@
   Malformed or unsafe Claude token totals and non-finite Continue metrics remain
   unknown rather than throwing or reporting invalid numeric telemetry.
   Pane precedence and controlled-session ownership are unchanged.
+- Added `mistral-vibe` in both languages, using native completed-history JSONL
+  and the shared lifecycle. `VibeOptions` exposes agent selection and explicit
+  invocation-only workspace trust; projected instructions require trust.
+  Models use native configuration aliases; token/USD metrics stay null.
+  See [setup, permission behavior and qualification limits](ADAPTER-MATRIX.md#mistral-vibe).
 - Added the standalone `cline` CLI adapter in Python and TypeScript, with native
   provider/approval options, `CLINE_DIR`, explicit instruction attachment and
   terminal NDJSON usage. Upstream defaults to auto-approval.

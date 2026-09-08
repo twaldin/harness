@@ -41,7 +41,7 @@ ErrorCode = Literal[
     "protocol-error",
     "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "mistral-vibe"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 #: Signal the runner sends the owned process group once before escalating to
@@ -124,7 +124,23 @@ class CopilotOptions:
     deny_tools: tuple[str, ...] | list[str] | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
+@dataclass(frozen=True)
+class VibeOptions:
+    """Typed `vibe` (Mistral Vibe) CLI knobs. `agent` is emitted as
+    `--agent=<name>` and `trust` as a bare `--trust` when True, in that order.
+
+    `trust` marks the workdir as a trusted workspace so `vibe` reads its
+    `AGENTS.md`; a non-empty `RunSpec.instructions` therefore requires
+    `trust=True` and is otherwise rejected with `unsupported-capability`
+    rather than projected silently. `trust=False` injects nothing.
+    """
+
+    kind: Literal["mistral-vibe"] = field(default="mistral-vibe", init=False)
+    agent: str | None = None
+    trust: bool | None = None
+
+
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | VibeOptions
 
 
 @dataclass
@@ -158,7 +174,8 @@ class RunSpec:
                       rejected with `unsupported-capability` when the adapter
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
-                      `CodexOptions`, `ClineOptions`, `CopilotOptions`). The kind must match `harness`.
+                      `CodexOptions`, `ClineOptions`, `CopilotOptions`,
+                      `VibeOptions`). The kind must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -571,9 +588,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, VibeOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions or CopilotOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions or VibeOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -616,6 +633,16 @@ class Adapter(ABC):
                     "cline auto_approve conflicts with permission_policy='bypass' (bypass is --auto-approve true); choose one",
                     code="invalid-options",
                 )
+        elif isinstance(native, VibeOptions):
+            agent = native.agent
+            if agent is not None and (not isinstance(agent, str) or not agent.strip() or "\0" in agent):
+                raise HarnessError("mistral-vibe agent must be None or a non-blank string without NUL bytes", code="invalid-options")
+            trust = native.trust
+            if trust is not None and type(trust) is not bool:
+                raise HarnessError(
+                    f"mistral-vibe trust must be None or a bool, got {type(trust).__name__}",
+                    code="invalid-options",
+                )
 
     def resolve_run_spec(self, spec: RunSpec) -> ResolvedSpec:
         """Validate `spec` and resolve the adapter-facing model and extra argv.
@@ -643,6 +670,11 @@ class Adapter(ABC):
                 *(f"--allow-tool={rule}" for rule in native.allow_tools or ()),
                 *(f"--deny-tool={rule}" for rule in native.deny_tools or ()),
             )
+        elif isinstance(native, VibeOptions):
+            if native.agent is not None:
+                native_args += (f"--agent={native.agent}",)
+            if native.trust is True:
+                native_args += ("--trust",)
         config_args: tuple[str, ...] = ()
         if spec.config_file is not None:
             config_args = (self.config_file_flag, str(Path(spec.config_file)))  # type: ignore[assignment]

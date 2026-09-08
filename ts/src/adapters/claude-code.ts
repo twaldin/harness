@@ -19,12 +19,8 @@ const claudeCodeAdapter: Adapter = {
 
   buildCommand(spec: RunSpec): BuildCommand {
     const validated = validateRunSpec(this, spec)
-    const { model, permissionArgs, nativeOptions, configArgs } = validated
-    const args = ['-p', spec.prompt, '--model', model]
-    if (nativeOptions?.kind === 'claude-code' && nativeOptions.effort) {
-      args.push('--effort', nativeOptions.effort)
-    }
-    args.push('--output-format', 'json', ...permissionArgs, ...configArgs)
+    const { model, permissionArgs, nativeArgs, configArgs } = validated
+    const args = ['-p', spec.prompt, '--model', model, ...nativeArgs, '--output-format', 'json', ...permissionArgs, ...configArgs]
     // -p mode does not auto-walk workdir for CLAUDE.md; inject explicitly so
     // the instructions are always visible to the model.
     if (spec.instructions) {

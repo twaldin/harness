@@ -2,6 +2,16 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added `goose` in Python and TypeScript using the official headless JSONL CLI
+  and shared subprocess lifecycle. Preserves caller-selected model/provider/extensions,
+  supports inline instructions, `GOOSE_PATH_ROOT` and explicit `GOOSE_MODE=auto`,
+  and retains final cumulative usage plus native error events.
+  See [setup, synthetic-provider smoke and extension cleanup limits](ADAPTER-MATRIX.md#goose).
+- Added `copilot` in Python and TypeScript for the current official GitHub Copilot
+  CLI, with JSONL native events, explicit `CopilotOptions` tool allow/deny rules,
+  opt-in bypass and `COPILOT_HOME` selection through the shared subprocess lifecycle.
+  Token/USD totals stay null; premium requests and AI credits remain native data.
+  See [setup and dated provider/cancellation coverage](ADAPTER-MATRIX.md#copilot).
 - **Instruction lifecycle migration:** command builders are now side-effect-free.
   `run` / `runAsync` prepare and restore instructions automatically. External
   drivers must pair `prepare_command` / `prepareCommand` with
@@ -25,9 +35,9 @@
   must explicitly select Python `permission_policy="bypass"`, TypeScript
   `permissionPolicy: 'bypass'`, or CLI `--permission-policy bypass`. Unmapped
   adapters reject bypass instead of silently ignoring it.
-- Added explicit backend selection and static capability queries. Only `cli`
-  executes; `rpc` and `sdk` fail with `unsupported-backend` before preparation
-  or process creation. This is not a live-session or SDK implementation.
+- Added explicit backend selection and static capability queries. The one-shot
+  API executes only `cli`; `rpc` and `sdk` fail before preparation or process
+  creation. Controlled Pi RPC now uses the separate session API.
 - Added typed Claude Code effort and Codex sandbox options, validated before
   file writes. Codex sandbox and bypass cannot be combined.
 - Aligned eager registry initialization, collision errors, model selection,
@@ -42,8 +52,8 @@
   continues the batch without executing an unsupported request.
 - Expanded [SPEC](SPEC.md) with ownership, future backend/session gates,
   telemetry limits, and paired migration examples. Existing results remain
-  compatible; versions are unchanged and these source changes are not yet a
-  package release.
+  compatible; these source changes are not yet a package release. Paired
+  fixture-update patch bumps follow SPEC and do not publish packages.
 
 ## 2026-05-06 (later)
 

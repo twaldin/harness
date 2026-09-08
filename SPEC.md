@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (16 adapters)
+│   ├── adapters/*.py       (17 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "goose"
+  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "goose" | "copilot"
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -112,11 +112,16 @@ interface CodexOptions {
   kind: 'codex'
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'
 }
-type NativeOptions = ClaudeCodeOptions | CodexOptions
+interface CopilotOptions {
+  kind: 'copilot'
+  allowTools?: readonly string[]
+  denyTools?: readonly string[]
+}
+type NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions
 interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
-  nativeOptions: 'claude-code' | 'codex' | null
+  nativeOptions: 'claude-code' | 'codex' | 'copilot' | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -126,9 +131,14 @@ interface Capabilities {
 ```
 
 Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
-`ClaudeCodeOptions` and `CodexOptions` with equivalent values. Construct native
-options as `ClaudeCodeOptions(effort="high")` or
-`CodexOptions(sandbox="read-only")`; their `kind` is fixed by the dataclass.
+`ClaudeCodeOptions`, `CodexOptions` and `CopilotOptions` with equivalent values.
+Construct native options as `ClaudeCodeOptions(effort="high")`,
+`CodexOptions(sandbox="read-only")` or
+`CopilotOptions(allow_tools=("shell(git status)",), deny_tools=("write",))`;
+their `kind` is fixed by the dataclass. Copilot rule collections accept tuples
+or lists in Python and arrays in TypeScript. Empty collections emit no flags.
+Each member must be a nonempty, non-whitespace, NUL-free string; valid native
+rules are preserved verbatim, including upstream's comma/filter syntax.
 Native options are a discriminated union, not an untyped bag passed to an
 arbitrary upstream. New variants land with a real implementation in both languages.
 
@@ -225,7 +235,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All sixteen CLI adapters share these lifecycle capabilities.
+for sessions. All seventeen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -254,6 +264,7 @@ approval request by silently escalating.
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
+| copilot | `--allow-all` |
 
 The other four adapters reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
@@ -261,6 +272,9 @@ silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 `--sandbox`, and cannot be combined with `"bypass"` because that would override
 the selected sandbox. Claude Code `effort` emits `--effort`; it is not a common
 model/effort policy for every tool.
+Copilot `allowTools` / `denyTools` emit repeated `--allow-tool=<rule>` /
+`--deny-tool=<rule>` arguments, respectively; upstream denial takes precedence
+over grants, including explicit bypass. These rules do not enable bypass.
 
 **Compatibility change:** older command builders inserted bypass mappings
 unconditionally. Hermes, OMP and Continue's mappings postdate that change.
@@ -568,6 +582,22 @@ inspect `raw` for agent failure; Harness preserves the actual process status.
 Setup and noninteractive approval failures can exit nonzero without `complete`.
 See [Goose](ADAPTER-MATRIX.md#goose) for its config, output and teardown limits.
 
+### copilot
+
+`raw` is the ordered array of complete JSON objects from stdout, including
+assistant deltas/messages, native errors and the terminal `result`; null if
+none were decoded. Noise, JSON scalars/arrays and incomplete records are ignored
+by the parser but remain in `stdout`. A complete final JSON object needs no
+trailing newline. Interrupted runs retain their complete preceding events.
+
+Token totals and USD cost are null: the qualified 1.0.83 JSONL result reports
+premium requests, durations and code changes, not aggregate tokens or billed
+USD. Cache checkpoints and AI credits are not interchangeable with those metrics.
+Native error/result fields remain in `raw`; they do not overwrite the process
+exit code or Harness termination cause. Omitted model leaves upstream selection
+in charge and reports null. See the [adapter reference](ADAPTER-MATRIX.md#copilot)
+for setup, explicit permissions and qualification limits.
+
 ---
 
 ## Adapter contract
@@ -578,7 +608,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `hermes` and `goose` have none (empty sentinel), so upstream configuration selects the model and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `hermes`, `goose` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -657,6 +687,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | codex | `CODEX_HOME` | unsupported |
 | hermes | `HERMES_HOME` | unsupported |
 | goose | `GOOSE_PATH_ROOT` | unsupported |
+| copilot | `COPILOT_HOME` | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -676,8 +707,8 @@ Managed settings, upstream project discovery and upstream writes still apply.
 Raw `HOME`, `XDG_*` and native env overrides remain caller-controlled; passing
 an env variable does not claim the upstream supports it or separates credentials.
 Harness does not rewrite a user's settings to make a model selection stick.
-An omitted/empty model retains the existing adapter default contract; for Hermes
-and Goose that contract is no `--model` flag and a null reported model.
+An omitted/empty model retains the existing adapter default contract; for Hermes,
+Goose and Copilot that contract is no `--model` flag and a null reported model.
 
 OMP preserves the requested model string, including unknown provider prefixes;
 it does not apply Pi's `openai-codex/` inference. An explicit OMP `configHome`

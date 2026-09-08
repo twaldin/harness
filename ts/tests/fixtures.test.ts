@@ -309,7 +309,7 @@ for (const name of FIXTURE_NAMES) {
         rejects('unsupported-capability', { configFile })
       }
 
-      const kinds: NativeOptions[] = [{ kind: 'claude-code' }, { kind: 'codex' }]
+      const kinds: NativeOptions[] = [{ kind: 'claude-code' }, { kind: 'codex' }, { kind: 'copilot' }]
       for (const nativeOptions of kinds) {
         if (nativeOptions.kind !== caps.nativeOptions) {
           rejects('invalid-options', { nativeOptions })

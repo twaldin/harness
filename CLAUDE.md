@@ -1,8 +1,8 @@
 # harness
 
-`harness` is a dual-language (Python + TypeScript) adapter library that wraps sixteen
+`harness` is a dual-language (Python + TypeScript) adapter library that wraps seventeen
 AI coding-agent CLIs — `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`,
-`aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose` —
+`aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot` —
 behind a shared `RunSpec → RunResult` contract. Both implementations sit in
 this monorepo. [SPEC.md](SPEC.md) defines the shared contract and distinguishes
 shipped CLI behavior from future RPC/SDK implementation requirements.
@@ -57,8 +57,8 @@ Both implementations provide the core headless API described in
 - Functions: `listAdapters()`, `getAdapter()`, `getCapabilities()`,
   `buildCommand(spec)`, `parseOutput(spec, outcome)`, `run(spec)`,
   `runAsync(spec)` (Python uses snake_case names).
-- Adapters: sixteen registered names, exact strings — `aider`, `claude-code`,
-  `codex`, `continue-cli`, `crush`, `factory-droid`, `gemini`, `goose`, `hermes`,
+- Adapters: seventeen registered names, exact strings — `aider`, `claude-code`,
+  `codex`, `continue-cli`, `copilot`, `crush`, `factory-droid`, `gemini`, `goose`, `hermes`,
   `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`. Lookup is case-sensitive.
 
 Both package roots initialize the built-in registry and expose subprocess

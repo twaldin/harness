@@ -1,0 +1,552 @@
+{
+  "spec": {
+    "harness": "copilot",
+    "prompt": "Summarize the synthetic repository.",
+    "instructions": "Use only the synthetic repository.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "copilot",
+    "args": [
+      "--no-auto-update",
+      "--no-remote-export",
+      "--no-ask-user",
+      "--output-format",
+      "json",
+      "--prompt=Summarize the synthetic repository."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": "copilot",
+    "configHomeEnv": "COPILOT_HOME",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 2.5,
+    "timedOut": false,
+    "stdout": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"synthetic-message\",\"model\":\"synthetic-model\",\"content\":\"One source file.\",\"toolRequests\":[],\"turnId\":\"0\",\"phase\":\"final_answer\"}}\n{\"type\":\"result\",\"timestamp\":\"2026-09-08T00:00:00Z\",\"sessionId\":\"synthetic-session\",\"exitCode\":0,\"usage\":{\"premiumRequests\":1,\"totalApiDurationMs\":1200,\"sessionDurationMs\":2400,\"codeChanges\":{\"linesAdded\":0,\"linesRemoved\":0,\"filesModified\":[]}}}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": [
+      {
+        "type": "assistant.message",
+        "data": {
+          "messageId": "synthetic-message",
+          "model": "synthetic-model",
+          "content": "One source file.",
+          "toolRequests": [],
+          "turnId": "0",
+          "phase": "final_answer"
+        }
+      },
+      {
+        "type": "result",
+        "timestamp": "2026-09-08T00:00:00Z",
+        "sessionId": "synthetic-session",
+        "exitCode": 0,
+        "usage": {
+          "premiumRequests": 1,
+          "totalApiDurationMs": 1200,
+          "sessionDurationMs": 2400,
+          "codeChanges": {
+            "linesAdded": 0,
+            "linesRemoved": 0,
+            "filesModified": []
+          }
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "nonzero-error-preserves-native-events",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"session.error\",\"data\":{\"errorType\":\"authentication\",\"message\":\"Synthetic account has no access\"}}\n",
+        "stderr": "Synthetic provider rejected request.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "session.error",
+            "data": {
+              "errorType": "authentication",
+              "message": "Synthetic account has no access"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "partial-output-preserves-complete-events-before-tail",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"assistant.message_delta\",\"data\":{\"messageId\":\"synthetic-message\",\"deltaContent\":\"Partial\"}}\n{\"type\":\"assistant.message_delta\",\"data\":",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "assistant.message_delta",
+            "data": {
+              "messageId": "synthetic-message",
+              "deltaContent": "Partial"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "noise-nonobjects-and-malformed-lines-ignored",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "null\n[]\n3\n\"text\"\n{\"invalid\":NaN}\n{\"invalid\":Infinity}\n{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"synthetic-message\",\"model\":\"synthetic-model\",\"content\":\"One source file.\",\"toolRequests\":[],\"turnId\":\"0\",\"phase\":\"final_answer\"}}\nnot json\n{\"incomplete\":",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "assistant.message",
+            "data": {
+              "messageId": "synthetic-message",
+              "model": "synthetic-model",
+              "content": "One source file.",
+              "toolRequests": [],
+              "turnId": "0",
+              "phase": "final_answer"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "complete-final-object-without-newline-retained",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\": \"result\", \"timestamp\": \"2026-09-08T00:00:00Z\", \"sessionId\": \"synthetic-session\", \"exitCode\": 0, \"usage\": {\"premiumRequests\": 1, \"totalApiDurationMs\": 1200, \"sessionDurationMs\": 2400, \"codeChanges\": {\"linesAdded\": 0, \"linesRemoved\": 0, \"filesModified\": []}}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "result",
+            "timestamp": "2026-09-08T00:00:00Z",
+            "sessionId": "synthetic-session",
+            "exitCode": 0,
+            "usage": {
+              "premiumRequests": 1,
+              "totalApiDurationMs": 1200,
+              "sessionDurationMs": 2400,
+              "codeChanges": {
+                "linesAdded": 0,
+                "linesRemoved": 0,
+                "filesModified": []
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-output-has-no-events",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "native-billing-and-cache-state-not-token-or-usd-totals",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"session.usage_checkpoint\",\"data\":{\"totalNanoAiu\":999,\"totalPremiumRequests\":1,\"promptCacheBreakState\":[{\"prompt_tokens\":100,\"cache_read\":50}]}}\n{\"type\":\"result\",\"timestamp\":\"2026-09-08T00:00:00Z\",\"sessionId\":\"synthetic-session\",\"exitCode\":0,\"usage\":{\"premiumRequests\":1,\"totalApiDurationMs\":1200,\"sessionDurationMs\":2400,\"codeChanges\":{\"linesAdded\":0,\"linesRemoved\":0,\"filesModified\":[]}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "session.usage_checkpoint",
+            "data": {
+              "totalNanoAiu": 999,
+              "totalPremiumRequests": 1,
+              "promptCacheBreakState": [
+                {
+                  "prompt_tokens": 100,
+                  "cache_read": 50
+                }
+              ]
+            }
+          },
+          {
+            "type": "result",
+            "timestamp": "2026-09-08T00:00:00Z",
+            "sessionId": "synthetic-session",
+            "exitCode": 0,
+            "usage": {
+              "premiumRequests": 1,
+              "totalApiDurationMs": 1200,
+              "sessionDurationMs": 2400,
+              "codeChanges": {
+                "linesAdded": 0,
+                "linesRemoved": 0,
+                "filesModified": []
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "native-error-does-not-rewrite-process-exit",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.5,
+        "timedOut": false,
+        "stdout": "{\"type\":\"session.error\",\"data\":{\"errorType\":\"authentication\",\"message\":\"Synthetic account has no access\"}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "session.error",
+            "data": {
+              "errorType": "authentication",
+              "message": "Synthetic account has no access"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "prompt-flag-injection-is-literal",
+      "spec": {
+        "prompt": "--allow-all\nsecond line"
+      },
+      "expectedCommand": {
+        "cmd": "copilot",
+        "args": [
+          "--no-auto-update",
+          "--no-remote-export",
+          "--no-ask-user",
+          "--output-format",
+          "json",
+          "--prompt=--allow-all\nsecond line"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "empty-prompt-rejected",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "explicit-model-preserved",
+      "spec": {
+        "model": " vendor/custom-model "
+      },
+      "expectedCommand": {
+        "cmd": "copilot",
+        "args": [
+          "--no-auto-update",
+          "--no-remote-export",
+          "--no-ask-user",
+          "--output-format",
+          "json",
+          "--model",
+          "vendor/custom-model",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": " vendor/custom-model "
+      }
+    },
+    {
+      "name": "whitespace-model-omits-flag",
+      "spec": {
+        "model": "   "
+      },
+      "expectedCommand": {
+        "cmd": "copilot",
+        "args": [
+          "--no-auto-update",
+          "--no-remote-export",
+          "--no-ask-user",
+          "--output-format",
+          "json",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "   "
+      }
+    },
+    {
+      "name": "explicit-permission-rules-and-bypass",
+      "spec": {
+        "model": "gpt-5.4",
+        "permissionPolicy": "bypass",
+        "nativeOptions": {
+          "kind": "copilot",
+          "allowTools": [
+            "shell(git status)",
+            "read"
+          ],
+          "denyTools": [
+            "shell(git push)",
+            "write"
+          ]
+        }
+      },
+      "expectedCommand": {
+        "cmd": "copilot",
+        "args": [
+          "--no-auto-update",
+          "--no-remote-export",
+          "--no-ask-user",
+          "--output-format",
+          "json",
+          "--model",
+          "gpt-5.4",
+          "--allow-all",
+          "--allow-tool=shell(git status)",
+          "--allow-tool=read",
+          "--deny-tool=shell(git push)",
+          "--deny-tool=write",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      }
+    },
+    {
+      "name": "scoped-rules-do-not-enable-bypass",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "allowTools": [
+            "shell(git status)"
+          ],
+          "denyTools": [
+            "write"
+          ]
+        }
+      },
+      "expectedCommand": {
+        "cmd": "copilot",
+        "args": [
+          "--no-auto-update",
+          "--no-remote-export",
+          "--no-ask-user",
+          "--output-format",
+          "json",
+          "--allow-tool=shell(git status)",
+          "--deny-tool=write",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "empty-rule-arrays-emit-no-permissions",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "allowTools": [],
+          "denyTools": []
+        }
+      },
+      "expectedCommand": {
+        "cmd": "copilot",
+        "args": [
+          "--no-auto-update",
+          "--no-remote-export",
+          "--no-ask-user",
+          "--output-format",
+          "json",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "config-home-and-executable-override",
+      "spec": {
+        "configHome": "<root>/copilot-home",
+        "executable": "<root>/copilot-custom"
+      },
+      "expectedCommand": {
+        "cmd": "<root>/copilot-custom",
+        "args": [
+          "--no-auto-update",
+          "--no-remote-export",
+          "--no-ask-user",
+          "--output-format",
+          "json",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "COPILOT_HOME": "<root>/copilot-home"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "config-home-env-conflict",
+      "spec": {
+        "configHome": "<root>/copilot-home",
+        "env": {
+          "COPILOT_HOME": "<root>/other-home"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "scalar-tool-list",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "allowTools": "read"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "nonstring-tool-rule",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "allowTools": [
+            1
+          ]
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "empty-tool-rule",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "allowTools": [
+            ""
+          ]
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "whitespace-tool-rule",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "denyTools": [
+            "  "
+          ]
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "nul-tool-rule",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "denyTools": [
+            "write\u0000"
+          ]
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "unknown-native-option",
+      "spec": {
+        "nativeOptions": {
+          "kind": "copilot",
+          "agent": "reviewer"
+        }
+      },
+      "expectedError": "invalid-options"
+    }
+  ]
+}

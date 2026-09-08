@@ -3,7 +3,7 @@ import './adapters/index.js'
 export type {
   RunSpec, BuildCommand, SubprocOutcome, RunResult, ParsedOutput, Adapter,
   ReadyState, AgentStatus, SessionTelemetry, InstallMeta, ScrollKeys,
-  Backend, PermissionPolicy, NativeOptions, ClaudeCodeOptions, CodexOptions,
+  Backend, PermissionPolicy, NativeOptions, ClaudeCodeOptions, CodexOptions, CopilotOptions,
   ClaudeCodeEffort, CodexSandbox, ErrorCode, Capabilities, ValidatedRunSpec,
   Termination, TimeoutKind, OutputStream, OutputCallback,
 } from './base.js'

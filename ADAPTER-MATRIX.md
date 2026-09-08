@@ -11,9 +11,9 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The fifteen adapters below are registered in **both** implementations and have
+The sixteen adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `crush`,
-`factory-droid`, `gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
+`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
@@ -58,6 +58,7 @@ versions below are dated observations, not a supported version range.
 | pi | [`@earendil-works/pi-coding-agent`; upstream](https://github.com/earendil-works/pi) (0.85.1) | not on PATH | Source-checked CLI JSON contract; old `@mariozechner/pi-coding-agent` 0.73.1 is explicitly deprecated. Install metadata corrected; runtime/RPC acceptance remains TWA-71. |
 | qwen | [`@qwen-code/qwen-code`; headless source](https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/headless.md) (0.23.0) | not on PATH | Source-checked flags/result array. Existing default `qwen3-coder` is not provider-qualified; current upstream also uses `coder-model`. Hash/project session layouts remain TWA-96. |
 | swe-agent | [`mini-swe-agent`; native CLI docs](https://mini-swe-agent.com/latest/usage/mini/) (registry 2.4.6) plus a **consumer-supplied wrapper** | dependency 2.2.8; wrapper help checked | Wrapper-only, not native SWE-agent/mini support. `mini --version` fails; metadata now queries the dependency via the wrapper's `python3`. Installing the dependency does not install the wrapper. Native mini is TWA-82. |
+| goose | [`aaif-goose/goose` release binary](https://github.com/aaif-goose/goose/releases/tag/v1.49.0); [CLI reference](https://goose-docs.ai/docs/guides/goose-cli-commands) | isolated Darwin arm64 v1.49.0; not installed on PATH | Help/source-checked; bounded real CLI probes with synthetic localhost provider. No authenticated provider coverage. macOS stdio MCP children can escape group teardown; see below. |
 
 Off-PATH probes used absolute executables; Harness does not add them to PATH.
 No tools were upgraded, credentials switched, global configuration rewritten or
@@ -67,7 +68,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `hermes` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
 upstreams and tracked in TWA-96. These are caller-driven artifact helpers, not
@@ -90,21 +91,22 @@ controlled sessions.
 | aider | unwired | unwired | no session-log hooks |
 | hermes | unwired | unwired | no session-log hooks; the headless `raw.session_id` comes from stderr, not a log file |
 | omp | unwired | unwired | ephemeral headless JSONL; no latest-session discovery |
+| goose | unwired | unwired | `complete` usage comes from stdout; no latest-session discovery or session ID in stream events |
 
 ## Backend and permission capabilities
 
-All fifteen currently implement `backend="cli"` only. `rpc` and `sdk` are
+All sixteen currently implement `backend="cli"` only. `rpc` and `sdk` are
 explicitly unsupported, with no fallback. `get_capabilities` / `getCapabilities`
 reports implemented support without probing binaries or credentials. Streaming
 (raw subprocess chunks) and cancellation are true for every shipped CLI adapter
 under the shared execution engine; controlled sessions are false. Streaming is
 chunk delivery of whatever the CLI writes, not structured events.
 Pure pane/install helpers exist for the same twelve adapters that have session
-hooks; `aider` and `hermes` ship none.
+hooks; `aider`, `goose` and `hermes` ship none.
 OMP adds install metadata but no Pi-derived pane or session-log heuristics.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
-flags. This preserves the selected upstream's policy, not a guarantee of
+flags or mode environment overrides. This preserves upstream policy, not a guarantee of
 sandboxing or an interactive approval channel. To intentionally regain the old
 auto-approval behavior, use `permission_policy="bypass"` /
 `permissionPolicy: "bypass"`. The mapping is:
@@ -120,6 +122,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
 | continue-cli | `--auto` |
+| goose | child environment `GOOSE_MODE=auto`; conflicting explicit `env.GOOSE_MODE` rejects |
 | crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
 Only Claude Code and Codex currently have typed native options:
@@ -130,8 +133,9 @@ Sandbox plus bypass is a conflict, not a precedence rule. See
 
 Configuration selection is also explicit: `executable` selects the binary;
 `configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
-Codex, `HERMES_HOME` for Hermes, and `PI_CODING_AGENT_DIR` plus `--profile default`
-for OMP. `configFile` maps to Claude Code `--settings`, or `--config` for Aider,
+Codex, `HERMES_HOME` for Hermes, `GOOSE_PATH_ROOT` for Goose, and
+`PI_CODING_AGENT_DIR` plus `--profile default` for OMP.
+`configFile` maps to Claude Code `--settings`, or `--config` for Aider,
 Continue and OMP. Other adapters reject these typed overrides. Existing
 caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
@@ -161,6 +165,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
 | kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
 | hermes       | **null**          | **null**                      | not parsed; stdout is preserved verbatim, only `session_id:` stderr lines are read |
+| goose        | optional upstream cost (may be estimated) | optional cumulative totals | last JSONL `complete` event; partial stream without completion has null metrics |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
@@ -178,6 +183,7 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
   - **crush** preserves explicit provider prefixes and passes bare names through.
   - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
   - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
+  - **goose** preserves explicit model IDs without provider inference; omitted/empty model delegates to upstream config and reports null.
   - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
   - `crush`: `--model == --small-model`
@@ -569,6 +575,91 @@ stdout is the plain final response; stderr carries the session line in quiet mod
 ```
 session_id: 20260908_094809_a1b2c3
 ```
+
+---
+
+## goose
+
+- **Distribution / setup:** official native `goose` binary from
+  [aaif-goose/goose](https://github.com/aaif-goose/goose) (formerly `block/goose`).
+  The [official installation guide](https://goose-docs.ai/docs/getting-started/installation)
+  supplies the release installer; configure provider/model/extensions locally
+  with `goose configure`, or select existing configuration through `configHome`
+  and caller env. Harness neither installs the CLI nor reads/copies credentials.
+- **Command:** `goose run --quiet --output-format stream-json`, optional
+  `--model <trimmed model>`, optional `--system=<exact instructions>`, then
+  `--text=<exact prompt>`. Equals forms preserve empty and leading-dash text.
+  Instructions are inline, not projected into `.goosehints` or `AGENTS.md`.
+  Upstream context files still apply according to `CONTEXT_FILE_NAMES`.
+- **Model / provider:** no library default or provider inference. Omitted/empty
+  model emits no flag and reports null; explicit IDs are trimmed only for argv.
+  `GOOSE_PROVIDER`, `GOOSE_MODEL`, credentials and helper-model settings remain
+  upstream-controlled; an explicit `--model` overrides upstream model selection.
+- **Permissions:** default `upstream` adds no mode override. Goose defaults to
+  `auto`, but caller `GOOSE_MODE`/config can select `chat`, `approve` or
+  `smart_approve`. Headless approval requests fail instead of being approved.
+  Explicit Harness `bypass` sets child `GOOSE_MODE=auto`; a different explicit
+  `env.GOOSE_MODE` conflicts (`invalid-options`). Inherited mode may be overridden
+  by that explicit policy. No global settings are changed.
+- **Configuration:** `configHome` maps to documented
+  [`GOOSE_PATH_ROOT`](https://goose-docs.ai/docs/guides/environment-variables),
+  relocating Goose config/data/state, not isolating credentials. System config,
+  `GOOSE_ADDITIONAL_CONFIG_FILES`, project plugins/context and user-selected
+  external paths can still apply. `configFile` and typed native options reject.
+- **Input / sessions / extensions:** Harness uses text input plus additive system
+  instructions. Upstream file/stdin input (`-i <file>` / `-i -`), recipes,
+  resume/fork, `--no-session`, and `--with-*` extension flags are not exposed as
+  typed options. Common finite stdin is delivered to the process, not substituted
+  for `prompt`. Caller-configured extensions remain enabled; Harness does not
+  inject `--no-profile`. Goose normally stores sessions in SQLite; even upstream
+  `--no-session` creates a hidden row in v1.49.0. No session discovery, resume,
+  pane, install helper or RPC/SDK backend is claimed by this adapter.
+- **Output:** `raw` is the ordered array of JSON objects with a string `type`,
+  including `message`, `notification`, `error`, `complete` and unknown future
+  events; null when none parse. Non-JSON banners, scalar/array values, typeless
+  objects and malformed/truncated lines are ignored. The last `complete`
+  supplies cumulative `input_tokens`, `output_tokens`, `cost_usd` independently;
+  absent/invalid values are null, zero is retained, totals are never summed.
+  Token values must be finite nonnegative integers; cost must be finite and
+  nonnegative. Cache/total fields remain in raw without inventing missing metrics.
+  Upstream cumulative usage can include descendant sessions and cost estimates.
+- **Failure:** bootstrap or approval errors can exit nonzero without structured
+  completion. Provider stream failures can emit `error` then `complete` and
+  exit **zero**. Harness retains the actual exit status; inspect raw events for
+  agent failure. Interrupted streams retain parsed events but have null metrics
+  if no complete was captured. Original stdout/stderr stay on `RunResult`.
+
+### Qualification and ownership boundary — 2026-09-08
+
+Official v1.49.0 (released September 3), source
+[`71fc4be1`](https://github.com/aaif-goose/goose/tree/v1.49.0), was checked against
+an isolated `goose-aarch64-apple-darwin.tar.bz2` executable; `--version` reports
+`1.49.0` and `run --help` accepts the emitted flags. Primary implementation:
+[`cli.rs`](https://github.com/aaif-goose/goose/blob/v1.49.0/crates/goose-cli/src/cli.rs),
+[`session/mod.rs`](https://github.com/aaif-goose/goose/blob/v1.49.0/crates/goose-cli/src/session/mod.rs),
+[`session/builder.rs`](https://github.com/aaif-goose/goose/blob/v1.49.0/crates/goose-cli/src/session/builder.rs).
+
+Bounded macOS real-CLI probes used a synthetic localhost OpenAI-compatible
+provider, isolated state and disabled keyring access—not an authenticated
+provider. Python `run`/`run_async` and TypeScript `run`/`runAsync` each completed
+the actual adapter command, retained streamed output and inline instructions,
+reported synthetic usage 11 input / 3 output with null cost and null reported
+model (upstream-configured), and released the workdir lease. A built-in developer
+shell sleep stopped with the original process
+group at a four-second timeout. `GOOSE_MODE=approve` rejected the same tool
+request with exit 1 and no shell launch. A stdio MCP tool still running at timeout
+survived under PID 1 in its own process group; only that reverified test child was
+then stopped. No unrelated processes or shared services were stopped.
+
+This is the existing [SPEC detached-descendant exclusion](SPEC.md#ownership-and-execution),
+not complete extension-tree cancellation. Goose
+[`subprocess.rs`](https://github.com/aaif-goose/goose/blob/v1.49.0/crates/goose/src/subprocess.rs)
+starts stdio MCP children in new groups and has Linux-only parent-death signaling;
+the CLI handles SIGINT, not SIGTERM. Cancellation/timeout covers the original
+group, **not** escaped extensions, remote tools or container runtimes. Their
+lifecycle remains caller/upstream-owned. Harness does not silently disable them
+or launch a supervisor. Authenticated providers, Linux upstream process cleanup,
+ACP providers and external extensions remain unqualified.
 
 ---
 

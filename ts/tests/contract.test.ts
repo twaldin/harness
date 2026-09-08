@@ -56,11 +56,12 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   omp: ['--auto-approve'],
   'continue-cli': ['--auto'],
 }
+const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MODE: 'auto' } }
 
 const NO_BYPASS = ['opencode', 'pi', 'crush', 'swe-agent']
 
 const ALL_BYPASS_FLAGS = Object.values(BYPASS_FLAGS).flat()
-const SHIPPED = [...Object.keys(BYPASS_FLAGS), ...NO_BYPASS]
+const SHIPPED = [...Object.keys(BYPASS_FLAGS), ...Object.keys(BYPASS_ENVS), ...NO_BYPASS]
 
 describe('permission policy', () => {
   for (const [name, flags] of Object.entries(BYPASS_FLAGS)) {
@@ -230,6 +231,7 @@ describe('getCapabilities', () => {
       'claude-code': ['CLAUDE_CONFIG_DIR', '--settings'],
       codex: ['CODEX_HOME', null],
       hermes: ['HERMES_HOME', null],
+      goose: ['GOOSE_PATH_ROOT', null],
       aider: [null, '--config'],
       'continue-cli': [null, '--config'],
       omp: ['PI_CODING_AGENT_DIR', '--config'],
@@ -246,7 +248,7 @@ describe('getCapabilities', () => {
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')
-      expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS)
+      expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS || name in BYPASS_ENVS)
       if (name !== 'claude-code' && name !== 'codex') expect(caps.nativeOptions).toBeNull()
       expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)

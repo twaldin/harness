@@ -7,11 +7,6 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-function stripMarkdownFences(s: string): string {
-  const m = /^```(?:[a-z]+)?\n([\s\S]*?)\n```\s*$/.exec(s)
-  return m ? m[1]! : s
-}
-
 const claudeCodeAdapter: Adapter = {
   name: 'claude-code',
   instructionsFilename: 'CLAUDE.md',
@@ -49,10 +44,6 @@ const claudeCodeAdapter: Adapter = {
     }
     if (raw !== null && typeof raw === 'object' && raw !== null) {
       const obj = raw as Record<string, unknown>
-      // Strip markdown fences that claude-code occasionally wraps output in.
-      if (typeof obj['result'] === 'string') {
-        obj['result'] = stripMarkdownFences(obj['result'] as string)
-      }
       const usage = (obj['usage'] as Record<string, unknown> | undefined) ?? {}
       return {
         costUsd: (obj['total_cost_usd'] as number | undefined) ?? null,

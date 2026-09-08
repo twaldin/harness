@@ -2,7 +2,6 @@
   "spec": {
     "harness": "kilo",
     "prompt": "fix broken unit tests",
-    "workdir": "/tmp/harness-fixture-kilo",
     "model": "gpt-5.4",
     "instructions": "Minimize scope.\n",
     "timeoutSeconds": 900
@@ -14,12 +13,34 @@
       "--format",
       "json",
       "--dir",
-      "/tmp/harness-fixture-kilo",
+      "<workdir>",
       "--model",
       "openai/gpt-5.4",
       "fix broken unit tests"
     ],
-    "instructionsFile": "/tmp/harness-fixture-kilo/AGENTS.md"
+    "cwd": "<workdir>",
+    "env": {
+      "KILO_DB": "<workdir>/.harness/kilo/kilo.db",
+      "KILO_CONFIG_CONTENT": "{\"model\":\"openai/gpt-5.4\",\"small_model\":\"openai/gpt-5.4\",\"default_agent\":\"build\"}"
+    },
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [
+      "<workdir>/.harness/kilo"
+    ],
+    "model": "gpt-5.4"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -29,9 +50,31 @@
     "stderr": ""
   },
   "expectedParsed": {
+    "costUsd": 0.0081,
+    "tokensIn": 810,
+    "tokensOut": 210,
+    "raw": null
+  },
+  "artifacts": [
+    {
+      "kind": "sqlite",
+      "path": "<workdir>/.harness/kilo/kilo.db",
+      "sql": [
+        "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL)",
+        "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL)",
+        "INSERT INTO session (id, directory, time_updated) VALUES ('stale', '<workdir>', 10)",
+        "INSERT INTO message (id, session_id, data) VALUES ('stale-1', 'stale', '{\"role\":\"assistant\",\"tokens\":{\"input\":99999,\"output\":99999},\"cost\":99.0}')",
+        "INSERT INTO session (id, directory, time_updated) VALUES ('latest', '<workdir>', 200)",
+        "INSERT INTO message (id, session_id, data) VALUES ('latest-1', 'latest', '{\"role\":\"assistant\",\"model\":\"openai/gpt-5.4\",\"tokens\":{\"input\":600,\"output\":150},\"cost\":0.006}')",
+        "INSERT INTO message (id, session_id, data) VALUES ('latest-2', 'latest', '{\"role\":\"assistant\",\"model\":\"openai/gpt-5.4\",\"tokens\":{\"input\":210,\"output\":60},\"cost\":0.0021}')",
+        "INSERT INTO message (id, session_id, data) VALUES ('latest-3', 'latest', '{\"role\":\"user\",\"tokens\":{\"input\":99999,\"output\":99999},\"cost\":99.0}')"
+      ]
+    }
+  ],
+  "expectedParsedWithoutArtifacts": {
     "costUsd": null,
     "tokensIn": null,
     "tokensOut": null,
-    "note": "kilo token/cost values are read from kilo.db after exit. With no DB fixture in this test, parseOutput returns null metrics."
+    "raw": null
   }
 }

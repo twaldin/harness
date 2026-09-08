@@ -160,7 +160,8 @@ class _LoopSink(_Sink):
 
     @property
     def pending(self) -> bool:  # type: ignore[override]
-        return self.future is not None and not self.future.done()
+        # Completed futures still own delivery until wait() collects their result.
+        return self.future is not None
 
     async def _invoke(self, text: str, stream: OutputStream) -> None:
         result = self.callback(text, stream)

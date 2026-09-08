@@ -49,8 +49,8 @@ their process tree has stopped. `parseOutput` MAY read files written by the CLI
 respect to network state.
 
 New adapters are wired in by adding an `import './<name>.js'` line to
-`src/adapters/index.ts`, a fixture at `../tests/fixtures/<name>.json` and the
-name to `ADAPTER_NAMES` in `tests/fixtures.test.ts`.
+`src/adapters/index.ts` and a fixture at `../tests/fixtures/<name>.json`.
+Both fixture loaders discover names and require them to match the registry.
 
 ## Model normalization
 
@@ -74,17 +74,15 @@ harness-specific rewriting, but surrounding whitespace is still trimmed.
 
 ## Fixture parity
 
-`tests/fixtures.test.ts` loads the adapter names in its explicit
-`ADAPTER_NAMES` list from `../tests/fixtures/`. It compares command arguments
-and instruction paths exactly. Fixtures with `expectedParsed.note` assert
-null metrics instead of the recorded values. Python uses adapter-specific
-assertions rather than the same generic loop. See the
-[shared coverage notes](../CLAUDE.md#how-parity-is-enforced).
+`tests/fixtures.test.ts` and Python's `tests/test_fixtures.py` assert the same
+discovered command, parser and capability cases, including real substitute-CLI
+execution and synthetic database/trajectory artifacts. The subprocess manifest
+at `../tests/subprocess_cases.json` runs against source under Bun and the built
+package under Node. See [the fixture contract](../SPEC.md#json-fixture-driven-verification)
+and [offline versus live coverage](../CONTRIBUTING.md#offline-conformance-versus-live-smoke).
 
-`tests/adapters/*-sessionlog.test.ts` covers selected session-log parsers:
-crush and kilo create temporary sqlite databases; continue-cli, factory-droid,
-openclaude and qwen use JSON/JSONL files. `opencode-parse.test.ts` covers
-per-run database selection. Python's `tests/test_*_db.py` covers all three schemas.
+`tests/adapters/*-sessionlog.test.ts` and `opencode-parse.test.ts` retain
+additional session-log and database-selection edge coverage.
 
 ## Things to keep in lockstep
 

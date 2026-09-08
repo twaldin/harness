@@ -59,12 +59,12 @@ def _scrape_aider_tokens(text: str, pattern: re.Pattern) -> tuple[int | None, in
 
 
 def _parse_aider_num(s: str) -> int | None:
-    s = s.replace(",", "").strip()
+    s = s.replace(",", "").strip().lower()
     if not s:
         return None
     try:
         if s.endswith("k"):
             return round(float(s[:-1]) * 1000)
         return int(float(s))
-    except ValueError:
+    except (ValueError, OverflowError):
         return None

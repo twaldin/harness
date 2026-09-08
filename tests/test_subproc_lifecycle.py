@@ -1,19 +1,28 @@
 """Subprocess lifecycle contract: group ownership, cancellation, termination classification.
 
-Driven by the shared fixture in tests/process_tree.py, which records the pids
-it creates and a `ready` marker so tests never rely on startup sleeps. Every
-test kills its own recorded pids on teardown; nothing is matched by name.
+The cross-language scenarios live in tests/subprocess_cases.json and run here
+through `test_shared_case`; ts/tests/subproc-lifecycle.test.ts and the Node
+smoke consume the same file, so each case's observable outcome is asserted
+identically in both languages. Python-only behavior (Task.cancel, startup
+races, adapter-level classification) stays as ordinary tests below.
+
+Children come from tests/process_tree.py (ownership: records the pids it
+creates and a `ready` marker so tests never rely on startup sleeps) and
+tests/subprocess_child.py (byte-level I/O). Every test kills its own recorded
+pids on teardown; nothing is matched by name.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import signal
-import stat
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -23,9 +32,11 @@ import harness.adapters  # noqa: F401 — populates registry
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.base import RunSpec
 from harness.registry import run, run_async
-from tests.process_tree import STDERR_MARKER, STDOUT_TEXT
+from tests.process_tree import STDOUT_TEXT
 
-FIXTURE = Path(__file__).parent / "process_tree.py"
+TESTS = Path(__file__).parent
+FIXTURE = TESTS / "process_tree.py"
+CASES_PATH = TESTS / "subprocess_cases.json"
 PYTHON = sys.executable
 ROLES = ("leader", "child", "grandchild")
 
@@ -132,88 +143,230 @@ def unrelated_process():
     proc.wait()
 
 
-def _assert_stopped(outcome: SubprocOutcome, directory: Path) -> None:
-    pids = _recorded(directory)
-    assert set(pids) == set(ROLES)
-    assert _wait_gone(list(pids.values())) == []
-    assert outcome.duration_seconds < CLEANUP_BUDGET + SLACK + 1  # 1s run timeout, or cancel/exit right after readiness
-    assert outcome.stdout == STDOUT_TEXT  # partial capture survives forced termination
-    assert STDERR_MARKER in outcome.stderr
+# ── shared cases (tests/subprocess_cases.json) ─────────────────────────────
+
+MANIFEST = json.loads(CASES_PATH.read_text(encoding="utf-8"))
+LANGUAGE = "python"
+RUNNERS = ("sync", "async")
+REQUIRED_CATEGORIES = {"spawn", "stdinEof", "signal", "timeout", "cancellation", "grandchildren", "flood", "chunkBoundary"}
+OPTION_NAMES = {
+    "timeoutSeconds": "timeout_seconds",
+    "inactivityTimeoutSeconds": "inactivity_timeout_seconds",
+    "maxOutputBytes": "max_output_bytes",
+    "stdin": "stdin",
+}
+OUTCOME_FIELDS = {
+    "termination": "termination",
+    "exitCode": "exit_code",
+    "timedOut": "timed_out",
+    "signal": "signal",
+    "launchError": "launch_error",
+    "timeoutKind": "timeout_kind",
+    "callbackError": "callback_error",
+    "stdout": "stdout",
+    "stderr": "stderr",
+    "stdoutBytes": "stdout_bytes",
+    "stderrBytes": "stderr_bytes",
+    "stdoutTruncated": "stdout_truncated",
+    "stderrTruncated": "stderr_truncated",
+}
+DERIVED_EXPECTATIONS = {
+    "stdoutLength", "stderrLength", "stdoutEqualsStdin", "stdoutPattern", "stderrContains",
+    "streamedStdout", "streamedStderr", "streamedNoReplacement",
+    "minDurationSeconds", "maxDurationSeconds", "maxCancelLatencySeconds",
+    "treeStopped", "leaderReaped", "childRunning", "filesExist", "filesAbsent",
+}
+STREAMED_EXPECTATIONS = {"streamedStdout", "streamedStderr", "streamedNoReplacement"}
+TREE_EXPECTATIONS = {"treeStopped", "leaderReaped", "childRunning"}
 
 
-# ── timeout ─────────────────────────────────────────────────────────────────
+@dataclass
+class _Observed:
+    outcome: SubprocOutcome
+    stdin: str | None
+    chunks: list[tuple[str, str]] = field(default_factory=list)
+    cancel_latency: float | None = None
+
+    def streamed(self, stream: str) -> str:
+        return "".join(text for name, text in self.chunks if name == stream)
 
 
-def test_sync_timeout_kills_term_ignoring_tree(tree_dir: Path):
-    outcome = run_subprocess(_fixture_cmd("tree", tree_dir), cwd=tree_dir, timeout_seconds=1)
-    assert outcome.timed_out
-    assert outcome.exit_code == -1
-    assert outcome.termination == "timed-out"
-    assert outcome.launch_error is None
-    assert outcome.duration_seconds >= 1
-    _assert_stopped(outcome, tree_dir)
+def _substitute(value: str, directory: Path) -> str:
+    return value.replace("{python}", PYTHON).replace("{tests}", str(TESTS)).replace("{dir}", str(directory))
 
 
-async def test_async_timeout_kills_term_ignoring_tree(tree_dir: Path):
-    outcome = await run_subprocess_async(_fixture_cmd("tree", tree_dir), cwd=tree_dir, timeout_seconds=1)
-    assert outcome.timed_out
-    assert outcome.exit_code == -1
-    assert outcome.termination == "timed-out"
-    _assert_stopped(outcome, tree_dir)
+def _stdin_text(spec: object) -> str | None:
+    if isinstance(spec, dict):
+        return spec["repeat"] * spec["times"]
+    assert spec is None or isinstance(spec, str)
+    return spec
 
 
-def test_timeout_reaps_direct_child(tree_dir: Path):
-    outcome = run_subprocess(_fixture_cmd("solo", tree_dir), cwd=tree_dir, timeout_seconds=1)
-    assert outcome.termination == "timed-out"
-    leader = _recorded(tree_dir)["leader"]
-    assert not _is_zombie(leader)
-    with pytest.raises(ChildProcessError):  # already reaped by the runner, not left for us
-        os.waitpid(leader, os.WNOHANG)
+def _prepare_case(case: dict, directory: Path) -> tuple[list[str], Path, dict]:
+    for name, spec in case.get("files", {}).items():
+        path = directory / name
+        path.write_text(spec["content"], encoding="utf-8")
+        path.chmod(spec["mode"])
+    cmd = [_substitute(arg, directory) for arg in case["argv"]]
+    cwd = Path(_substitute(case.get("cwd", "{dir}"), directory))
+    kwargs: dict = {}
+    for key, value in case["options"].items():
+        if key == "onOutput":
+            continue
+        kwargs[OPTION_NAMES[key]] = _stdin_text(value) if key == "stdin" else value
+    return cmd, cwd, kwargs
+
+
+def _collector(case: dict, directory: Path, chunks: list[tuple[str, str]]):
+    def collect(text: str, stream: str) -> None:
+        chunks.append((stream, text))
+        if case.get("acknowledgeChunks"):
+            (directory / f"chunk-{len(chunks) - 1}").touch()
+    return collect
+
+
+def _run_shared_case_sync(case: dict, directory: Path) -> _Observed:
+    cmd, cwd, kwargs = _prepare_case(case, directory)
+    chunks: list[tuple[str, str]] = []
+    if case["options"].get("onOutput"):
+        kwargs["on_output"] = _collector(case, directory, chunks)
+    cancelled_at: list[float] = []
+    if case.get("cancel") == "beforeLaunch":
+        kwargs["cancel"] = threading.Event()
+        kwargs["cancel"].set()
+    elif case.get("cancel") == "afterReady":
+        cancel = threading.Event()
+
+        def arm() -> None:
+            _wait_ready(directory)
+            cancelled_at.append(time.monotonic())
+            cancel.set()
+
+        threading.Thread(target=arm, daemon=True).start()
+        kwargs["cancel"] = cancel
+    outcome = run_subprocess(cmd, cwd=cwd, **kwargs)
+    returned = time.monotonic()
+    latency = returned - cancelled_at[0] if cancelled_at else None
+    return _Observed(outcome, kwargs.get("stdin"), chunks, latency)
+
+
+async def _run_shared_case_async(case: dict, directory: Path) -> _Observed:
+    cmd, cwd, kwargs = _prepare_case(case, directory)
+    chunks: list[tuple[str, str]] = []
+    if case["options"].get("onOutput"):
+        kwargs["on_output"] = _collector(case, directory, chunks)
+    cancel = threading.Event()
+    if case.get("cancel"):
+        kwargs["cancel"] = cancel
+    if case.get("cancel") == "beforeLaunch":
+        cancel.set()
+    task = asyncio.ensure_future(run_subprocess_async(cmd, cwd=cwd, **kwargs))
+    cancelled_at: float | None = None
+    try:
+        if case.get("cancel") == "afterReady":
+            await _wait_ready_async(directory)
+            cancelled_at = time.monotonic()
+            cancel.set()
+        outcome = await task
+        latency = time.monotonic() - cancelled_at if cancelled_at is not None else None
+        return _Observed(outcome, kwargs.get("stdin"), chunks, latency)
+    finally:
+        if not task.done():
+            cancel.set()
+            await task
+
+
+def _check_shared_case(case: dict, observed: _Observed, directory: Path) -> None:
+    outcome = observed.outcome
+    for key, expected in case["expect"].items():
+        label = f"{case['id']}: {key}"
+        if key in OUTCOME_FIELDS:
+            assert getattr(outcome, OUTCOME_FIELDS[key]) == expected, label
+        elif key == "stdoutLength":
+            assert len(outcome.stdout) == expected, label
+        elif key == "stderrLength":
+            assert len(outcome.stderr) == expected, label
+        elif key == "stdoutEqualsStdin":
+            assert (outcome.stdout == observed.stdin) is expected, label
+        elif key == "stdoutPattern":
+            assert re.search(expected, outcome.stdout), f"{label}: {outcome.stdout!r}"
+        elif key == "stderrContains":
+            assert expected in outcome.stderr, label
+        elif key == "streamedStdout":
+            assert observed.streamed("stdout") == expected, label
+        elif key == "streamedStderr":
+            assert observed.streamed("stderr") == expected, label
+        elif key == "streamedNoReplacement":
+            assert all("\ufffd" not in text for _, text in observed.chunks) is expected, label
+        elif key == "minDurationSeconds":
+            assert outcome.duration_seconds >= expected, f"{label}: {outcome.duration_seconds}"
+        elif key == "maxDurationSeconds":
+            assert outcome.duration_seconds <= expected, f"{label}: {outcome.duration_seconds}"
+        elif key == "maxCancelLatencySeconds":
+            assert observed.cancel_latency is not None and observed.cancel_latency <= expected, f"{label}: {observed.cancel_latency}"
+        elif key == "treeStopped":
+            pids = _recorded(directory)
+            assert set(pids) == set(ROLES), label
+            assert (_wait_gone(list(pids.values())) == []) is expected, label
+        elif key == "leaderReaped":
+            leader = _recorded(directory)["leader"]
+            assert (_wait_gone([leader], timeout=0.5) == [] and not _is_zombie(leader)) is expected, label
+        elif key == "childRunning":
+            assert _is_running(_recorded(directory)["child"]) is expected, label
+        elif key == "filesExist":
+            assert [name for name in expected if (directory / name).exists()] == expected, label
+        elif key == "filesAbsent":
+            time.sleep(0.2)  # a wrongly launched child would create the file shortly after; nothing to await
+            assert [name for name in expected if (directory / name).exists()] == [], label
+        else:
+            raise AssertionError(f"{label}: unknown expectation")
+
+
+def _shared_params() -> list:
+    return [
+        pytest.param(case, runner, id=f"{case['id']}[{runner}]")
+        for case in MANIFEST["cases"]
+        for runner in case["runners"][LANGUAGE]
+    ]
+
+
+@pytest.mark.parametrize("case,runner", _shared_params())
+async def test_shared_case(case: dict, runner: str, tree_dir: Path):
+    observed = _run_shared_case_sync(case, tree_dir) if runner == "sync" else await _run_shared_case_async(case, tree_dir)
+    _check_shared_case(case, observed, tree_dir)
+
+
+def test_shared_cases_are_all_applicable_here():
+    """Coverage guard: every manifest case runs here and uses only understood options/expectations."""
+    cases = MANIFEST["cases"]
+    ids = [case["id"] for case in cases]
+    assert len(ids) == len(set(ids)), "duplicate case ids"
+    assert set(MANIFEST["categories"]) == REQUIRED_CATEGORIES
+    assert {case["category"] for case in cases} == REQUIRED_CATEGORIES, "a required category has no case"
+    for case in cases:
+        runners = case["runners"]
+        assert set(runners) == {LANGUAGE, "typescript"}, f"{case['id']}: runners must name both languages"
+        assert runners[LANGUAGE] and set(runners[LANGUAGE]) <= set(RUNNERS), f"{case['id']}: no Python runner"
+        options = case["options"]
+        assert "timeoutSeconds" in options, f"{case['id']}: timeoutSeconds must be explicit"
+        assert set(options) <= set(OPTION_NAMES) | {"onOutput"}, f"{case['id']}: unknown option"
+        expectations = set(case["expect"])
+        assert expectations <= set(OUTCOME_FIELDS) | DERIVED_EXPECTATIONS, f"{case['id']}: unknown expectation"
+        assert case.get("cancel") in (None, "beforeLaunch", "afterReady"), f"{case['id']}: unknown cancel mode"
+        if expectations & STREAMED_EXPECTATIONS:
+            assert options.get("onOutput"), f"{case['id']}: streamed expectations need onOutput"
+        if case.get("acknowledgeChunks"):
+            assert options.get("onOutput") and "gated-pieces" in case["argv"]
+        if expectations & TREE_EXPECTATIONS or case.get("cancel") == "afterReady":
+            assert "{tests}/process_tree.py" in case["argv"], f"{case['id']}: needs the process_tree fixture"
+        if "maxCancelLatencySeconds" in expectations:
+            assert case.get("cancel") == "afterReady", f"{case['id']}: cancel latency needs afterReady"
 
 
 def test_timeout_leaves_unrelated_session_alone(tree_dir: Path, unrelated_process: subprocess.Popen):
     run_subprocess(_fixture_cmd("tree", tree_dir), cwd=tree_dir, timeout_seconds=1)
     assert _is_running(unrelated_process.pid)
     assert unrelated_process.poll() is None
-
-
-# ── explicit cancellation (threading.Event) ────────────────────────────────
-
-
-def test_sync_cancel_event_returns_cancelled_outcome(tree_dir: Path):
-    cancel = _cancel_when_ready(tree_dir)
-    outcome = run_subprocess(_fixture_cmd("tree", tree_dir), cwd=tree_dir, timeout_seconds=20, cancel=cancel)
-    assert outcome.termination == "cancelled"
-    assert outcome.exit_code == -1
-    assert not outcome.timed_out
-    assert outcome.duration_seconds < 20 - SLACK
-    _assert_stopped(outcome, tree_dir)
-
-
-async def test_async_cancel_event_returns_cancelled_outcome(tree_dir: Path):
-    cancel = threading.Event()
-    task = asyncio.ensure_future(
-        run_subprocess_async(_fixture_cmd("tree", tree_dir), cwd=tree_dir, timeout_seconds=20, cancel=cancel)
-    )
-    await _wait_ready_async(tree_dir)
-    cancel.set()
-    outcome = await task
-    assert outcome.termination == "cancelled"
-    assert outcome.exit_code == -1
-    assert not outcome.timed_out
-    _assert_stopped(outcome, tree_dir)
-
-
-def test_pre_cancelled_event_never_launches(tmp_path: Path):
-    cancel = threading.Event()
-    cancel.set()
-    outcome = run_subprocess(["sh", "-c", "touch launched; sleep 5"], cwd=tmp_path, timeout_seconds=5, cancel=cancel)
-    assert outcome.termination == "cancelled"
-    assert outcome.exit_code == -1
-    assert not outcome.timed_out
-    assert outcome.duration_seconds < 1
-    time.sleep(0.2)
-    assert not (tmp_path / "launched").exists()
 
 
 # ── Task.cancel ─────────────────────────────────────────────────────────────
@@ -285,112 +438,6 @@ async def test_task_cancel_during_startup_still_owns_the_process(tree_dir: Path,
     owned_pids = spawned_pids + [pid for pid in _recorded(tree_dir).values() if pid not in spawned_pids]
     assert _wait_gone(owned_pids, timeout=0.5) == []
     assert not _is_zombie(spawned_pids[0])
-
-
-# ── leader exit with leftovers ──────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("mode", ["early-exit", "closed-pipes"])
-def test_early_leader_exit_stops_leftovers_and_keeps_exit_code(tree_dir: Path, mode: str):
-    outcome = run_subprocess(_fixture_cmd(mode, tree_dir), cwd=tree_dir, timeout_seconds=30)
-    assert outcome.exit_code == 7
-    assert outcome.termination == "exited"
-    assert outcome.signal is None
-    assert not outcome.timed_out
-    assert outcome.duration_seconds < 30 - SLACK  # returned on leader exit, not on run timeout
-    assert outcome.duration_seconds < CLEANUP_BUDGET + SLACK + 1
-    _assert_stopped(outcome, tree_dir)
-
-
-@pytest.mark.parametrize("mode", ["early-exit", "closed-pipes"])
-async def test_async_early_leader_exit_stops_leftovers(tree_dir: Path, mode: str):
-    outcome = await run_subprocess_async(_fixture_cmd(mode, tree_dir), cwd=tree_dir, timeout_seconds=30)
-    assert outcome.exit_code == 7
-    assert outcome.termination == "exited"
-    assert outcome.duration_seconds < CLEANUP_BUDGET + SLACK + 1
-    _assert_stopped(outcome, tree_dir)
-
-
-def test_graceful_tree_gets_sigterm_and_reaps_itself(tree_dir: Path):
-    cancel = _cancel_when_ready(tree_dir)
-    outcome = run_subprocess(_fixture_cmd("graceful", tree_dir), cwd=tree_dir, timeout_seconds=20, cancel=cancel)
-    assert outcome.termination == "cancelled"
-    pids = _recorded(tree_dir)
-    assert _wait_gone(list(pids.values())) == []
-    for role in ROLES:
-        assert (tree_dir / f"{role}.term").exists(), f"{role} never saw SIGTERM"
-        assert not _is_zombie(pids[role])
-
-
-def test_escaped_pipe_holder_does_not_hang_the_run(tree_dir: Path):
-    outcome = run_subprocess(_fixture_cmd("escaped", tree_dir), cwd=tree_dir, timeout_seconds=30)
-    assert outcome.exit_code == 0
-    assert outcome.termination == "exited"
-    assert not outcome.timed_out
-    assert outcome.duration_seconds < CLEANUP_BUDGET + SLACK
-    assert outcome.stdout == STDOUT_TEXT
-    pids = _recorded(tree_dir)
-    assert not _is_zombie(pids["leader"])
-    # Documented limitation: a descendant that left the group is not ours to stop.
-    assert _is_running(pids["child"])
-
-
-# ── termination classification ──────────────────────────────────────────────
-
-
-def test_self_signal_is_signaled_not_timed_out(tree_dir: Path):
-    outcome = run_subprocess(_fixture_cmd("self-signal", tree_dir), cwd=tree_dir, timeout_seconds=10)
-    assert outcome.termination == "signaled"
-    assert outcome.signal == "SIGTERM"
-    assert outcome.exit_code == -signal.SIGTERM
-    assert not outcome.timed_out
-    assert outcome.duration_seconds < 10 - SLACK
-
-
-def test_partial_utf8_decodes_with_replacement(tree_dir: Path):
-    outcome = run_subprocess(_fixture_cmd("partial-utf8", tree_dir), cwd=tree_dir, timeout_seconds=1)
-    assert outcome.termination == "timed-out"
-    assert outcome.stdout.startswith("h\u00e9llo ")
-    assert outcome.stdout.rstrip("\ufffd") == "h\u00e9llo "
-    assert "\ufffd" in outcome.stdout
-
-
-@pytest.mark.parametrize("runner", ["sync", "async"])
-async def test_missing_binary_is_launch_failed(tmp_path: Path, runner: str):
-    cmd = [str(tmp_path / "no-such-binary")]
-    if runner == "sync":
-        outcome = run_subprocess(cmd, cwd=tmp_path, timeout_seconds=5)
-    else:
-        outcome = await run_subprocess_async(cmd, cwd=tmp_path, timeout_seconds=5)
-    assert outcome.termination == "launch-failed"
-    assert outcome.launch_error == "ENOENT"
-    assert outcome.exit_code == -1
-    assert not outcome.timed_out
-    assert outcome.signal is None
-    assert outcome.duration_seconds < 1
-
-
-def test_missing_cwd_is_launch_failed(tmp_path: Path):
-    outcome = run_subprocess(["sh", "-c", "true"], cwd=tmp_path / "gone", timeout_seconds=5)
-    assert outcome.termination == "launch-failed"
-    assert outcome.launch_error == "ENOENT"
-    assert outcome.exit_code == -1
-
-
-def test_non_executable_is_launch_failed_eacces(tmp_path: Path):
-    script = tmp_path / "not-executable"
-    script.write_text("#!/bin/sh\necho ran\n")
-    script.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    outcome = run_subprocess([str(script)], cwd=tmp_path, timeout_seconds=5)
-    assert outcome.termination == "launch-failed"
-    assert outcome.launch_error == "EACCES"
-    assert outcome.exit_code == -1
-    assert not outcome.timed_out
-
-
-def test_normal_exit_fields(tmp_path: Path):
-    outcome = run_subprocess(["sh", "-c", "exit 3"], cwd=tmp_path, timeout_seconds=5)
-    assert (outcome.exit_code, outcome.termination, outcome.signal, outcome.launch_error) == (3, "exited", None, None)
 
 
 # ── adapter-level classification ────────────────────────────────────────────

@@ -2,7 +2,6 @@
   "spec": {
     "harness": "continue-cli",
     "prompt": "add docstrings to all public functions",
-    "workdir": "/tmp/harness-fixture-continue",
     "model": "claude-sonnet-4-6",
     "instructions": "Keep it brief.\n",
     "timeoutSeconds": 600
@@ -16,7 +15,23 @@
       "claude-sonnet-4-6",
       "--json"
     ],
-    "instructionsFile": "/tmp/harness-fixture-continue/CONTINUE.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/CONTINUE.md",
+    "directories": [],
+    "model": "claude-sonnet-4-6"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": "--config",
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -28,6 +43,48 @@
   "expectedParsed": {
     "costUsd": 0.0187,
     "tokensIn": 950,
-    "tokensOut": 380
-  }
+    "tokensOut": 380,
+    "raw": {
+      "type": "result",
+      "result": "added docstrings",
+      "usage": {
+        "input_tokens": 950,
+        "output_tokens": 380
+      },
+      "total_cost_usd": 0.0187
+    }
+  },
+  "cases": [
+    {
+      "name": "config-file-rejects-whitespace-model",
+      "spec": {
+        "model": "   ",
+        "configFile": "<root>/continue.yaml"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "config-file-owns-model-selection",
+      "spec": {
+        "model": "",
+        "configFile": "<root>/continue.yaml"
+      },
+      "expectedCommand": {
+        "cmd": "cn",
+        "args": [
+          "-p",
+          "--config",
+          "<root>/continue.yaml",
+          "--format",
+          "json",
+          "add docstrings to all public functions"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/CONTINUE.md",
+        "directories": [],
+        "model": null
+      }
+    }
+  ]
 }

@@ -2,7 +2,6 @@
   "spec": {
     "harness": "qwen",
     "prompt": "refactor the session cache",
-    "workdir": "/tmp/harness-fixture-qwen",
     "model": "qwen3-coder",
     "instructions": "Be concise.\n",
     "timeoutSeconds": 600
@@ -17,7 +16,24 @@
       "--output-format",
       "json"
     ],
-    "instructionsFile": "/tmp/harness-fixture-qwen/QWEN.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/QWEN.md",
+    "directories": [],
+    "model": "qwen3-coder"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -29,6 +45,127 @@
   "expectedParsed": {
     "costUsd": null,
     "tokensIn": 1100,
-    "tokensOut": 280
-  }
+    "tokensOut": 280,
+    "raw": [
+      {
+        "type": "assistant",
+        "content": "refactored"
+      },
+      {
+        "type": "result",
+        "usage": {
+          "input_tokens": 1100,
+          "output_tokens": 280
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "legacy-stats-envelope",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 7.0,
+        "timedOut": false,
+        "stdout": "{\"response\":\"done\",\"stats\":{\"models\":{\"qwen3-coder\":{\"tokens\":{\"input\":640,\"candidates\":150}}}}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 640,
+        "tokensOut": 150,
+        "raw": {
+          "response": "done",
+          "stats": {
+            "models": {
+              "qwen3-coder": {
+                "tokens": {
+                  "input": 640,
+                  "candidates": 150
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "legacy-stats-envelope-line",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 7.0,
+        "timedOut": false,
+        "stdout": "Loading credentials\n{\"response\":\"done\",\"stats\":{\"models\":{\"qwen3-coder\":{\"tokens\":{\"input\":640,\"candidates\":150}}}}}\nbye\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 640,
+        "tokensOut": 150,
+        "raw": {
+          "response": "done",
+          "stats": {
+            "models": {
+              "qwen3-coder": {
+                "tokens": {
+                  "input": 640,
+                  "candidates": 150
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "legacy-malformed-input-tokens",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.0,
+        "timedOut": false,
+        "stdout": "{\"stats\":{\"models\":{\"qwen3-coder\":{\"tokens\":{\"input\":\"invalid\",\"candidates\":150}}}}}",
+        "stderr": ""
+      },
+      "expectedParseError": true,
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "legacy-infinite-output-tokens",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.0,
+        "timedOut": false,
+        "stdout": "{\"stats\":{\"models\":{\"qwen3-coder\":{\"tokens\":{\"input\":640,\"candidates\":\"Infinity\"}}}}}",
+        "stderr": ""
+      },
+      "expectedParseError": true,
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "array-without-result",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.0,
+        "timedOut": false,
+        "stdout": "[{\"type\":\"assistant\",\"content\":\"refactored\"}]",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    }
+  ]
 }

@@ -1,12 +1,15 @@
-"""Streaming I/O contract: stdin, output callbacks, bounded capture, inactivity.
+"""Streaming I/O contract: stdin validation, output callbacks, teardown with pending callbacks, run()-level I/O.
 
-Children are `python3 -c` snippets or shell pipelines; every test that
+Cross-language stdin/capture/inactivity scenarios live in
+tests/subprocess_cases.json and run from tests/test_subproc_lifecycle.py.
+Children here are `python3 -c` snippets or shell pipelines; every test that
 streams proves liveness through side effects (a callback unblocks the child)
 rather than timing.
 """
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import sys
 import threading
 import time
@@ -21,24 +24,11 @@ from harness._subproc import run_subprocess, run_subprocess_async
 PYTHON = sys.executable
 CLEANUP_BUDGET = 1.5
 SLACK = 1.5
-MIB = 1024 * 1024
 INTERRUPTED = "on_output callback did not complete before teardown finished"
 
 
 def _py(code: str) -> list[str]:
     return [PYTHON, "-u", "-c", code]
-
-
-WRITER = """
-import sys, time
-out = sys.stdout.buffer
-for piece in {pieces!r}:
-    out.write(piece); out.flush(); time.sleep(0.05)
-"""
-
-
-def _writer(pieces: list[bytes]) -> list[str]:
-    return _py(WRITER.format(pieces=pieces))
 
 
 def _gated_child(gate: Path) -> list[str]:
@@ -59,117 +49,9 @@ async def _no_tasks_left() -> None:
 # ── stdin ───────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("runner", ["sync", "async"])
-async def test_stdin_larger_than_pipe_with_concurrent_output(tmp_path: Path, runner: str):
-    payload = ("x" * 1023 + "\n") * 2048  # 2 MiB: far beyond any pipe buffer
-    noise = "e" * 200_000
-    cmd = _py(
-        "import sys, threading\n"
-        "t = threading.Thread(target=lambda: (sys.stderr.write('e' * 200_000), sys.stderr.flush())); t.start()\n"
-        "sys.stdout.write(sys.stdin.read()); sys.stdout.flush(); t.join()"
-    )
-    kwargs = dict(cwd=tmp_path, timeout_seconds=20, stdin=payload, max_output_bytes=4 * MIB)
-    outcome = run_subprocess(cmd, **kwargs) if runner == "sync" else await run_subprocess_async(cmd, **kwargs)
-    assert (outcome.termination, outcome.exit_code) == ("exited", 0)
-    assert outcome.stdout == payload
-    assert outcome.stdout_bytes == len(payload)
-    assert not outcome.stdout_truncated
-    assert outcome.stderr == noise
-
-
-def test_stdin_early_epipe_is_not_an_error(tmp_path: Path):
-    payload = "y" * (4 * MIB)
-    outcome = run_subprocess(["sh", "-c", "head -c 10; exit 3"], cwd=tmp_path, timeout_seconds=10, stdin=payload)
-    assert (outcome.exit_code, outcome.termination) == (3, "exited")
-    assert outcome.stdout == "y" * 10
-    assert outcome.duration_seconds < CLEANUP_BUDGET + SLACK
-
-
-@pytest.mark.parametrize("stdin", [None, ""])
-def test_absent_or_empty_stdin_is_eof(tmp_path: Path, stdin: str | None):
-    outcome = run_subprocess(["sh", "-c", "cat; echo eof"], cwd=tmp_path, timeout_seconds=5, stdin=stdin)
-    assert (outcome.stdout, outcome.termination) == ("eof\n", "exited")
-
-
-def test_stdin_utf8_payload_round_trips(tmp_path: Path):
-    text = "caf\u00e9 \u2713 \U0001d11e\n"
-    outcome = run_subprocess(["cat"], cwd=tmp_path, timeout_seconds=5, stdin=text)
-    assert outcome.stdout == text
-    assert outcome.stdout_bytes == len(text.encode())
-
-
 def test_stdin_conflicts_with_inherited_stdin(tmp_path: Path):
     with pytest.raises(ValueError, match="stdin_close"):
         run_subprocess(["cat"], cwd=tmp_path, timeout_seconds=5, stdin="", stdin_close=False)
-
-
-# ── decoding and capture bounds ────────────────────────────────────────────
-
-
-def test_split_utf8_across_reads_streams_and_captures_whole_code_points(tmp_path: Path):
-    pieces = [b"h\xc3", b"\xa9llo \xe2", b"\x9c\x93\n"]  # é and ✓ split across writes
-    chunks: list[str] = []
-    outcome = run_subprocess(_writer(pieces), cwd=tmp_path, timeout_seconds=10, on_output=lambda t, s: chunks.append(t))
-    assert outcome.stdout == "h\u00e9llo \u2713\n"
-    assert "".join(chunks) == outcome.stdout
-    assert all("\ufffd" not in c for c in chunks)
-    assert outcome.stdout_bytes == sum(map(len, pieces))
-    assert not outcome.stdout_truncated
-
-
-def test_cap_inside_a_multibyte_sequence_drops_partial_code_point(tmp_path: Path):
-    chunks: list[str] = []
-    outcome = run_subprocess(
-        _writer([b"ab\xe2\x9c\x93cd\n"]), cwd=tmp_path, timeout_seconds=10, max_output_bytes=3,  # cuts inside ✓
-        on_output=lambda t, s: chunks.append(t),
-    )
-    assert outcome.stdout == "ab"
-    assert outcome.stdout_truncated
-    assert outcome.stdout_bytes == 8
-    assert "".join(chunks) == "ab\u2713cd\n"  # streaming is independent of the cap
-
-
-def test_cap_exactly_at_code_point_boundary_is_complete(tmp_path: Path):
-    outcome = run_subprocess(_writer([b"ab\xe2\x9c\x93cd\n"]), cwd=tmp_path, timeout_seconds=10, max_output_bytes=5)
-    assert outcome.stdout == "ab\u2713"
-    assert outcome.stdout_truncated
-
-
-def test_invalid_and_eof_incomplete_utf8_use_replacement(tmp_path: Path):
-    chunks: list[str] = []
-    outcome = run_subprocess(_writer([b"ok\xff", b"\xe2\x9c"]), cwd=tmp_path, timeout_seconds=10, on_output=lambda t, s: chunks.append(t))
-    assert outcome.stdout == "ok\ufffd\ufffd"
-    assert "".join(chunks) == "ok\ufffd\ufffd"
-    assert not outcome.stdout_truncated
-
-
-def test_zero_cap_counts_and_flags_but_captures_nothing(tmp_path: Path):
-    chunks: list[tuple[str, str]] = []
-    outcome = run_subprocess(
-        ["sh", "-c", "echo out; echo err >&2"], cwd=tmp_path, timeout_seconds=5, max_output_bytes=0,
-        on_output=lambda t, s: chunks.append((s, t)),
-    )
-    assert (outcome.stdout, outcome.stderr) == ("", "")
-    assert (outcome.stdout_bytes, outcome.stderr_bytes) == (4, 4)
-    assert outcome.stdout_truncated and outcome.stderr_truncated
-    assert sorted(chunks) == [("stderr", "err\n"), ("stdout", "out\n")]
-
-
-def test_zero_cap_with_silent_child_is_not_truncated(tmp_path: Path):
-    outcome = run_subprocess(["true"], cwd=tmp_path, timeout_seconds=5, max_output_bytes=0)
-    assert (outcome.stdout_bytes, outcome.stdout_truncated, outcome.stderr_truncated) == (0, False, False)
-
-
-@pytest.mark.parametrize("runner", ["sync", "async"])
-async def test_noisy_child_is_drained_past_the_default_cap(tmp_path: Path, runner: str):
-    total = 5 * MIB
-    cmd = _py(f"import sys; sys.stdout.buffer.write(b'a' * {total}); sys.stderr.buffer.write(b'e' * {total})")
-    kwargs = dict(cwd=tmp_path, timeout_seconds=20)
-    outcome = run_subprocess(cmd, **kwargs) if runner == "sync" else await run_subprocess_async(cmd, **kwargs)
-    assert (outcome.exit_code, outcome.termination) == (0, "exited")
-    assert len(outcome.stdout) == MIB and len(outcome.stderr) == MIB
-    assert (outcome.stdout_bytes, outcome.stderr_bytes) == (total, total)
-    assert outcome.stdout_truncated and outcome.stderr_truncated
 
 
 # ── callbacks ───────────────────────────────────────────────────────────────
@@ -219,6 +101,38 @@ async def test_sync_callback_in_run_async_executes_on_the_loop_thread(tmp_path: 
     )
     assert outcome.callback_error is None
     assert threads == {threading.get_ident()}
+
+
+@pytest.mark.parametrize("reject", [False, True])
+async def test_completed_callback_is_collected_before_next_delivery(monkeypatch, tmp_path: Path, reject: bool):
+    schedule = asyncio.run_coroutine_threadsafe
+    seen: list[tuple[str, str]] = []
+
+    def complete_before_return(coro, loop):
+        future = schedule(coro, loop)
+        # Force completion before the reader can observe the returned future.
+        concurrent.futures.wait((future,), timeout=5)
+        assert future.done()
+        return future
+
+    def on_output(chunk: str, stream: str) -> None:
+        seen.append((stream, chunk))
+        if reject:
+            raise ValueError("callback rejected")
+
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", complete_before_return)
+    outcome = await run_subprocess_async(
+        ["sh", "-c", "echo out; echo err >&2"], cwd=tmp_path,
+        timeout_seconds=5, max_output_bytes=0, on_output=on_output,
+    )
+    assert (outcome.stdout, outcome.stderr) == ("", "")
+    assert (outcome.stdout_truncated, outcome.stderr_truncated) == (True, True)
+    if reject:
+        assert outcome.callback_error is not None
+        assert len(seen) == 1  # Failure disables further delivery, not pipe draining.
+    else:
+        assert (outcome.termination, outcome.exit_code, outcome.callback_error) == ("exited", 0, None)
+        assert sorted(seen) == [("stderr", "err\n"), ("stdout", "out\n")]
 
 
 async def test_async_backpressure_serializes_callbacks_and_pauses_inactivity(tmp_path: Path):
@@ -368,34 +282,7 @@ async def test_wall_timeout_fires_while_a_callback_backpressures(tmp_path: Path)
     assert outcome.duration_seconds < 0.3 + CLEANUP_BUDGET + SLACK
 
 
-# ── inactivity ──────────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("runner", ["sync", "async"])
-async def test_inactivity_timeout_is_opt_in(tmp_path: Path, runner: str):
-    cmd = ["sh", "-c", "echo a; sleep 30"]
-    kwargs = dict(cwd=tmp_path, timeout_seconds=None, inactivity_timeout_seconds=0.3)
-    outcome = run_subprocess(cmd, **kwargs) if runner == "sync" else await run_subprocess_async(cmd, **kwargs)
-    assert (outcome.termination, outcome.timeout_kind, outcome.timed_out, outcome.exit_code) == ("timed-out", "inactivity", True, -1)
-    assert outcome.stdout == "a\n"
-    assert 0.3 <= outcome.duration_seconds < 0.3 + CLEANUP_BUDGET + SLACK
-
-
-def test_silence_alone_is_not_failure(tmp_path: Path):
-    outcome = run_subprocess(["sh", "-c", "sleep 0.5; echo late"], cwd=tmp_path, timeout_seconds=None)
-    assert (outcome.termination, outcome.exit_code, outcome.timeout_kind) == ("exited", 0, None)
-    assert outcome.stdout == "late\n"
-
-
-def test_inactivity_measures_last_byte_on_either_stream(tmp_path: Path):
-    child = _py("import sys, time\nfor _ in range(6): print('.', file=sys.stderr, flush=True); time.sleep(0.1)\nprint('done')")
-    outcome = run_subprocess(child, cwd=tmp_path, timeout_seconds=None, inactivity_timeout_seconds=0.3)
-    assert (outcome.termination, outcome.stdout) == ("exited", "done\n")
-
-
-def test_wall_timeout_reports_kind(tmp_path: Path):
-    outcome = run_subprocess(["sh", "-c", "sleep 30"], cwd=tmp_path, timeout_seconds=0.2, inactivity_timeout_seconds=10)
-    assert (outcome.termination, outcome.timeout_kind) == ("timed-out", "wall")
+# ── deadlines ───────────────────────────────────────────────────────────────
 
 
 def test_disabled_wall_timeout_still_honors_cancel(tmp_path: Path):

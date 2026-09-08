@@ -12,6 +12,9 @@ import '../src/adapters/index.js'
 // backpressure, real pipe buffers, real deadlines. Fake timers cannot drive
 // that, so children sleep for real and the few timing assertions are bounded
 // by the engine's own cleanup budget rather than guessed waits.
+// Cross-language stdin/capture/inactivity scenarios live in
+// ../../tests/subprocess_cases.json and run from subproc-lifecycle.test.ts;
+// this file keeps the callback, validation and run()-level contracts.
 const ROOT = mkdtempSync(join(tmpdir(), 'harness-ts-io-'))
 // cleanup is 0.5s grace + 1.0s drain; anything beyond that plus scheduling slack is a hang
 const CLEANUP_BUDGET = 1.5
@@ -84,34 +87,6 @@ function isRunning(pid: number): boolean {
 // ── stdin ───────────────────────────────────────────────────────────────────
 
 describe('stdin', () => {
-  const ECHO_AFTER_FLOOD = 'import sys; sys.stdout.write("x" * 300000); sys.stdout.flush(); data = sys.stdin.buffer.read(); sys.stdout.write(str(len(data)))'
-
-  test.each([runSubprocessAsync, runSubprocess])('%p: a payload larger than the pipe is delivered whole while output floods concurrently', async (entry) => {
-    const payload = 'p'.repeat(1_000_000) + '\u00e9'
-    const outcome = await entry(py(ECHO_AFTER_FLOOD), { cwd: workdir(), timeoutSeconds: 20, stdin: payload, maxOutputBytes: 4_000_000 })
-    expect(outcome.termination).toBe('exited')
-    expect(outcome.exitCode).toBe(0)
-    expect(outcome.stdout).toBe('x'.repeat(300000) + String(1_000_002))
-    expect(outcome.stdoutBytes).toBe(300000 + 7)
-    expect(outcome.stdoutTruncated).toBe(false)
-  })
-
-  test('the child sees EOF after the payload, and immediately when stdin is omitted or empty', async () => {
-    const cwd = workdir()
-    const cmd = py('import sys; sys.stdout.write(repr(sys.stdin.read()))')
-    expect((await runSubprocessAsync(cmd, { cwd, stdin: 'two\nlines\n' })).stdout).toBe("'two\\nlines\\n'")
-    expect((await runSubprocessAsync(cmd, { cwd })).stdout).toBe("''")
-    expect((await runSubprocessAsync(cmd, { cwd, stdin: '' })).stdout).toBe("''")
-    expect((await runSubprocessAsync(cmd, { cwd, stdin: null })).stdout).toBe("''")
-    expect(runSubprocess(cmd, { cwd, stdin: 'sync \u2713' }).stdout).toBe("'sync \u2713'")
-  })
-
-  test('a child that exits without reading a large payload reports its own exit (early EPIPE is not an error)', async () => {
-    const outcome = await runSubprocessAsync(['sh', '-c', 'exit 3'], { cwd: workdir(), stdin: 'z'.repeat(2_000_000) })
-    expect([outcome.termination, outcome.exitCode, outcome.launchError]).toEqual(['exited', 3, null])
-    expect(outcome.durationSeconds).toBeLessThan(CLEANUP_BUDGET)
-  })
-
   test('a non-string stdin is rejected before launch', () => {
     const cwd = workdir()
     expectCode(() => runSubprocess(['sh', '-c', 'touch launched'], { cwd, stdin: 42 as unknown as string }), 'invalid-options')
@@ -122,76 +97,6 @@ describe('stdin', () => {
 // ── bounded capture and decoding ────────────────────────────────────────────
 
 describe('capture', () => {
-  test('a multi-byte sequence split across chunks decodes whole in capture and callback', async () => {
-    const seen = collector()
-    const outcome = await runSubprocessAsync(
-      py('import sys,time; sys.stdout.buffer.write(b"a\\xe2"); sys.stdout.flush(); time.sleep(0.2); sys.stdout.buffer.write(b"\\x9c\\x93b"); sys.stdout.flush()'),
-      { cwd: workdir(), onOutput: seen.onOutput },
-    )
-    expect(outcome.stdout).toBe('a\u2713b')
-    expect(seen.joined('stdout')).toBe('a\u2713b')
-    expect(seen.chunks.every((c) => !c.text.includes('\ufffd'))).toBe(true)
-    expect(outcome.stdoutBytes).toBe(5)
-  })
-
-  test('the cap cuts on raw bytes: a sequence split by the cap is omitted, not replaced; the stream keeps flowing to the callback', async () => {
-    const seen = collector()
-    const outcome = await runSubprocessAsync(py('import sys; sys.stdout.write("ab\u00e9cd")'), {
-      cwd: workdir(),
-      maxOutputBytes: 3, // 'a','b', first byte of 'é'
-      onOutput: seen.onOutput,
-    })
-    expect(outcome.stdout).toBe('ab')
-    expect(outcome.stdoutBytes).toBe(6)
-    expect(outcome.stdoutTruncated).toBe(true)
-    expect(outcome.stderrTruncated).toBe(false)
-    expect(seen.joined('stdout')).toBe('ab\u00e9cd')
-  })
-
-  test('output exactly at the cap is not truncated; one byte more is', async () => {
-    const cwd = workdir()
-    const exact = await runSubprocessAsync(py('import sys; sys.stdout.write("abcd")'), { cwd, maxOutputBytes: 4 })
-    expect([exact.stdout, exact.stdoutBytes, exact.stdoutTruncated]).toEqual(['abcd', 4, false])
-    const over = await runSubprocessAsync(py('import sys; sys.stdout.write("abcde")'), { cwd, maxOutputBytes: 4 })
-    expect([over.stdout, over.stdoutBytes, over.stdoutTruncated]).toEqual(['abcd', 5, true])
-  })
-
-  test('genuinely invalid or EOF-incomplete UTF-8 decodes with replacement in both capture and callback', async () => {
-    const seen = collector()
-    const outcome = await runSubprocessAsync(py('import sys; sys.stdout.buffer.write(b"x\\xff y\\xe2\\x9c")'), { cwd: workdir(), onOutput: seen.onOutput })
-    expect(outcome.stdout).toBe('x\ufffd y\ufffd')
-    expect(seen.joined('stdout')).toBe('x\ufffd y\ufffd')
-    expect(outcome.stdoutTruncated).toBe(false)
-  })
-
-  test.each([runSubprocessAsync, runSubprocess])('%p: a zero cap keeps nothing but still counts and flags; the callback still receives everything', async (entry) => {
-    const seen = collector()
-    const opts = { cwd: workdir(), maxOutputBytes: 0, ...(entry === runSubprocessAsync ? { onOutput: seen.onOutput } : {}) }
-    const outcome = await entry(['sh', '-c', 'printf hello; printf oops >&2'], opts)
-    expect([outcome.stdout, outcome.stderr]).toEqual(['', ''])
-    expect([outcome.stdoutBytes, outcome.stderrBytes]).toEqual([5, 4])
-    expect([outcome.stdoutTruncated, outcome.stderrTruncated]).toEqual([true, true])
-    if (entry === runSubprocessAsync) {
-      expect(seen.joined('stdout')).toBe('hello')
-      expect(seen.joined('stderr')).toBe('oops')
-    }
-  })
-
-  test.each([runSubprocessAsync, runSubprocess])('%p: noisy output beyond the default cap is drained without growth or hang', async (entry) => {
-    const outcome = await entry(py('import sys; b = b"y" * 65536\nfor _ in range(80): sys.stdout.buffer.write(b)'), { cwd: workdir(), timeoutSeconds: 30 })
-    expect([outcome.termination, outcome.exitCode]).toEqual(['exited', 0])
-    expect(outcome.stdoutBytes).toBe(80 * 65536)
-    expect(outcome.stdout.length).toBe(1_048_576)
-    expect(outcome.stdoutTruncated).toBe(true)
-    expect(outcome.stderrTruncated).toBe(false)
-  }, 35_000)
-
-  test('a silent exit reports zero bytes and no truncation', async () => {
-    const outcome = await runSubprocessAsync(['true'], { cwd: workdir() })
-    expect([outcome.stdoutBytes, outcome.stderrBytes, outcome.stdoutTruncated, outcome.stderrTruncated, outcome.callbackError, outcome.timeoutKind])
-      .toEqual([0, 0, false, false, null, null])
-  })
-
   test('the sync supervisor result pipe survives the worst-case JSON expansion of a full capture', () => {
     // 64 KiB of NUL bytes per stream escape to six characters each.
     const outcome = runSubprocess(py('import sys; z = b"\\x00" * 65536; sys.stdout.buffer.write(z); sys.stderr.buffer.write(z)'), { cwd: workdir(), maxOutputBytes: 65536 })
@@ -390,28 +295,6 @@ describe('onOutput', () => {
 // ── deadlines ───────────────────────────────────────────────────────────────
 
 describe('deadlines', () => {
-  test.each([runSubprocessAsync, runSubprocess])('%p: silence is not failure by default', async (entry) => {
-    const outcome = await entry(['sh', '-c', 'sleep 0.6; echo late'], { cwd: workdir(), timeoutSeconds: 10 })
-    expect([outcome.termination, outcome.stdout, outcome.timeoutKind]).toEqual(['exited', 'late\n', null])
-  })
-
-  test.each([runSubprocessAsync, runSubprocess])('%p: inactivity opt-in ends a silent run as timed-out/inactivity', async (entry) => {
-    const outcome = await entry(['sh', '-c', 'echo start; sleep 30'], { cwd: workdir(), timeoutSeconds: 20, inactivityTimeoutSeconds: 0.3 })
-    expect([outcome.termination, outcome.timedOut, outcome.exitCode, outcome.timeoutKind]).toEqual(['timed-out', true, -1, 'inactivity'])
-    expect(outcome.stdout).toBe('start\n')
-    expect(outcome.durationSeconds).toBeLessThan(0.3 + CLEANUP_BUDGET + SLACK)
-  })
-
-  test('the inactivity window restarts on every byte, and counts from launch', async () => {
-    const chatty = await runSubprocessAsync(py('import sys,time\nfor _ in range(12): sys.stdout.write("."); time.sleep(0.1)'), {
-      cwd: workdir(),
-      inactivityTimeoutSeconds: 0.8,
-    })
-    expect([chatty.termination, chatty.stdout]).toEqual(['exited', '............'])
-    const mute = await runSubprocessAsync(['sleep', '5'], { cwd: workdir(), inactivityTimeoutSeconds: 0.3 })
-    expect([mute.termination, mute.timeoutKind]).toEqual(['timed-out', 'inactivity'])
-  })
-
   test('time spent awaiting a callback does not count as inactivity', async () => {
     // Without the exclusion the 0.4s window would expire during the first 0.7s callback wait.
     const outcome = await runSubprocessAsync(['sh', '-c', 'echo a; sleep 0.2; echo b; sleep 0.6'], {
@@ -420,11 +303,6 @@ describe('deadlines', () => {
       onOutput: () => Bun.sleep(700),
     })
     expect([outcome.termination, outcome.stdout, outcome.callbackError]).toEqual(['exited', 'a\nb\n', null])
-  })
-
-  test('the wall timeout reports timeoutKind wall and wins over a later inactivity deadline', async () => {
-    const outcome = await runSubprocessAsync(['sleep', '5'], { cwd: workdir(), timeoutSeconds: 0.2, inactivityTimeoutSeconds: 5 })
-    expect([outcome.termination, outcome.timeoutKind]).toEqual(['timed-out', 'wall'])
   })
 
   test.each([runSubprocessAsync, runSubprocess])('%p: timeoutSeconds null disables the wall clock', async (entry) => {

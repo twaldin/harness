@@ -2,7 +2,6 @@
   "spec": {
     "harness": "codex",
     "prompt": "add input validation to handler",
-    "workdir": "/tmp/harness-fixture-codex",
     "model": "gpt-5.3-codex",
     "instructions": "Follow TDD. Never weaken tests.\n",
     "timeoutSeconds": 1800
@@ -15,10 +14,27 @@
       "gpt-5.3-codex",
       "--json",
       "-C",
-      "/tmp/harness-fixture-codex",
+      "<workdir>",
       "add input validation to handler"
     ],
-    "instructionsFile": "/tmp/harness-fixture-codex/AGENTS.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": "gpt-5.3-codex"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": "codex",
+    "configHomeEnv": "CODEX_HOME",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -30,6 +46,7 @@
   "expectedParsed": {
     "costUsd": null,
     "tokensIn": 1200,
-    "tokensOut": 323
+    "tokensOut": 323,
+    "raw": null
   }
 }

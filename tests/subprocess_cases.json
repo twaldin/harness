@@ -1,0 +1,506 @@
+{
+  "notes": [
+    "Shared offline subprocess conformance cases consumed by tests/test_subproc_lifecycle.py, ts/tests/subproc-lifecycle.test.ts (against ts/src) and ts/tests/node-lifecycle.mjs (against ts/dist).",
+    "Each case runs in a fresh temporary directory. argv/cwd tokens: {python} = interpreter, {tests} = this directory, {dir} = the case directory. `files` are written into {dir} before launch (mode is a decimal POSIX mode).",
+    "`options` use the TypeScript option names; Python maps them to snake_case. `stdin` may be a string, null, absent, or {repeat, times}. `onOutput: true` attaches a chunk collector, so runners that cannot stream (TypeScript sync) must be excluded. `cancel` is `beforeLaunch` (already cancelled) or `afterReady` (triggered once {dir}/ready exists).",
+    "`runners` lists the entry points per language; a case missing from a language, or listing an entry point that cannot honor its options, fails that language's coverage guard. Sync/async differences are stated in `note`.",
+    "Duration bounds derive from the engine's cleanup budget (0.5s TERM grace + 1s drain = 1.5s) plus 1.5s of scheduling slack; `maxDurationSeconds` includes the run's own deadline and fixture startup. `stdoutLength`/`stderrLength` count decoded characters and are only used with ASCII content."
+  ],
+  "categories": ["spawn", "stdinEof", "signal", "timeout", "cancellation", "grandchildren", "flood", "chunkBoundary"],
+  "cases": [
+    {
+      "id": "spawn-missing-executable",
+      "category": "spawn",
+      "argv": ["{dir}/no-such-binary"],
+      "options": {"timeoutSeconds": 5},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "launch-failed",
+        "launchError": "ENOENT",
+        "exitCode": -1,
+        "timedOut": false,
+        "signal": null,
+        "timeoutKind": null,
+        "maxDurationSeconds": 1
+      }
+    },
+    {
+      "id": "spawn-missing-cwd",
+      "category": "spawn",
+      "argv": ["sh", "-c", "true"],
+      "cwd": "{dir}/gone",
+      "options": {"timeoutSeconds": 5},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "launch-failed",
+        "launchError": "ENOENT",
+        "exitCode": -1,
+        "timedOut": false,
+        "signal": null
+      }
+    },
+    {
+      "id": "spawn-non-executable-file",
+      "category": "spawn",
+      "files": {"not-executable": {"content": "#!/bin/sh\necho ran\n", "mode": 384}},
+      "argv": ["{dir}/not-executable"],
+      "options": {"timeoutSeconds": 5},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "launch-failed",
+        "launchError": "EACCES",
+        "exitCode": -1,
+        "timedOut": false,
+        "signal": null,
+        "stdout": ""
+      }
+    },
+    {
+      "id": "exit-nonzero-is-exited",
+      "category": "spawn",
+      "argv": ["sh", "-c", "exit 3"],
+      "options": {"timeoutSeconds": 5},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "exitCode": 3,
+        "timedOut": false,
+        "signal": null,
+        "launchError": null,
+        "timeoutKind": null,
+        "callbackError": null
+      }
+    },
+    {
+      "id": "stdin-absent-is-eof",
+      "category": "stdinEof",
+      "argv": ["sh", "-c", "cat; echo eof"],
+      "options": {"timeoutSeconds": 5},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "exitCode": 0, "stdout": "eof\n", "stdoutBytes": 4}
+    },
+    {
+      "id": "stdin-null-is-eof",
+      "category": "stdinEof",
+      "argv": ["sh", "-c", "cat; echo eof"],
+      "options": {"timeoutSeconds": 5, "stdin": null},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "exitCode": 0, "stdout": "eof\n"}
+    },
+    {
+      "id": "stdin-empty-is-eof",
+      "category": "stdinEof",
+      "argv": ["sh", "-c", "cat; echo eof"],
+      "options": {"timeoutSeconds": 5, "stdin": ""},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "exitCode": 0, "stdout": "eof\n"}
+    },
+    {
+      "id": "stdin-utf8-round-trips-then-eof",
+      "category": "stdinEof",
+      "argv": ["sh", "-c", "cat; echo eof"],
+      "options": {"timeoutSeconds": 5, "stdin": "café ✓ 𝄞\n"},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "exitCode": 0, "stdout": "café ✓ 𝄞\neof\n", "stdoutBytes": 19}
+    },
+    {
+      "id": "stdin-larger-than-pipe-with-concurrent-stderr",
+      "category": "stdinEof",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "echo-stdin-noisy", "200000"],
+      "options": {"timeoutSeconds": 20, "stdin": {"repeat": "x", "times": 2097152}, "maxOutputBytes": 4194304},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "exitCode": 0,
+        "stdoutEqualsStdin": true,
+        "stdoutBytes": 2097152,
+        "stdoutTruncated": false,
+        "stderrLength": 200000,
+        "stderrBytes": 200000,
+        "stderrTruncated": false
+      }
+    },
+    {
+      "id": "stdin-early-close-is-not-an-error",
+      "category": "stdinEof",
+      "argv": ["sh", "-c", "head -c 10; exit 3"],
+      "options": {"timeoutSeconds": 10, "stdin": {"repeat": "y", "times": 4194304}},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "exitCode": 3,
+        "launchError": null,
+        "stdout": "yyyyyyyyyy",
+        "maxDurationSeconds": 3
+      }
+    },
+    {
+      "id": "self-sigterm-is-signaled-not-timed-out",
+      "category": "signal",
+      "argv": ["{python}", "{tests}/process_tree.py", "self-signal", "{dir}"],
+      "options": {"timeoutSeconds": 10},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "signaled",
+        "signal": "SIGTERM",
+        "exitCode": -15,
+        "timedOut": false,
+        "timeoutKind": null,
+        "launchError": null,
+        "stdout": "tree stdout ✓ 日本語 𝄞\n",
+        "stderrContains": "PROCESS_TREE_STDERR_MARKER\n",
+        "maxDurationSeconds": 8.5
+      }
+    },
+    {
+      "id": "wall-timeout-kills-term-ignoring-tree",
+      "category": "timeout",
+      "argv": ["{python}", "{tests}/process_tree.py", "tree", "{dir}"],
+      "options": {"timeoutSeconds": 1},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "timed-out",
+        "timeoutKind": "wall",
+        "timedOut": true,
+        "exitCode": -1,
+        "launchError": null,
+        "minDurationSeconds": 1,
+        "maxDurationSeconds": 4,
+        "treeStopped": true,
+        "stdout": "tree stdout ✓ 日本語 𝄞\n",
+        "stderrContains": "PROCESS_TREE_STDERR_MARKER\n"
+      }
+    },
+    {
+      "id": "wall-timeout-reaps-direct-child",
+      "category": "timeout",
+      "argv": ["{python}", "{tests}/process_tree.py", "solo", "{dir}"],
+      "options": {"timeoutSeconds": 1},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "timed-out", "timeoutKind": "wall", "leaderReaped": true}
+    },
+    {
+      "id": "inactivity-timeout-is-opt-in",
+      "category": "timeout",
+      "argv": ["sh", "-c", "echo a; sleep 30"],
+      "options": {"timeoutSeconds": null, "inactivityTimeoutSeconds": 0.3},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "timed-out",
+        "timeoutKind": "inactivity",
+        "timedOut": true,
+        "exitCode": -1,
+        "stdout": "a\n",
+        "minDurationSeconds": 0.3,
+        "maxDurationSeconds": 3.3
+      }
+    },
+    {
+      "id": "silence-alone-is-not-failure",
+      "category": "timeout",
+      "argv": ["sh", "-c", "sleep 0.5; echo late"],
+      "options": {"timeoutSeconds": null},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "exitCode": 0, "timeoutKind": null, "timedOut": false, "stdout": "late\n"}
+    },
+    {
+      "id": "inactivity-resets-on-either-stream",
+      "category": "timeout",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "stderr-ticks", "6", "0.1"],
+      "options": {"timeoutSeconds": null, "inactivityTimeoutSeconds": 0.3},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "exitCode": 0, "stdout": "done\n", "stderr": "......"}
+    },
+    {
+      "id": "inactivity-counts-from-launch",
+      "category": "timeout",
+      "argv": ["sleep", "5"],
+      "options": {"timeoutSeconds": null, "inactivityTimeoutSeconds": 0.3},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "timed-out", "timeoutKind": "inactivity", "timedOut": true, "stdout": "", "stdoutBytes": 0, "minDurationSeconds": 0.3, "maxDurationSeconds": 3.3}
+    },
+    {
+      "id": "wall-timeout-wins-over-later-inactivity",
+      "category": "timeout",
+      "argv": ["sh", "-c", "sleep 30"],
+      "options": {"timeoutSeconds": 0.2, "inactivityTimeoutSeconds": 10},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "timed-out", "timeoutKind": "wall", "timedOut": true, "exitCode": -1, "maxDurationSeconds": 3.2}
+    },
+    {
+      "id": "cancel-after-ready-stops-tree",
+      "category": "cancellation",
+      "argv": ["{python}", "{tests}/process_tree.py", "tree", "{dir}"],
+      "options": {"timeoutSeconds": 20},
+      "cancel": "afterReady",
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "TypeScript runSubprocess blocks its caller, so an abort raised after launch cannot be delivered; only the async entry point honors in-flight cancellation.",
+      "expect": {
+        "termination": "cancelled",
+        "exitCode": -1,
+        "timedOut": false,
+        "timeoutKind": null,
+        "launchError": null,
+        "treeStopped": true,
+        "stdout": "tree stdout ✓ 日本語 𝄞\n",
+        "stderrContains": "PROCESS_TREE_STDERR_MARKER\n",
+        "maxCancelLatencySeconds": 3,
+        "maxDurationSeconds": 5
+      }
+    },
+    {
+      "id": "cancel-before-launch-spawns-nothing",
+      "category": "cancellation",
+      "argv": ["sh", "-c", "touch launched; sleep 5"],
+      "options": {"timeoutSeconds": 5},
+      "cancel": "beforeLaunch",
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "cancelled",
+        "exitCode": -1,
+        "timedOut": false,
+        "stdout": "",
+        "maxDurationSeconds": 1,
+        "filesAbsent": ["launched"]
+      }
+    },
+    {
+      "id": "cancel-delivers-sigterm-to-graceful-tree",
+      "category": "cancellation",
+      "argv": ["{python}", "{tests}/process_tree.py", "graceful", "{dir}"],
+      "options": {"timeoutSeconds": 20},
+      "cancel": "afterReady",
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "Same sync restriction as cancel-after-ready-stops-tree.",
+      "expect": {
+        "termination": "cancelled",
+        "exitCode": -1,
+        "timedOut": false,
+        "treeStopped": true,
+        "filesExist": ["leader.term", "child.term", "grandchild.term"],
+        "maxCancelLatencySeconds": 3
+      }
+    },
+    {
+      "id": "leader-exit-stops-term-ignoring-leftovers",
+      "category": "grandchildren",
+      "argv": ["{python}", "{tests}/process_tree.py", "early-exit", "{dir}"],
+      "options": {"timeoutSeconds": 30},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "exitCode": 7,
+        "signal": null,
+        "timedOut": false,
+        "treeStopped": true,
+        "stdout": "tree stdout ✓ 日本語 𝄞\n",
+        "stderrContains": "PROCESS_TREE_STDERR_MARKER\n",
+        "maxDurationSeconds": 4
+      }
+    },
+    {
+      "id": "leader-exit-with-closed-pipes-still-stops-leftovers",
+      "category": "grandchildren",
+      "argv": ["{python}", "{tests}/process_tree.py", "closed-pipes", "{dir}"],
+      "options": {"timeoutSeconds": 30},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "exitCode": 7,
+        "signal": null,
+        "timedOut": false,
+        "treeStopped": true,
+        "stdout": "tree stdout ✓ 日本語 𝄞\n",
+        "stderrContains": "PROCESS_TREE_STDERR_MARKER\n",
+        "maxDurationSeconds": 4
+      }
+    },
+    {
+      "id": "escaped-pipe-holder-does-not-hang-the-run",
+      "category": "grandchildren",
+      "argv": ["{python}", "{tests}/process_tree.py", "escaped", "{dir}"],
+      "options": {"timeoutSeconds": 30},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "note": "Documented limitation: a descendant that left the process group is not ours to stop; it stays running.",
+      "expect": {
+        "termination": "exited",
+        "exitCode": 0,
+        "timedOut": false,
+        "stdout": "tree stdout ✓ 日本語 𝄞\n",
+        "leaderReaped": true,
+        "childRunning": true,
+        "maxDurationSeconds": 3
+      }
+    },
+    {
+      "id": "flood-both-streams-is-drained-past-default-cap",
+      "category": "flood",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "flood", "5242880"],
+      "options": {"timeoutSeconds": 20},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "exitCode": 0,
+        "stdoutLength": 1048576,
+        "stderrLength": 1048576,
+        "stdoutBytes": 5242880,
+        "stderrBytes": 5242880,
+        "stdoutTruncated": true,
+        "stderrTruncated": true
+      }
+    },
+    {
+      "id": "zero-cap-counts-and-flags-but-captures-nothing",
+      "category": "flood",
+      "argv": ["sh", "-c", "echo out; echo err >&2"],
+      "options": {"timeoutSeconds": 5, "maxOutputBytes": 0},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "stdout": "",
+        "stderr": "",
+        "stdoutBytes": 4,
+        "stderrBytes": 4,
+        "stdoutTruncated": true,
+        "stderrTruncated": true
+      }
+    },
+    {
+      "id": "zero-cap-still-streams-to-the-callback",
+      "category": "flood",
+      "argv": ["sh", "-c", "echo out; echo err >&2"],
+      "options": {"timeoutSeconds": 5, "maxOutputBytes": 0, "onOutput": true},
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "TypeScript runSubprocess rejects onOutput before launch; Python's blocking runner accepts synchronous callbacks.",
+      "expect": {
+        "termination": "exited",
+        "callbackError": null,
+        "stdout": "",
+        "stderr": "",
+        "stdoutTruncated": true,
+        "stderrTruncated": true,
+        "streamedStdout": "out\n",
+        "streamedStderr": "err\n"
+      }
+    },
+    {
+      "id": "zero-cap-with-silent-child-is-not-truncated",
+      "category": "flood",
+      "argv": ["true"],
+      "options": {"timeoutSeconds": 5, "maxOutputBytes": 0},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "exited",
+        "exitCode": 0,
+        "stdoutBytes": 0,
+        "stderrBytes": 0,
+        "stdoutTruncated": false,
+        "stderrTruncated": false,
+        "callbackError": null,
+        "timeoutKind": null
+      }
+    },
+    {
+      "id": "split-utf8-across-reads-stays-whole",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "gated-pieces", "{dir}", "68c3", "a96c6c6f20e2", "9c930a"],
+      "options": {"timeoutSeconds": 10, "onOutput": true},
+      "acknowledgeChunks": true,
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "Each decoded callback acknowledges a piece before the child writes the next, forcing UTF-8 splits across reads. TypeScript sync cannot provide callbacks.",
+      "expect": {
+        "termination": "exited",
+        "stdout": "héllo ✓\n",
+        "streamedStdout": "héllo ✓\n",
+        "streamedNoReplacement": true,
+        "stdoutBytes": 11,
+        "stdoutTruncated": false
+      }
+    },
+    {
+      "id": "split-utf8-across-reads-captures-whole",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "write-pieces", "68c3", "a96c6c6f20e2", "9c930a"],
+      "options": {"timeoutSeconds": 10},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "stdout": "héllo ✓\n", "stdoutBytes": 11, "stdoutTruncated": false}
+    },
+    {
+      "id": "cap-inside-multibyte-drops-partial-code-point",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "write-pieces", "6162e29c9363640a"],
+      "options": {"timeoutSeconds": 10, "maxOutputBytes": 3, "onOutput": true},
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "TypeScript runSubprocess rejects onOutput; streaming is independent of the capture cap.",
+      "expect": {
+        "termination": "exited",
+        "stdout": "ab",
+        "stdoutTruncated": true,
+        "stdoutBytes": 8,
+        "stderrTruncated": false,
+        "streamedStdout": "ab✓cd\n"
+      }
+    },
+    {
+      "id": "cap-exactly-at-code-point-boundary-is-complete",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "write-pieces", "6162e29c9363640a"],
+      "options": {"timeoutSeconds": 10, "maxOutputBytes": 5},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "stdout": "ab✓", "stdoutTruncated": true, "stdoutBytes": 8}
+    },
+    {
+      "id": "cap-exactly-at-output-size-is-not-truncated",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "write-pieces", "61626364"],
+      "options": {"timeoutSeconds": 10, "maxOutputBytes": 4},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "stdout": "abcd", "stdoutBytes": 4, "stdoutTruncated": false}
+    },
+    {
+      "id": "cap-exceeded-by-one-byte-is-truncated",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "write-pieces", "6162636465"],
+      "options": {"timeoutSeconds": 10, "maxOutputBytes": 4},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "stdout": "abcd", "stdoutBytes": 5, "stdoutTruncated": true}
+    },
+    {
+      "id": "invalid-and-eof-incomplete-utf8-use-replacement",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "gated-pieces", "{dir}", "6f6bff", "e29c"],
+      "options": {"timeoutSeconds": 10, "onOutput": true},
+      "acknowledgeChunks": true,
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "TypeScript runSubprocess rejects onOutput; invalid-utf8-capture-uses-replacement is its capture-only twin.",
+      "expect": {
+        "termination": "exited",
+        "stdout": "ok\ufffd\ufffd",
+        "streamedStdout": "ok\ufffd\ufffd",
+        "stdoutBytes": 5,
+        "stdoutTruncated": false
+      }
+    },
+    {
+      "id": "invalid-utf8-capture-uses-replacement",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/subprocess_child.py", "write-pieces", "6f6bff", "e29c"],
+      "options": {"timeoutSeconds": 10},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {"termination": "exited", "stdout": "ok\ufffd\ufffd", "stdoutBytes": 5, "stdoutTruncated": false}
+    },
+    {
+      "id": "incomplete-utf8-at-forced-close-uses-replacement",
+      "category": "chunkBoundary",
+      "argv": ["{python}", "{tests}/process_tree.py", "partial-utf8", "{dir}"],
+      "options": {"timeoutSeconds": 1},
+      "runners": {"python": ["sync", "async"], "typescript": ["sync", "async"]},
+      "expect": {
+        "termination": "timed-out",
+        "timeoutKind": "wall",
+        "stdoutPattern": "^héllo \ufffd+$",
+        "stdoutBytes": 9
+      }
+    }
+  ]
+}

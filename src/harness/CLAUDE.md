@@ -90,10 +90,11 @@ returning a `SessionTelemetry` payload (`base.py`), separate from headless
 `parse_output`. Selected cross-runtime cases are checked in
 `tests/adapters/test_session_parity.py`.
 
-`tests/test_fixtures.py` explicitly loads named fixtures and uses
-adapter-specific assertions; it does not discover new JSON files. Add tests
-for each new adapter in both languages. See
-[the shared fixture coverage notes](../../CLAUDE.md#how-parity-is-enforced).
+`tests/test_fixtures.py` discovers every adapter fixture, requires names to
+match the registry, and asserts the same command/parser/capability cases as
+TypeScript, including real substitute-executable runs. Add shared edge cases
+to the fixture rather than a language-only golden assertion. See
+[the fixture contract](../../SPEC.md#json-fixture-driven-verification).
 
 ## What to keep in lockstep with TypeScript
 

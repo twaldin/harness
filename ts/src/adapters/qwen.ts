@@ -6,13 +6,19 @@ import { existsSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { deriveCost } from '../pricing.js'
 
-function parseQwenStatsBlob(blob: string): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null; raw: unknown | null } {
+type QwenStats = { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null; raw: unknown | null }
+
+function parseQwenStatsBlob(blob: string): QwenStats {
   let parsed: unknown
   try {
     parsed = JSON.parse(blob)
   } catch {
     return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
+  return statsFromParsed(parsed)
+}
+
+function statsFromParsed(parsed: unknown): QwenStats {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
   }
@@ -59,9 +65,13 @@ const qwenAdapter: Adapter = {
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
+    // Current qwen emits a JSON array whose last `type: "result"` item carries
+    // usage. Older versions emit a `stats.models[*]` envelope object; keep that
+    // fallback so headless parsing matches the Python adapter.
     const candidates: string[] = [outcome.stdout.trim()]
     for (const ln of outcome.stdout.split('\n')) {
-      if (ln.trim().startsWith('[')) candidates.push(ln.trim())
+      const s = ln.trim()
+      if (s.startsWith('[') || s.startsWith('{')) candidates.push(s)
     }
 
     for (const blob of candidates) {
@@ -72,7 +82,14 @@ const qwenAdapter: Adapter = {
       } catch {
         continue
       }
-      if (!Array.isArray(parsed)) continue
+      if (!Array.isArray(parsed)) {
+        const stats = statsFromParsed(parsed)
+        if (stats.tokensIn === null) continue
+        if (!Number.isFinite(stats.tokensIn) || !Number.isFinite(stats.tokensOut)) {
+          throw new Error('Invalid Qwen token totals')
+        }
+        return { costUsd: null, tokensIn: stats.tokensIn, tokensOut: stats.tokensOut, raw: parsed }
+      }
       for (let i = parsed.length - 1; i >= 0; i--) {
         const item = parsed[i]
         if (!item || typeof item !== 'object') continue

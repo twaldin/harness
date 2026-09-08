@@ -7,14 +7,16 @@ import { join } from 'node:path'
 const TOKEN_RE = /Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i
 
 function parseAiderNum(s: string): number | null {
-  const cleaned = s.replace(/,/g, '').trim()
-  if (!cleaned) return null
-  try {
-    if (cleaned.endsWith('k')) return Math.round(parseFloat(cleaned.slice(0, -1)) * 1000)
-    return Math.round(parseFloat(cleaned))
-  } catch {
-    return null
-  }
+  const cleaned = s.replace(/,/g, '').trim().toLowerCase()
+  const scaled = cleaned.endsWith('k')
+  const digits = scaled ? cleaned.slice(0, -1) : cleaned
+  if (digits === '') return null
+  const value = Number(digits) * (scaled ? 1000 : 1)
+  if (!Number.isFinite(value)) return null
+  if (!scaled) return Math.trunc(value)
+  // Match Python round(): nearest whole token, ties to even, for abbreviated counts.
+  const lower = Math.floor(value)
+  return value - lower === 0.5 ? lower + lower % 2 : Math.round(value)
 }
 
 const aiderAdapter: Adapter = {

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import sys
 from pathlib import Path
 
 import pytest
@@ -150,14 +151,10 @@ def test_pi_session_log_path_encoding(tmp_path: Path, monkeypatch: pytest.Monkey
     assert get_adapter("pi").session_log_path(workdir) == str(log)
 
 
-def test_gemini_session_log_parses_stats_envelope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    workdir = tmp_path / "proj"
-    workdir.mkdir()
+def test_gemini_session_log_parses_stats_envelope(tmp_path: Path):
     payload = {"stats": {"models": {"gemini-2.5-pro": {"tokens": {"input": 1000, "candidates": 100}}}}}
-    log = _write(tmp_path / ".gemini" / "tmp" / "proj" / "logs.json", json.dumps(payload))
+    log = _write(tmp_path / "stats.json", json.dumps(payload))
     a = get_adapter("gemini")
-    assert a.session_log_path(workdir) == str(log)
     t = a.parse_session_log(str(log))
     assert (t.tokens_in, t.tokens_out, t.model) == (1000, 100, "gemini-2.5-pro")
     assert t.cost_usd == pytest.approx(1000 / 1e6 * 1.25 + 100 / 1e6 * 10.0)
@@ -167,10 +164,33 @@ def test_gemini_session_log_parses_stats_envelope(tmp_path: Path, monkeypatch: p
 
 def test_swe_agent_session_log_prefers_headless_trajectory(tmp_path: Path):
     workdir = tmp_path / "wd"
-    traj = {"info": {"model_stats": {"instance_cost": 0.5, "gpt-5.4": {}}}, "messages": []}
-    log = _write(workdir / ".harness" / "swe-traj.json", json.dumps(traj))
+    fixture = Path(__file__).parent / "fixtures/session-logs/swe-agent/trajectory.json"
+    log = _write(workdir / ".harness" / "swe-traj.json", fixture.read_text())
     _write(workdir / "mini-traj.json", "{}")
     a = get_adapter("swe-agent")
     assert a.session_log_path(workdir) == str(log)
     t = a.parse_session_log(str(log))
-    assert (t.cost_usd, t.model, t.tokens_in) == (0.5, "gpt-5.4", None)
+    assert (t.cost_usd, t.model, t.tokens_in) == (0.5, "openai/gpt-5.4", None)
+
+
+@pytest.mark.parametrize(
+    "case",
+    json.loads((Path(__file__).parent / "fixtures/session-logs/swe-agent/discovery.json").read_text()),
+    ids=lambda case: case["name"],
+)
+def test_swe_discovery_cutoff_and_project_scope(case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    home = tmp_path / "home"
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    global_dir = (
+        home / "Library/Application Support/mini-swe-agent"
+        if sys.platform == "darwin"
+        else home / ".local/share/mini-swe-agent"
+    )
+    for relative, modified in case["files"].items():
+        path = global_dir / Path(relative).name if relative.startswith("global/") else tmp_path / relative
+        _write(path, "{}")
+        os.utime(path, (modified, modified))
+    expected = str(tmp_path / case["expected"]) if case["expected"] else None
+    assert get_adapter("swe-agent").session_log_path(workdir, case["since"]) == expected

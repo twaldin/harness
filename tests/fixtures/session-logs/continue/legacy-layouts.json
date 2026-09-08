@@ -1,0 +1,9 @@
+{
+  "$comment": "Negative discovery cases: these were Harness basename/dev-data/index and CONTINUE_SESSION_DIR guesses, not upstream Continue session layouts. Both runtimes place the native session fixture for an unrelated workspace here and must return no match.",
+  "cases": [
+    {"name": "basename sessions", "directory": ".continue/sessions/__BASENAME__", "override": false},
+    {"name": "basename dev data", "directory": ".continue/dev_data/__BASENAME__", "override": false},
+    {"name": "basename index", "directory": ".continue/index/__BASENAME__", "override": false},
+    {"name": "obsolete override", "directory": "obsolete-session-root", "override": true}
+  ]
+}

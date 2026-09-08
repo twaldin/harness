@@ -1,0 +1,10 @@
+{"sessionId":"11111111-aaaa-4bbb-8ccc-000000000001","projectHash":"__PROJECT_HASH__","startTime":"2026-09-08T10:00:00.000Z","lastUpdated":"2026-09-08T10:00:00.000Z","kind":"main"}
+{"id":"u1","timestamp":"2026-09-08T10:00:01.000Z","type":"user","content":[{"text":"refactor the queue class"}]}
+{"id":"g1","timestamp":"2026-09-08T10:00:02.000Z","type":"gemini","content":[{"text":"Working on it."}],"thoughts":[],"tokens":null,"model":"gemini-2.5-pro"}
+{"id":"g1","timestamp":"2026-09-08T10:00:02.000Z","type":"gemini","content":[{"text":"Working on it."}],"thoughts":[],"tokens":{"input":1000,"output":100,"cached":0,"thoughts":20,"tool":0,"total":1120},"model":"gemini-2.5-pro"}
+{"$set":{"lastUpdated":"2026-09-08T10:00:03.000Z"}}
+{"id":"g2","timestamp":"2026-09-08T10:00:04.000Z","type":"gemini","content":"","toolCalls":[{"id":"t1","name":"read_file","args":{"path":"queue.py"},"status":"scheduled","timestamp":"2026-09-08T10:00:04.000Z"}],"thoughts":[],"tokens":{"input":500,"output":0,"cached":0,"thoughts":0,"tool":0,"total":500},"model":"gemini-2.5-pro"}
+{"id":"g2","timestamp":"2026-09-08T10:00:04.000Z","type":"gemini","content":"","toolCalls":[{"id":"t1","name":"read_file","args":{"path":"queue.py"},"status":"success","result":[{"text":"class Queue: ..."}],"timestamp":"2026-09-08T10:00:04.000Z"}],"thoughts":[],"tokens":{"input":500,"output":0,"cached":0,"thoughts":0,"tool":0,"total":500},"model":"gemini-2.5-pro"}
+{"id":"g3","timestamp":"2026-09-08T10:00:05.000Z","type":"gemini","content":[{"text":"rewound answer"}],"thoughts":[],"tokens":{"input":9999,"output":9999,"cached":0,"thoughts":0,"tool":0,"total":19998},"model":"gemini-2.5-flash"}
+{"$rewindTo":"g3"}
+{"$set":{"lastUpdated":"2026-09-08T10:00:06.000Z"}}

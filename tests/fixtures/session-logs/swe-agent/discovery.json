@@ -1,0 +1,6 @@
+[
+  {"name":"stale wrapper trajectory is excluded","files":{"work/.harness/swe-traj.json":1000},"since":2000,"expected":null},
+  {"name":"cutoff boundary is inclusive","files":{"work/.harness/swe-traj.json":2000},"since":2000,"expected":"work/.harness/swe-traj.json"},
+  {"name":"fresh local fallback follows stale wrapper","files":{"work/.harness/swe-traj.json":1000,"work/mini-traj.json":3000},"since":2000,"expected":"work/mini-traj.json"},
+  {"name":"global last run does not identify this workdir","files":{"global/last_mini_run.traj.json":3000},"since":null,"expected":null}
+]

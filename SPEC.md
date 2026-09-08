@@ -886,10 +886,14 @@ working directory or latest log file. Existing `sessionLogPath` and
 `parseSessionLog` helpers locate/read artifacts; they do not open, own, resume
 or cancel a session. Python `session_started_after` is Unix seconds and
 TypeScript `sessionStartedAfter` is Unix milliseconds, preserving their native
-time conventions. Pass the same instant after converting units. Not every
-adapter honors the cutoff; newest-file and basename-based database selectors
-are discovery heuristics, not proof of session ownership. Do not use them to
-attribute concurrent runs without an upstream session ID.
+time conventions. Pass the same instant after converting units. Claude Code,
+OpenClaude, Factory, Gemini, Qwen, Continue and the SWE wrapper honor an
+inclusive file-mtime cutoff. Other adapter limitations remain documented in
+the [matrix](ADAPTER-MATRIX.md#session-telemetry-coverage). A modified/resumed
+old conversation can pass the cutoff; newest-file selectors are
+discovery heuristics, not proof of ownership. Do not attribute concurrent runs
+without an upstream session ID. File helpers read the caller process's selected
+config environment, not remembered child `RunSpec` overrides.
 
 Current execution behavior and limits:
 

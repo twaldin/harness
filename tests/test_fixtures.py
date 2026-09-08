@@ -319,7 +319,7 @@ async def test_run_executes_fixture_cli(case: dict, entrypoint: str):
         assert result.parse_error is None
     assert (result.stdout, result.stderr) == (sample["stdout"], sample["stderr"])
     assert (result.stdout_truncated, result.stderr_truncated) == (False, False)
-    assert result.ok == (not case.get("expectedParseError", False))
+    assert result.ok == (sample["exitCode"] == 0 and not case.get("expectedParseError", False))
 
     # What the substitute CLI observed at launch.
     seen = json.loads(record_path.read_text(encoding="utf-8"))

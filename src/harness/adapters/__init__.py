@@ -6,6 +6,7 @@ from harness.adapters.continue_cli import ContinueCliAdapter
 from harness.adapters.crush import CrushAdapter
 from harness.adapters.factory_droid import FactoryDroidAdapter
 from harness.adapters.gemini import GeminiAdapter
+from harness.adapters.hermes import HermesAdapter
 from harness.adapters.kilo import KiloAdapter
 from harness.adapters.openclaude import OpenClaudeAdapter
 from harness.adapters.opencode import OpenCodeAdapter
@@ -27,6 +28,7 @@ register("factory-droid", FactoryDroidAdapter)
 register("openclaude", OpenClaudeAdapter)
 register("crush", CrushAdapter)
 register("kilo", KiloAdapter)
+register("hermes", HermesAdapter)
 
 __all__ = [
     "AiderAdapter",
@@ -36,6 +38,7 @@ __all__ = [
     "CrushAdapter",
     "FactoryDroidAdapter",
     "GeminiAdapter",
+    "HermesAdapter",
     "KiloAdapter",
     "OpenClaudeAdapter",
     "OpenCodeAdapter",

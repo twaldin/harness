@@ -19,6 +19,7 @@ JavaScript works on UTF-16 code units, so the sanitizer and hash do too.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import string
@@ -196,7 +197,7 @@ def parse_claude_transcript(path: str) -> SessionTelemetry:
 
     tokens_in = 0
     tokens_out = 0
-    cost_usd = 0.0
+    cost_usd: float | None = 0.0
     model_name: str | None = None
     saw_usage = False
     saw_cost = False
@@ -236,9 +237,14 @@ def parse_claude_transcript(path: str) -> SessionTelemetry:
             event_cost = event.get("costUSD")
             if not isinstance(event_cost, (int, float)) or isinstance(event_cost, bool):
                 event_cost = event.get("total_cost_usd")
-            if isinstance(event_cost, (int, float)) and not isinstance(event_cost, bool) and not duplicate:
+            if isinstance(event_cost, (int, float)) and not isinstance(event_cost, bool) and not duplicate and cost_usd is not None:
                 saw_cost = True
-                cost_usd += float(event_cost)
+                try:
+                    total = cost_usd + float(event_cost)
+                except OverflowError:
+                    cost_usd = None
+                else:
+                    cost_usd = total if math.isfinite(total) else None
             # Skip claude-code's "<synthetic>" placeholder — an autoresponder /
             # interrupt turn, not a real model invocation.
             if model_name is None and isinstance(msg.get("model"), str) and msg.get("model") != "<synthetic>":

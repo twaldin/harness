@@ -7,16 +7,18 @@ export type {
   ClaudeCodeEffort, CodexSandbox, ErrorCode, Capabilities, ValidatedRunSpec,
   Termination,
 } from './base.js'
-export type { InstructionProjection, ProjectInstructionsOptions, RunSubprocessOptions } from './subproc.js'
+export type { InstructionProjection, ProjectInstructionsOptions, PreparedCommand } from './instructions.js'
+export type { RunSubprocessOptions } from './subproc.js'
 export { HarnessError, validateRunSpec } from './base.js'
 export { register, listAdapters, getAdapter, getCapabilities, buildCommand, parseOutput, run, runAsync } from './registry.js'
 export {
   writeInstructions,
   projectInstructions,
   restoreProjectedInstructions,
-  runSubprocess,
-  runSubprocessAsync,
-} from './subproc.js'
+  prepareCommand,
+  cleanupCommand,
+} from './instructions.js'
+export { runSubprocess, runSubprocessAsync } from './subproc.js'
 export { stripAnsi, lastLines, lastNonEmptyJoin } from './util.js'
 export { lookupPricing, deriveCost } from './pricing.js'
 export type { ModelPricing } from './pricing.js'

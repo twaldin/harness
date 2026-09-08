@@ -1,8 +1,8 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome } from '../base.js'
-import { writeFileSync } from 'fs'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
+import { devNull } from 'node:os'
+import { join } from 'node:path'
 
 const TOKEN_RE = /Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received/i
 
@@ -19,35 +19,32 @@ function parseAiderNum(s: string): number | null {
 
 const aiderAdapter: Adapter = {
   name: 'aider',
-  instructionsFilename: '.aider.conf.yml',
+  instructionsFilename: '.harness-aider-instructions.md',
   defaultModel: 'openrouter/anthropic/claude-sonnet-4.6',
   permissionBypassArgs: ['--yes-always'],
+  configFileFlag: '--config',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model, permissionArgs } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-
-    const configPath = `${spec.workdir}/.agentelo-aider.yml`
-    writeFileSync(configPath, '{}\n', 'utf-8')
-
-    return {
-      cmd: 'aider',
-      args: [
-        '--config', configPath,
-        '--no-restore-chat-history',
-        '--chat-history-file', `${spec.workdir}/.agentelo-aider-chat.history.md`,
-        '--input-history-file', `${spec.workdir}/.agentelo-aider-input.history`,
-        '--model', model,
-        '--message', spec.prompt,
-        ...permissionArgs,
-        '--no-auto-commits',
-        '--no-analytics',
-        '--no-show-model-warnings',
-      ],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile,
+    const validated = validateRunSpec(this, spec)
+    const { model, permissionArgs, configArgs, workdir } = validated
+    const args = [...configArgs]
+    // Instructions are plain text the model reads, not aider's YAML config.
+    if (spec.instructions !== undefined) {
+      args.push('--read', join(workdir, this.instructionsFilename))
     }
+    args.push(
+      '--no-restore-chat-history',
+      // Upstream defaults to writing histories into the workdir; the null device keeps runs from sharing them.
+      '--chat-history-file', devNull,
+      '--input-history-file', devNull,
+      '--model', model,
+      '--message', spec.prompt,
+      ...permissionArgs,
+      '--no-auto-commits',
+      '--no-analytics',
+      '--no-show-model-warnings',
+    )
+    return finalizeCommand(this, spec, validated, { cmd: 'aider', args })
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {

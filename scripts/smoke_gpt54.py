@@ -12,40 +12,8 @@ from pathlib import Path
 from harness import HarnessError, PermissionPolicy, RunSpec, run
 
 
-def _augment_path_with_nvm() -> None:
-    """Prepend Node 20 then Node 18 from ~/.nvm if present.
-
-    Required because `pi` needs Node 20 (regex /v flag) while kilo/droid/cn/
-    openclaude may be installed under Node 18. Putting Node 20 first lets
-    `env node` pick v20 (pi passes, Node 18 scripts usually still work).
-    """
-    nvm_root = Path.home() / ".nvm" / "versions" / "node"
-    if not nvm_root.is_dir():
-        return
-    to_add: list[str] = []
-    for preferred in ("v20.20.2", "v20"):
-        match = list(nvm_root.glob(f"{preferred}*"))
-        if match and (match[0] / "bin").is_dir():
-            to_add.append(str(match[0] / "bin"))
-            break
-    for preferred in ("v18.20.8", "v18"):
-        match = list(nvm_root.glob(f"{preferred}*"))
-        if match and (match[0] / "bin").is_dir():
-            to_add.append(str(match[0] / "bin"))
-            break
-    if to_add:
-        os.environ["PATH"] = os.pathsep.join([*to_add, os.environ.get("PATH", "")])
-
-
-_augment_path_with_nvm()
 
 PROMPT = "Write exactly hi to hi.txt in the current working directory, then stop."
-OPENAI_PROXY_ENV = {
-    "OPENAI_API_KEY": "dummy",
-    "OPENAI_BASE_URL": "http://localhost:10531/v1",
-    # crush and some other CLIs use OPENAI_API_ENDPOINT instead of OPENAI_BASE_URL
-    "OPENAI_API_ENDPOINT": "http://localhost:10531/v1",
-}
 DEFAULT_HARNESSES = [
     "codex",
     "opencode",
@@ -115,9 +83,6 @@ def _run_once(harness: str, model: str, timeout: int, keep_workdirs: bool, model
     tmp = tempfile.TemporaryDirectory(prefix=f"harness-smoke-{harness}-")
     workdir = Path(tmp.name)
     try:
-        env = {}
-        if harness in {"openclaude", "continue-cli", "swe-agent", "crush", "kilo", "factory-droid"}:
-            env.update(OPENAI_PROXY_ENV)
         result = run(
             RunSpec(
                 harness=harness,
@@ -127,7 +92,6 @@ def _run_once(harness: str, model: str, timeout: int, keep_workdirs: bool, model
                 timeout_seconds=timeout,
                 model_no_resolve=model_no_resolve,
                 permission_policy=permission_policy,
-                env=env,
             )
         )
         hi = workdir / "hi.txt"

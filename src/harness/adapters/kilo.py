@@ -7,7 +7,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -17,6 +17,7 @@ from harness.base import (
     ReadyState,
     RunSpec,
     SessionTelemetry,
+    absolute_workdir,
 )
 from harness.pricing import derive_cost
 from harness.util import last_non_empty_join
@@ -47,34 +48,24 @@ class KiloAdapter(Adapter):
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
         model = resolved.model
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
-        workdir = Path(spec.workdir)
+        workdir = absolute_workdir(spec.workdir)
         db_path = _kilo_db_path(workdir, spec.env)
-        # Only attempt mkdir if the parent path already sits under a writable
-        # prefix on the host. When KILO_DB points at a container-only path
-        # (e.g. /app/...), leave dir creation to the runtime inside the
-        # container.
-        try:
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+        # The default per-workdir DB parent is a harness artifact prepare
+        # creates; a KILO_DB override (e.g. a container-only path) is
+        # caller-owned and left to the runtime.
+        directories = () if _kilo_db_override(spec.env) else (db_path.parent,)
 
-        config_json = json.dumps(
-            {
-                "model": model,
-                "small_model": model,
-                "default_agent": "build",
-            },
-            separators=(",", ":"),
-        )
-
-        env = {
-            # Use a deterministic per-workdir DB for container safety.
-            "KILO_DB": str(db_path),
-            # Force single-model behavior for helper/small-model paths.
-            "KILO_CONFIG_CONTENT": config_json,
-        }
+        # Use a deterministic per-workdir DB for container safety.
+        env = {"KILO_DB": str(db_path)}
+        # Force single-model behavior for helper/small-model paths, unless the
+        # caller already selected a config (explicitly or inherited); that
+        # content is passed through untouched.
+        if "KILO_CONFIG_CONTENT" not in spec.env and "KILO_CONFIG_CONTENT" not in os.environ:
+            env["KILO_CONFIG_CONTENT"] = json.dumps(
+                {"model": model, "small_model": model, "default_agent": "build"},
+                separators=(",", ":"),
+            )
 
         args = [
             "run",
@@ -87,7 +78,7 @@ class KiloAdapter(Adapter):
             model,
             spec.prompt,
         ]
-        return BuildCommand(cmd="kilo", args=args, cwd=workdir, env=env, instructions_file=instructions_file)
+        return self.finalize_command(spec, cmd="kilo", args=args, env=env, directories=directories)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, _model = _read_kilo_session_totals(Path(spec.workdir), spec.env)
@@ -149,8 +140,12 @@ class KiloAdapter(Adapter):
         return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
+def _kilo_db_override(extra_env: dict[str, str] | None = None) -> str | None:
+    return (extra_env or {}).get("KILO_DB") or os.environ.get("KILO_DB") or None
+
+
 def _kilo_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
-    env_path = (extra_env or {}).get("KILO_DB") or os.environ.get("KILO_DB")
+    env_path = _kilo_db_override(extra_env)
     if env_path:
         return Path(env_path).expanduser()
     return workdir / ".harness" / "kilo" / "kilo.db"

@@ -37,15 +37,16 @@ from harness.registry import (
     run,
     run_async,
 )
-from harness._subproc import (
+from harness._instructions import (
     InstructionProjection,
-    SubprocOutcome,
+    PreparedCommand,
+    cleanup_command,
+    prepare_command,
     project_instructions,
     restore_projected_instructions,
-    run_subprocess,
-    run_subprocess_async,
     write_instructions,
 )
+from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.util import last_lines, last_non_empty_join, strip_ansi
 
 import harness.adapters  # noqa: E402,F401 — registers the shipped adapters
@@ -72,6 +73,7 @@ __all__ = [
     "Termination",
     "SubprocOutcome",
     "InstructionProjection",
+    "PreparedCommand",
     "build_command",
     "get_adapter",
     "get_capabilities",
@@ -82,6 +84,8 @@ __all__ = [
     "run_async",
     "run_subprocess",
     "run_subprocess_async",
+    "prepare_command",
+    "cleanup_command",
     "project_instructions",
     "restore_projected_instructions",
     "write_instructions",

@@ -1,8 +1,10 @@
 """Core types: RunSpec (input), BuildCommand (pre-exec), RunResult (output), Adapter (ABC)."""
 from __future__ import annotations
 
+import asyncio
+import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Literal, TypedDict, get_args
@@ -22,6 +24,7 @@ ErrorCode = Literal[
     "unsupported-backend",
     "unsupported-capability",
     "invalid-options",
+    "instruction-conflict",
 ]
 NativeOptionsKind = Literal["claude-code", "codex"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -82,10 +85,13 @@ class RunSpec:
                       codex:       "gpt-5.3-codex" / "o3"
                       None or "" selects the adapter default.
     `instructions`  — content for the per-harness instructions file
-                      (CLAUDE.md / AGENTS.md / GEMINI.md / .aider.conf.yml).
-                      Adapter writes it to the right filename inside `workdir`.
+                      (CLAUDE.md / AGENTS.md / GEMINI.md / ...). Planned by
+                      `build_command`, projected into `workdir` by
+                      `prepare_command` and restored by `cleanup_command`.
     `timeout_seconds` — wall-clock cap. Adapter SHOULD enforce this.
-    `env`           — extra environment variables merged onto os.environ.
+    `env`           — caller environment additions layered over the adapter's
+                      own additions; the inherited process environment is
+                      applied at execution. Never mutated by harness.
     `model_no_resolve` — pass `model` through exactly as provided, without
                       harness-specific normalization. Escape hatch for odd
                       provider/model combinations.
@@ -98,6 +104,16 @@ class RunSpec:
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
                       `CodexOptions`). The kind must match `harness`.
+    `executable`    — overrides the adapter's default program: a bare binary
+                      name resolved on PATH or an absolute path. Relative
+                      paths containing separators are rejected.
+    `config_home`   — absolute directory exported through the adapter's
+                      `config_home_env` variable (e.g. CLAUDE_CONFIG_DIR).
+                      Rejected with `unsupported-capability` when the adapter
+                      declares no such variable.
+    `config_file`   — absolute path passed verbatim through the adapter's
+                      `config_file_flag` (e.g. `--settings`). Never opened,
+                      copied or created by harness.
     `cancel`        — optional threading.Event. Setting it returns a cancelled
                       result after owned-process cleanup; a set event launches
                       nothing. Async Task.cancel instead propagates CancelledError.
@@ -114,6 +130,9 @@ class RunSpec:
     backend: Backend = "cli"
     permission_policy: PermissionPolicy = "upstream"
     native_options: NativeOptions | None = None
+    executable: str | None = None
+    config_home: Path | None = None
+    config_file: Path | None = None
     cancel: Event | None = None
 
 
@@ -121,8 +140,10 @@ class RunSpec:
 class BuildCommand:
     """What to invoke — without invoking it.
 
-    Returned by Adapter.build_command(). Writing the instructions file is a
-    side effect of build_command(), so the file exists before the CLI reads it.
+    Returned by Adapter.build_command(). Building is pure with respect to the
+    filesystem: nothing is written. `instructions_file` / `instruction_content`
+    plan the projection that `prepare_command` performs and `cleanup_command`
+    reverts; `directories` lists artifact parents prepare creates on demand.
     """
 
     cmd: str
@@ -130,6 +151,12 @@ class BuildCommand:
     cwd: Path
     env: dict[str, str]
     instructions_file: Path | None
+    instruction_content: str | None = None
+    directories: tuple[Path, ...] = ()
+    #: Model selection reported on `RunResult.model`: the requested model or
+    #: the adapter default; None when selection is delegated to a
+    #: caller-supplied config file.
+    model: str | None = None
 
 
 class ParsedOutput(TypedDict):
@@ -155,6 +182,8 @@ class Capabilities:
     streaming: bool
     cancellation: bool
     sessions: bool
+    config_home_env: str | None
+    config_file_flag: str | None
 
 
 @dataclass(frozen=True)
@@ -235,6 +264,19 @@ class ResolvedSpec:
     model: str | None
     permission_args: tuple[str, ...]
     native_args: tuple[str, ...]
+    #: `(config_file_flag, config_file)` when `spec.config_file` is set, else empty.
+    config_args: tuple[str, ...]
+
+
+def absolute_workdir(workdir: Path | str) -> Path:
+    """`workdir` as an absolute path against the current process cwd, without
+    resolving symlinks or changing the global cwd."""
+    if not isinstance(workdir, (str, os.PathLike)):
+        raise HarnessError("workdir must be a path", code="invalid-options")
+    text = os.fspath(workdir)
+    if not isinstance(text, str) or not text or "\0" in text:
+        raise HarnessError("workdir must be a non-empty path without NUL bytes", code="invalid-options")
+    return Path(workdir).absolute()
 
 
 def validate_backend(backend: object) -> None:
@@ -246,6 +288,25 @@ def validate_backend(backend: object) -> None:
     raise HarnessError(f"unknown backend {backend!r}; expected one of {', '.join(BACKENDS)}", code="invalid-options")
 
 
+def _absolute_option(name: str, value: object) -> Path:
+    """`RunSpec.config_home` / `config_file` must be absolute, NUL-free paths."""
+    if not isinstance(value, (str, os.PathLike)):
+        raise HarnessError(f"{name} must be a path, got {type(value).__name__}", code="invalid-options")
+    text = os.fspath(value)
+    if not text or "\0" in text:
+        raise HarnessError(f"{name} must be a non-empty path without NUL bytes", code="invalid-options")
+    path = Path(text)
+    if not path.is_absolute():
+        raise HarnessError(f"{name} must be an absolute path, got {text!r}", code="invalid-options")
+    return path
+
+
+def snapshot_run_spec(spec: RunSpec) -> RunSpec:
+    """Copy `spec` with its own `env` dict so later caller mutation cannot leak
+    into an in-flight run."""
+    return replace(spec, env=dict(spec.env))
+
+
 class Adapter(ABC):
     """Subclass per CLI. Each knows how to invoke its tool and parse its output.
 
@@ -255,8 +316,9 @@ class Adapter(ABC):
     Minimal third-party interface: `name`, `instructions_filename`,
     `DEFAULT_MODEL`, `build_command`, `parse_output`. Custom `build_command`
     implementations MUST call `validate_run_spec` (or `resolve_run_spec`)
-    before writing anything, so unsupported backends/policies/options are
-    rejected without side effects.
+    first and return `finalize_command(...)`, so unsupported backends,
+    policies and options are rejected and executable/config/env overrides are
+    applied uniformly. Building never touches the filesystem.
     """
 
     #: Short name used in CLI/registry. e.g. "claude-code".
@@ -275,6 +337,14 @@ class Adapter(ABC):
 
     #: Which `NativeOptions` kind this adapter accepts; None accepts none.
     native_options_kind: NativeOptionsKind | None = None
+
+    #: Environment variable that relocates the CLI's config/state home
+    #: (e.g. CLAUDE_CONFIG_DIR). None: `RunSpec.config_home` is rejected.
+    config_home_env: str | None = None
+
+    #: Flag that passes a caller-selected config file path (e.g. --settings).
+    #: None: `RunSpec.config_file` is rejected.
+    config_file_flag: str | None = None
 
     #: Scroll-key routing policy for terminal multiplexer integrations
     #: (for example flt's TUI). Consumers can use this to decide whether
@@ -306,7 +376,8 @@ class Adapter(ABC):
         """Reject a RunSpec this adapter cannot honor. Pure: no filesystem or
         subprocess side effects. Raises `HarnessError` with a stable `code`.
 
-        Order: backend, permission policy, native options.
+        Order: backend, permission policy, native options, executable,
+        config_home, config_file, workdir.
         """
         validate_backend(spec.backend)
 
@@ -323,8 +394,44 @@ class Adapter(ABC):
             )
 
         native = spec.native_options
-        if native is None:
-            return
+        if native is not None:
+            self._validate_native_options(spec, native)
+
+        executable = spec.executable
+        if executable is not None:
+            if not isinstance(executable, str) or not executable or "\0" in executable:
+                raise HarnessError("executable must be a non-empty string without NUL bytes", code="invalid-options")
+            separators = os.sep + (os.altsep or "")
+            if not os.path.isabs(executable) and any(ch in executable for ch in separators):
+                raise HarnessError(
+                    f"executable {executable!r} is a relative path; use a bare binary name or an absolute path",
+                    code="invalid-options",
+                )
+
+        if spec.config_home is not None:
+            if self.config_home_env is None:
+                raise HarnessError(
+                    f"harness {self.name!r} has no config_home mapping; leave config_home unset",
+                    code="unsupported-capability",
+                )
+            home = _absolute_option("config_home", spec.config_home)
+            explicit = spec.env.get(self.config_home_env)
+            if explicit is not None and explicit != str(home):
+                raise HarnessError(
+                    f"config_home conflicts with env[{self.config_home_env!r}]; set one of them",
+                    code="invalid-options",
+                )
+
+        if spec.config_file is not None:
+            if self.config_file_flag is None:
+                raise HarnessError(
+                    f"harness {self.name!r} has no config_file mapping; leave config_file unset",
+                    code="unsupported-capability",
+                )
+            _absolute_option("config_file", spec.config_file)
+        absolute_workdir(spec.workdir)
+
+    def _validate_native_options(self, spec: RunSpec, native: object) -> None:
         if type(native) not in (ClaudeCodeOptions, CodexOptions):
             raise HarnessError(
                 f"native_options must be ClaudeCodeOptions or CodexOptions, got {type(native).__name__}",
@@ -347,7 +454,7 @@ class Adapter(ABC):
                     f"invalid codex sandbox {native.sandbox!r}; expected one of {', '.join(_CODEX_SANDBOXES)}",
                     code="invalid-options",
                 )
-            if native.sandbox is not None and policy == "bypass":
+            if native.sandbox is not None and spec.permission_policy == "bypass":
                 raise HarnessError(
                     "codex sandbox conflicts with permission_policy='bypass' (the bypass flag disables the sandbox); choose one",
                     code="invalid-options",
@@ -369,7 +476,56 @@ class Adapter(ABC):
             native_args = ("--effort", native.effort)
         elif isinstance(native, CodexOptions) and native.sandbox is not None:
             native_args = ("--sandbox", native.sandbox)
-        return ResolvedSpec(model=model, permission_args=permission_args or (), native_args=native_args)
+        config_args: tuple[str, ...] = ()
+        if spec.config_file is not None:
+            config_args = (self.config_file_flag, str(Path(spec.config_file)))  # type: ignore[assignment]
+        return ResolvedSpec(model=model, permission_args=permission_args or (), native_args=native_args, config_args=config_args)
+
+    def planned_instructions_file(self, spec: RunSpec) -> Path | None:
+        """Absolute path `prepare_command` will project `spec.instructions` to,
+        or None when this adapter has no instructions file or none were given."""
+        if spec.instructions is None or not self.instructions_filename:
+            return None
+        return absolute_workdir(spec.workdir) / self.instructions_filename
+
+    def reported_model(self, spec: RunSpec) -> str | None:
+        """Model selection reported on `BuildCommand.model` / `RunResult.model`:
+        the requested model or the adapter default. Adapters that delegate
+        selection to a caller config file override this to return None."""
+        return spec.model or self.DEFAULT_MODEL
+
+    def finalize_command(
+        self,
+        spec: RunSpec,
+        *,
+        cmd: str,
+        args: list[str],
+        env: dict[str, str] | None = None,
+        directories: tuple[Path, ...] = (),
+    ) -> BuildCommand:
+        """Assemble the `BuildCommand` every builder returns. Pure.
+
+        Applies `spec.executable`, the absolute cwd, env layering
+        (adapter additions, then `spec.env`, then the config-home variable),
+        the planned instructions projection, artifact directories and the
+        reported model. Idempotent, so registry entrypoints re-apply it to
+        third-party output.
+        """
+        cwd = absolute_workdir(spec.workdir)
+        merged = {**(env or {}), **spec.env}
+        if spec.config_home is not None and self.config_home_env is not None:
+            merged[self.config_home_env] = str(Path(spec.config_home))
+        instructions_file = self.planned_instructions_file(spec)
+        return BuildCommand(
+            cmd=spec.executable or cmd,
+            args=list(args),
+            cwd=cwd,
+            env=merged,
+            instructions_file=instructions_file,
+            instruction_content=spec.instructions if instructions_file is not None else None,
+            directories=tuple(cwd / d for d in directories),
+            model=self.reported_model(spec),
+        )
 
     # ---- headless contract ----------------------------------------------
 
@@ -387,9 +543,9 @@ class Adapter(ABC):
     def build_command(self, spec: RunSpec) -> BuildCommand:
         """Build the subprocess command without executing it.
 
-        MUST call `validate_run_spec`/`resolve_run_spec` before any side effect.
-        MAY write files (instructions, config) as a side effect.
-        MUST NOT fork a subprocess.
+        MUST call `validate_run_spec`/`resolve_run_spec` first and return
+        `finalize_command(...)`. MUST NOT write files or fork a subprocess;
+        `prepare_command` performs the planned filesystem work.
         """
 
     @abstractmethod
@@ -401,39 +557,74 @@ class Adapter(ABC):
         MUST NOT block on I/O > 5s.
         """
 
+    def _finalized(self, spec: RunSpec, built: BuildCommand) -> BuildCommand:
+        """Re-apply the finalizer to any builder output (no-op for built-ins)."""
+        return self.finalize_command(spec, cmd=built.cmd, args=built.args, env=built.env, directories=built.directories)
+
     def run(self, spec: RunSpec) -> RunResult:
-        """Full headless invocation: build_command + exec + parse_output."""
+        """Full headless invocation: build_command + prepare + exec + parse_output + cleanup."""
+        from harness._instructions import cleanup_command, prepare_command
         from harness._subproc import run_subprocess
 
-        bc = self.build_command(spec)
-        outcome = run_subprocess(
-            [bc.cmd] + bc.args,
-            cwd=bc.cwd,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env={**bc.env, **spec.env},
-            cancel=spec.cancel,
-        )
-        return self._run_result(spec, outcome)
+        spec = snapshot_run_spec(spec)
+        bc = self._finalized(spec, self.build_command(spec))
+        prepared = prepare_command(bc)
+        cleanup_safe = False
+        try:
+            try:
+                outcome = run_subprocess(
+                    [bc.cmd] + bc.args,
+                    cwd=bc.cwd,
+                    timeout_seconds=spec.timeout_seconds,
+                    extra_env=bc.env,
+                    cancel=spec.cancel,
+                )
+            except (ValueError, NotImplementedError, KeyboardInterrupt, SystemExit):
+                # Validation precedes launch; control-flow exceptions follow teardown.
+                cleanup_safe = True
+                raise
+            cleanup_safe = True
+            return self._run_result(spec, bc, outcome)
+        finally:
+            if cleanup_safe:
+                cleanup_command(prepared)
 
     async def run_async(self, spec: RunSpec) -> RunResult:
-        """Async headless invocation: build_command + async exec + parse_output."""
+        """Async headless invocation: build_command + prepare + async exec + parse_output + cleanup."""
+        from harness._instructions import cleanup_command, prepare_command
         from harness._subproc import run_subprocess_async
 
-        bc = self.build_command(spec)
-        outcome = await run_subprocess_async(
-            [bc.cmd] + bc.args,
-            cwd=bc.cwd,
-            timeout_seconds=spec.timeout_seconds,
-            extra_env={**bc.env, **spec.env},
-            cancel=spec.cancel,
-        )
-        return self._run_result(spec, outcome)
+        spec = snapshot_run_spec(spec)
+        bc = self._finalized(spec, self.build_command(spec))
+        prepared = prepare_command(bc)
+        cleanup_safe = False
+        try:
+            try:
+                outcome = await run_subprocess_async(
+                    [bc.cmd] + bc.args,
+                    cwd=bc.cwd,
+                    timeout_seconds=spec.timeout_seconds,
+                    extra_env=bc.env,
+                    cancel=spec.cancel,
+                )
+            except asyncio.CancelledError as error:
+                # The engine chains a teardown failure as the cancellation's cause.
+                cleanup_safe = error.__cause__ is None
+                raise
+            except (ValueError, NotImplementedError, KeyboardInterrupt, SystemExit):
+                cleanup_safe = True
+                raise
+            cleanup_safe = True
+            return self._run_result(spec, bc, outcome)
+        finally:
+            if cleanup_safe:
+                cleanup_command(prepared)
 
-    def _run_result(self, spec: RunSpec, outcome: SubprocOutcome) -> RunResult:
+    def _run_result(self, spec: RunSpec, built: BuildCommand, outcome: SubprocOutcome) -> RunResult:
         parsed = self.parse_output(spec, outcome)
         return RunResult(
             harness=self.name,
-            model=spec.model or self.DEFAULT_MODEL,
+            model=built.model,
             exit_code=outcome.exit_code,
             duration_seconds=outcome.duration_seconds,
             stdout=outcome.stdout,

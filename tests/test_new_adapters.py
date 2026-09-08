@@ -32,13 +32,20 @@ def test_codex_sums_turn_completed_usage(tmp_path, monkeypatch):
         json.dumps({"type": "turn.completed", "usage": {"input_tokens": 50, "output_tokens": 20}}),
         json.dumps({"type": "other.event", "usage": {"input_tokens": 999}}),
     ])
-    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
+    seen: dict = {}
+
+    def fake_run(cmd, *, cwd, **kw):
+        seen["agents"] = (cwd / "AGENTS.md").read_text()
+        return _stub(stdout=stdout)
+
+    monkeypatch.setattr("harness._subproc.run_subprocess", fake_run)
     spec = RunSpec(harness="codex", prompt="x", workdir=tmp_path, instructions="rules")
     result = CodexAdapter().run(spec)
     assert result.tokens_in == 150
     assert result.tokens_out == 60
     assert result.cost_usd is None
-    assert (tmp_path / "AGENTS.md").read_text() == "rules"
+    assert seen["agents"] == "rules"
+    assert not (tmp_path / "AGENTS.md").exists()
 
 
 def test_codex_handles_empty_stdout(tmp_path, monkeypatch):
@@ -61,7 +68,7 @@ def test_gemini_parses_whole_stdout_json(tmp_path, monkeypatch):
     assert result.tokens_in == 200
     assert result.tokens_out == 70
     assert result.raw is not None
-    assert (tmp_path / "GEMINI.md").read_text() == "r"
+    assert not (tmp_path / "GEMINI.md").exists()  # projection restored after the run
 
 
 def test_gemini_falls_back_to_per_line_json(tmp_path, monkeypatch):
@@ -121,14 +128,23 @@ def test_gemini_aggregate_safe_integer_boundary(tmp_path, extra_in, extra_out):
 
 def test_aider_scrapes_token_summary(tmp_path, monkeypatch):
     stdout = "blah blah\nTokens: 12.4k sent, 850 received.\nDone."
-    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub(stdout=stdout))
-    spec = RunSpec(harness="aider", prompt="x", workdir=tmp_path, instructions="cfg yaml")
+    seen: dict = {}
+
+    def fake_run(cmd, *, cwd, **kw):
+        read_path = cmd[cmd.index("--read") + 1]
+        seen["read"] = (read_path, open(read_path, encoding="utf-8").read())
+        seen["files"] = sorted(p.name for p in cwd.iterdir())
+        return _stub(stdout=stdout)
+
+    monkeypatch.setattr("harness._subproc.run_subprocess", fake_run)
+    spec = RunSpec(harness="aider", prompt="x", workdir=tmp_path, instructions="plain text guidance")
     result = AiderAdapter().run(spec)
     assert result.tokens_in == 12400
     assert result.tokens_out == 850
-    # aider config files written
-    assert (tmp_path / ".agentelo-aider.yml").read_text().strip() == "{}"
-    assert (tmp_path / ".aider.conf.yml").read_text() == "cfg yaml"
+    # instructions are plain text handed to aider via --read, not YAML config
+    assert seen["read"] == (str(tmp_path / ".harness-aider-instructions.md"), "plain text guidance")
+    assert seen["files"] == [".harness-aider-instructions.md", ".harness-run.lock"]
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_aider_handles_thousands_separators(tmp_path, monkeypatch):

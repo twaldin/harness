@@ -10,7 +10,7 @@ import json
 import re
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -48,9 +48,8 @@ class QwenAdapter(Adapter):
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
         args = ["-p", spec.prompt, *resolved.permission_args, "-m", resolved.model, "--output-format", "json"]
-        return BuildCommand(cmd="qwen", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        return self.finalize_command(spec, cmd="qwen", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, raw = _parse_qwen_stats(outcome.stdout)

@@ -3,25 +3,26 @@
 aider doesn't ship structured output. Its log line `Tokens: N sent, M received`
 is the canonical token source. We scrape it from stdout/stderr.
 
-Aider ALSO uses `.aider.conf.yml` for config; agentelo's --instructions flag
-writes the user instructions to that file. We mirror that — but be aware:
-aider treats this as YAML config, not free-form prompt text. Consumers that
-want to inject system-style instructions to aider should put them inline
-(in `prompt`) rather than via `instructions`.
+`instructions` are treated as text: they are projected to
+`<workdir>/.harness-aider-instructions.md` and passed with `--read` so aider
+loads them as a read-only chat file. aider's own config (`.aider.conf.yml`,
+`~/.aider.conf.yml`) is left to upstream unless `RunSpec.config_file` selects
+one explicitly (`--config`). Chat/input history is sent to the null device.
 """
 from __future__ import annotations
 
+import os
 import re
-from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import Adapter, BuildCommand, ParsedOutput, RunSpec
 
 
 class AiderAdapter(Adapter):
     name = "aider"
-    instructions_filename = ".aider.conf.yml"
+    instructions_filename = ".harness-aider-instructions.md"
     permission_bypass_args = ("--yes-always",)
+    config_file_flag = "--config"
 
     DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.6"
 
@@ -29,17 +30,13 @@ class AiderAdapter(Adapter):
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
-        workdir = Path(spec.workdir)
-        instructions_file = write_instructions(workdir, self.instructions_filename, spec.instructions)
-
-        config_path = workdir / ".agentelo-aider.yml"
-        config_path.write_text("{}\n", encoding="utf-8")
-
+        instructions_file = self.planned_instructions_file(spec)
         args = [
-            "--config", str(config_path),
+            *resolved.config_args,
+            *(("--read", str(instructions_file)) if instructions_file is not None else ()),
             "--no-restore-chat-history",
-            "--chat-history-file", str(workdir / ".agentelo-aider-chat.history.md"),
-            "--input-history-file", str(workdir / ".agentelo-aider-input.history"),
+            "--chat-history-file", os.devnull,
+            "--input-history-file", os.devnull,
             "--model", resolved.model,
             "--message", spec.prompt,
             *resolved.permission_args,
@@ -47,7 +44,7 @@ class AiderAdapter(Adapter):
             "--no-analytics",
             "--no-show-model-warnings",
         ]
-        return BuildCommand(cmd="aider", args=args, cwd=workdir, env={}, instructions_file=instructions_file)
+        return self.finalize_command(spec, cmd="aider", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out = _scrape_aider_tokens(outcome.stdout + "\n" + outcome.stderr, self.TOKEN_RE)

@@ -1,11 +1,10 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { createRequire } from 'module'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync } from 'fs'
 import { basename, dirname, join, resolve } from 'path'
 import { homedir } from 'os'
 
@@ -47,10 +46,11 @@ function openDb(dbPath: string): SqliteDriver | null {
   }
 }
 
-function kiloDbPath(workdir: string, extraEnv: Record<string, string> | undefined): string {
+/** Caller-selected KILO_DB (spec env, then inherited env) is upstream state; otherwise the harness default under the workdir. */
+function kiloDbPath(workdir: string, extraEnv: Record<string, string> | undefined): { path: string; harnessOwned: boolean } {
   const envPath = (extraEnv ?? {})['KILO_DB'] ?? process.env['KILO_DB']
-  if (envPath) return envPath.replace(/^~/, homedir())
-  return join(workdir, '.harness', 'kilo', 'kilo.db')
+  if (envPath) return { path: envPath.replace(/^~/, homedir()), harnessOwned: false }
+  return { path: join(workdir, '.harness', 'kilo', 'kilo.db'), harnessOwned: true }
 }
 
 function readKiloSessionTotalsByDbPath(
@@ -103,14 +103,8 @@ function readKiloSessionTotals(
   workdir: string,
   extraEnv: Record<string, string> | undefined,
 ): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
-  let resolvedWorkdir = workdir
-  try {
-    resolvedWorkdir = resolve(workdir)
-  } catch {
-    // keep raw
-  }
-  const wdBasename = basename(resolvedWorkdir)
-  return readKiloSessionTotalsByDbPath(kiloDbPath(workdir, extraEnv), wdBasename)
+  const resolvedWorkdir = resolve(workdir)
+  return readKiloSessionTotalsByDbPath(kiloDbPath(resolvedWorkdir, extraEnv).path, basename(resolvedWorkdir))
 }
 
 const kiloAdapter: Adapter = {
@@ -120,35 +114,22 @@ const kiloAdapter: Adapter = {
   permissionBypassArgs: ['--auto'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model, permissionArgs } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-
-    const dbPath = kiloDbPath(spec.workdir, spec.env)
-    // Only attempt mkdir if the parent path sits under a writable prefix on
-    // the host. When KILO_DB points at a container-only path (e.g. /app/...),
-    // leave dir creation to the runtime inside the container.
-    try {
-      mkdirSync(dirname(dbPath), { recursive: true })
-    } catch {
-      // intentionally ignore: container-only paths
+    const validated = validateRunSpec(this, spec)
+    const { model, permissionArgs, workdir } = validated
+    const db = kiloDbPath(workdir, spec.env)
+    const env: Record<string, string> = { KILO_DB: db.path }
+    // A caller-selected KILO_CONFIG_CONTENT (spec env or inherited) is passed through untouched;
+    // the single-model JSON is only generated when neither environment provides one.
+    if (spec.env?.['KILO_CONFIG_CONTENT'] === undefined && process.env['KILO_CONFIG_CONTENT'] === undefined) {
+      env['KILO_CONFIG_CONTENT'] = JSON.stringify({ model, small_model: model, default_agent: 'build' })
     }
-
-    const configJson = JSON.stringify({
-      model,
-      small_model: model,
-      default_agent: 'build',
-    })
-
-    return {
+    return finalizeCommand(this, spec, validated, {
       cmd: 'kilo',
-      args: ['run', ...permissionArgs, '--format', 'json', '--dir', spec.workdir, '--model', model, spec.prompt],
-      cwd: spec.workdir,
-      env: {
-        KILO_DB: dbPath,
-        KILO_CONFIG_CONTENT: configJson,
-      },
-      instructionsFile,
-    }
+      args: ['run', ...permissionArgs, '--format', 'json', '--dir', workdir, '--model', model, spec.prompt],
+      env,
+      // Caller-selected DB paths (possibly container-only) are upstream state; only the harness default parent is created.
+      directories: db.harnessOwned ? [dirname(db.path)] : [],
+    })
   },
 
   parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
@@ -157,7 +138,7 @@ const kiloAdapter: Adapter = {
   },
 
   sessionLogPath(workdir: string, _since?: number): string | null {
-    const dbPath = kiloDbPath(workdir, undefined)
+    const dbPath = kiloDbPath(workdir, undefined).path
     if (!existsSync(dbPath)) return null
     let wd = workdir
     try { wd = basename(resolve(workdir)) } catch { wd = basename(workdir) }

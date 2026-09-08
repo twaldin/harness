@@ -35,9 +35,11 @@ class MyCLIAdapter(Adapter):
 ```
 
 Wire it in by adding an `import` and a `register("name", AdapterCls)` call to
-`src/harness/adapters/__init__.py`. `build_command` MAY write instructions/config
-files but MUST NOT spawn a subprocess. `parse_output` MAY read post-exit
-artifacts but MUST NOT block on long I/O (sqlite reads use `timeout=5.0`).
+`src/harness/adapters/__init__.py`. `build_command` plans argv/env/cwd and optional
+instruction projection without filesystem writes or subprocesses. Execution uses
+`prepare_command` / `cleanup_command`; external drivers retain that handle until
+their process tree has stopped. `parse_output` MAY read post-exit artifacts but
+MUST NOT block on long I/O (sqlite reads use `timeout=5.0`).
 
 ## Output parsing strategies
 
@@ -76,7 +78,7 @@ All three open the DB read-only (`mode=ro` URI, 5s timeout) and tolerate
 `sqlite3.Error` by returning `None`. Python schema tests live in
 `tests/test_*_db.py`. TypeScript selects `bun:sqlite` under Bun and
 `better-sqlite3` under Node. Its session-log tests create temporary databases
-for crush and kilo, but do not cover opencode in that directory.
+for crush and kilo; `opencode-parse.test.ts` covers per-run database selection.
 
 `crush` pins `--model` and `--small-model` to the same value; `kilo` sets
 `model` and `small_model` in `KILO_CONFIG_CONTENT`. Both avoid helper-model drift.

@@ -2,6 +2,24 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- **Instruction lifecycle migration:** command builders are now side-effect-free.
+  `run` / `runAsync` prepare and restore instructions automatically. External
+  drivers must pair `prepare_command` / `prepareCommand` with
+  `cleanup_command` / `cleanupCommand` after their process tree stops.
+  Same-workdir overlap and unsafe symlinks reject. Cleanup preserves changed
+  user content and its original backup rather than overwriting either.
+  Cancellation restores instructions only after subprocess teardown; a teardown
+  failure retains instructions, backup and lease until manual recovery.
+- Added explicit executable and supported config-home/config-file selection in
+  both languages. Caller-selected authentication and environment are retained;
+  unsupported overrides reject without editing configuration. Continue no longer
+  generates credential YAML, Aider no longer replaces configuration with an
+  empty generated file, and Kilo preserves selected inline configuration.
+- `write_instructions` / `writeInstructions` now exclusively create files rather
+  than truncate existing content. Projection's unsafe `backup=false` option
+  rejects. See [SPEC migration and recovery](SPEC.md#instruction-preparation-and-restoration).
+- The provider smoke script no longer rewrites process PATH or substitutes a
+  local proxy credential; it uses the launch-selected binaries and authentication.
 - **Intentional compatibility change:** omitted permission policy now preserves
   upstream defaults. Callers that require the former automatic-approval flags
   must explicitly select Python `permission_policy="bypass"`, TypeScript

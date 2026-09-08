@@ -14,7 +14,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -25,6 +25,7 @@ from harness.base import (
     RunSpec,
     ScrollKeys,
     SessionTelemetry,
+    absolute_workdir,
 )
 from harness.pricing import derive_cost
 from harness.util import last_non_empty_join, strip_ansi
@@ -62,9 +63,8 @@ class OpenCodeAdapter(Adapter):
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
-        args = ["run", "--dir", str(spec.workdir), "--model", resolved.model, spec.prompt]
-        return BuildCommand(cmd="opencode", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        args = ["run", "--dir", str(absolute_workdir(spec.workdir)), "--model", resolved.model, spec.prompt]
+        return self.finalize_command(spec, cmd="opencode", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, _model = _read_opencode_session_totals(Path(spec.workdir), spec.env)

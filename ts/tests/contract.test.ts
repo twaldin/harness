@@ -213,11 +213,28 @@ describe('getCapabilities', () => {
       backend: 'cli',
       permissionPolicies: ['upstream', 'bypass'],
       nativeOptions: 'claude-code',
+      configHomeEnv: 'CLAUDE_CONFIG_DIR',
+      configFileFlag: '--settings',
       streaming: false,
       cancellation: true,
       sessions: false,
     })
     expect(getCapabilities('codex', 'cli').nativeOptions).toBe('codex')
+  })
+
+  test('config overrides are declared exactly where verified', () => {
+    const declared: Record<string, [string | null, string | null]> = {
+      'claude-code': ['CLAUDE_CONFIG_DIR', '--settings'],
+      codex: ['CODEX_HOME', null],
+      aider: [null, '--config'],
+      'continue-cli': [null, '--config'],
+    }
+    for (const name of SHIPPED) {
+      const caps = getCapabilities(name)
+      const [home, flag] = declared[name] ?? [null, null]
+      expect(caps.configHomeEnv).toBe(home)
+      expect(caps.configFileFlag).toBe(flag)
+    }
   })
 
   test('bypass appears exactly for the eight mapped adapters', () => {

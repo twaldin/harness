@@ -1,7 +1,6 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -52,8 +51,8 @@ const openClaudeAdapter: Adapter = {
   permissionBypassArgs: ['--dangerously-skip-permissions'],
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model, permissionArgs } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
+    const validated = validateRunSpec(this, spec)
+    const { model, permissionArgs } = validated
 
     const args = [
       '-p',
@@ -79,13 +78,7 @@ const openClaudeAdapter: Adapter = {
       args.push('--model', model)
     }
 
-    return {
-      cmd: 'openclaude',
-      args,
-      cwd: spec.workdir,
-      env,
-      instructionsFile,
-    }
+    return finalizeCommand(this, spec, validated, { cmd: 'openclaude', args, env })
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {

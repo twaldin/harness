@@ -1,3 +1,4 @@
+import { isAbsolute, join, resolve, sep } from 'node:path'
 import { normalizeModelForHarness } from './model-normalization.js'
 
 /** Execution backend. Only `cli` is implemented; `rpc`/`sdk` are reserved and always rejected. */
@@ -31,10 +32,13 @@ export type NativeOptions = ClaudeCodeOptions | CodexOptions
 export interface RunSpec {
   harness: string
   prompt: string
+  /** Working directory. Relative paths resolve against the current process cwd at build time. */
   workdir: string
   model?: string
+  /** Instruction text projected into the adapter's instructions file for the run. Empty string projects an empty file. */
   instructions?: string
   timeoutSeconds?: number
+  /** Caller env additions layered over the adapter's own; never mutated. */
   env?: Record<string, string>
   /**
    * Pass `model` through exactly as provided, without harness-specific
@@ -46,6 +50,12 @@ export interface RunSpec {
   /** Defaults to `upstream`. */
   permissionPolicy?: PermissionPolicy
   nativeOptions?: NativeOptions
+  /** Replaces the adapter's default binary: a bare name resolved on PATH or an absolute path. */
+  executable?: string
+  /** Absolute directory exported through the adapter's `configHomeEnv`; rejected when the adapter has none. */
+  configHome?: string
+  /** Absolute file passed through the adapter's `configFileFlag`; rejected when the adapter has none. Never opened or checked. */
+  configFile?: string
   /** Abort to tear down the run's process group; the result reports `termination: 'cancelled'`. */
   cancel?: AbortSignal
 }
@@ -53,9 +63,18 @@ export interface RunSpec {
 export interface BuildCommand {
   cmd: string
   args: string[]
+  /** Absolute working directory. */
   cwd: string
+  /** Adapter additions, then `spec.env`, then the mapped config-home variable. Layered over the inherited process env at execution. */
   env: Record<string, string>
+  /** Planned absolute instructions path, or null when the adapter has none for this run. Nothing is written at build time. */
   instructionsFile: string | null
+  /** Text to project into `instructionsFile` during `prepareCommand`; undefined means no projection. */
+  instructionContent?: string
+  /** Directories `prepareCommand` creates before launch (adapter artifact parents under the workdir). Empty when absent; never removed by cleanup. */
+  directories?: readonly string[]
+  /** Model reported on `RunResult`: the requested model or the adapter default, or null when a caller config file selects it. Absent means requested/default. */
+  model?: string | null
 }
 
 /**
@@ -169,6 +188,18 @@ export interface Adapter {
   /** Which `NativeOptions.kind` this adapter accepts. Absent means none. */
   nativeOptionsKind?: NativeOptions['kind']
 
+  /**
+   * Environment variable the CLI reads its config/state home from. Absent
+   * means `spec.configHome` is rejected with `unsupported-capability`.
+   */
+  configHomeEnv?: string
+
+  /**
+   * Flag the CLI takes a config file path through. Absent means
+   * `spec.configFile` is rejected with `unsupported-capability`.
+   */
+  configFileFlag?: string
+
   // ---- session-aware (optional; fall back to flt's local impl when missing) ----
 
   /** Keystrokes to submit a message in this CLI's TUI. e.g. ['Enter'] or ['Escape','Enter']. */
@@ -227,6 +258,7 @@ export type ErrorCode =
   | 'unsupported-backend'
   | 'unsupported-capability'
   | 'invalid-options'
+  | 'instruction-conflict'
 
 export class HarnessError extends Error {
   readonly code: ErrorCode
@@ -243,6 +275,10 @@ export interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
   nativeOptions: NativeOptions['kind'] | null
+  /** Env variable `configHome` maps to, or null when overrides are unsupported. */
+  configHomeEnv: string | null
+  /** argv flag `configFile` maps to, or null when overrides are unsupported. */
+  configFileFlag: string | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -256,6 +292,13 @@ export interface ValidatedRunSpec {
   /** argv to splice in at the adapter's bypass slot; empty under `upstream`. */
   permissionArgs: readonly string[]
   nativeOptions: NativeOptions | null
+  /** Absolute working directory; relative input resolved against the process cwd without changing it. */
+  workdir: string
+  executable: string | null
+  configHome: string | null
+  configFile: string | null
+  /** `[configFileFlag, configFile]` to splice in at the adapter's config slot; empty when no file was given. */
+  configArgs: readonly string[]
 }
 
 const KNOWN_BACKENDS: Readonly<Record<Backend, true>> = { cli: true, rpc: true, sdk: true }
@@ -308,14 +351,44 @@ function resolveNativeOptions(adapter: Adapter, spec: RunSpec): NativeOptions | 
   return raw as NativeOptions
 }
 
+function resolveExecutable(raw: unknown): string | null {
+  if (raw === undefined) return null
+  if (typeof raw !== 'string' || raw === '' || raw.includes('\0')) {
+    throw new HarnessError('executable must be a non-empty string without NUL bytes', 'invalid-options')
+  }
+  if ((raw.includes('/') || raw.includes(sep)) && !isAbsolute(raw)) {
+    throw new HarnessError(`executable ${JSON.stringify(raw)} must be a bare binary name or an absolute path`, 'invalid-options')
+  }
+  return raw
+}
+
+function resolveWorkdir(raw: unknown): string {
+  if (typeof raw !== 'string' || raw === '' || raw.includes('\0')) {
+    throw new HarnessError('workdir must be a non-empty string without NUL bytes', 'invalid-options')
+  }
+  return resolve(raw)
+}
+
+function resolveConfigPath(field: 'configHome' | 'configFile', raw: unknown, mapping: string | undefined, adapter: Adapter): string | null {
+  if (raw === undefined) return null
+  if (mapping === undefined) {
+    throw new HarnessError(`Harness "${adapter.name}" has no ${field} mapping`, 'unsupported-capability')
+  }
+  if (typeof raw !== 'string' || raw === '' || raw.includes('\0') || !isAbsolute(raw)) {
+    throw new HarnessError(`${field} must be an absolute path, got ${JSON.stringify(raw)}`, 'invalid-options')
+  }
+  return raw
+}
+
 /**
  * Apply defaults and validate a `RunSpec` against an adapter. Pure: no
  * filesystem or process side effects, so callers can reject bad specs before
- * writing instructions or config. Every shipped adapter calls this first
- * thing in `buildCommand`; custom adapters called directly must do the same.
- * Public registry entry points validate before dispatching to any adapter.
+ * any file is touched. Every shipped adapter calls this first thing in
+ * `buildCommand`; custom adapters called directly must do the same. Public
+ * registry entry points validate before dispatching to any adapter.
  *
- * Check order: backend, permission policy, native options, model.
+ * Check order: backend, permission policy, native options, model,
+ * executable, workdir, configHome, configFile.
  */
 export function validateRunSpec(adapter: Adapter, spec: RunSpec): ValidatedRunSpec {
   const backend = resolveBackend(spec.backend)
@@ -346,5 +419,55 @@ export function validateRunSpec(adapter: Adapter, spec: RunSpec): ValidatedRunSp
   const model = normalizeModelForHarness(adapter.name, spec.model || adapter.defaultModel, { resolve: !spec.modelNoResolve })
     ?? adapter.defaultModel
 
-  return { backend, model, permissionPolicy, permissionArgs, nativeOptions }
+  const executable = resolveExecutable(spec.executable)
+  const workdir = resolveWorkdir(spec.workdir)
+  const configHome = resolveConfigPath('configHome', spec.configHome, adapter.configHomeEnv, adapter)
+  if (configHome !== null) {
+    const explicit = spec.env?.[adapter.configHomeEnv!]
+    if (explicit !== undefined && explicit !== configHome) {
+      throw new HarnessError(
+        `configHome conflicts with env.${adapter.configHomeEnv}; set one`,
+        'invalid-options',
+      )
+    }
+  }
+  const configFile = resolveConfigPath('configFile', spec.configFile, adapter.configFileFlag, adapter)
+  const configArgs: readonly string[] = configFile === null ? [] : [adapter.configFileFlag!, configFile]
+
+  return { backend, model, permissionPolicy, permissionArgs, nativeOptions, workdir, executable, configHome, configFile, configArgs }
+}
+
+/** What an adapter plans before the shared finalizer applies the spec-level overrides. */
+export interface PlannedCommand {
+  cmd: string
+  args: string[]
+  /** Adapter env additions; `spec.env` and the config-home mapping layer on top. */
+  env?: Record<string, string>
+  /** Artifact parent directories `prepareCommand` must create. */
+  directories?: readonly string[]
+  /** Overrides the reported model (requested or default), e.g. `null` when the CLI picks it from a caller config. */
+  model?: string | null
+}
+
+/**
+ * Turn an adapter's plan into the public `BuildCommand`. Pure: applies
+ * `executable`, the absolute workdir, the env layering (adapter, then caller,
+ * then config home) and plans the instructions projection from
+ * `adapter.instructionsFilename`. Every built-in builder returns through here.
+ */
+export function finalizeCommand(adapter: Adapter, spec: RunSpec, validated: ValidatedRunSpec, planned: PlannedCommand): BuildCommand {
+  const env: Record<string, string> = { ...(planned.env ?? {}), ...(spec.env ?? {}) }
+  if (validated.configHome !== null) env[adapter.configHomeEnv!] = validated.configHome
+  const project = adapter.instructionsFilename !== '' && spec.instructions !== undefined
+  const built: BuildCommand = {
+    cmd: validated.executable ?? planned.cmd,
+    args: planned.args,
+    cwd: validated.workdir,
+    env,
+    instructionsFile: project ? join(validated.workdir, adapter.instructionsFilename) : null,
+    directories: planned.directories?.map((directory) => resolve(validated.workdir, directory)) ?? [],
+    model: planned.model === undefined ? spec.model || adapter.defaultModel : planned.model,
+  }
+  if (project) built.instructionContent = spec.instructions
+  return built
 }

@@ -1,5 +1,6 @@
 import type { Adapter, Backend, BuildCommand, Capabilities, ParsedOutput, RunResult, RunSpec, SubprocOutcome } from './base.js'
-import { HarnessError, resolveBackend, validateRunSpec } from './base.js'
+import { HarnessError, finalizeCommand, resolveBackend, validateRunSpec } from './base.js'
+import { cleanupCommand, prepareCommand } from './instructions.js'
 import { runSubprocessAsync } from './subproc.js'
 
 const registry = new Map<string, Adapter>()
@@ -38,17 +39,23 @@ export function getCapabilities(name: string, backend: Backend = 'cli'): Capabil
     backend: resolveBackend(backend),
     permissionPolicies: adapter.permissionBypassArgs ? ['upstream', 'bypass'] : ['upstream'],
     nativeOptions: adapter.nativeOptionsKind ?? null,
+    configHomeEnv: adapter.configHomeEnv ?? null,
+    configFileFlag: adapter.configFileFlag ?? null,
     streaming: false,
     cancellation: true,
     sessions: false,
   }
 }
 
+/**
+ * Validate, dispatch, and pass the adapter's command back through the shared
+ * finalizer. Idempotent for built-in adapters; it gives minimal third-party
+ * adapters the same executable/config-home/env layering and absolute cwd.
+ */
 export function buildCommand(spec: RunSpec): BuildCommand {
   const adapter = getAdapter(spec.harness)
-  // Public dispatch also protects callers of minimal third-party adapters.
-  validateRunSpec(adapter, spec)
-  return adapter.buildCommand(spec)
+  const validated = validateRunSpec(adapter, spec)
+  return finalizeCommand(adapter, spec, validated, adapter.buildCommand(spec))
 }
 
 export function parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
@@ -57,32 +64,48 @@ export function parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutpu
   return adapter.parseOutput(spec, outcome)
 }
 
+/** Caller-owned spec and env are copied before command planning and execution. */
 async function execute(spec: RunSpec): Promise<RunResult> {
-  const adapter = getAdapter(spec.harness)
-  validateRunSpec(adapter, spec)
-  const built = adapter.buildCommand(spec)
-  const outcome = await runSubprocessAsync([built.cmd, ...built.args], {
-    cwd: built.cwd,
-    timeoutSeconds: spec.timeoutSeconds,
-    extraEnv: { ...built.env, ...(spec.env ?? {}) },
-    cancel: spec.cancel,
-  })
-  const parsed = adapter.parseOutput(spec, outcome)
-  return {
-    harness: spec.harness,
-    model: spec.model || adapter.defaultModel,
-    exitCode: outcome.exitCode,
-    durationSeconds: outcome.durationSeconds,
-    stdout: outcome.stdout,
-    stderr: outcome.stderr,
-    timedOut: outcome.timedOut,
-    termination: outcome.termination,
-    signal: outcome.signal,
-    launchError: outcome.launchError,
-    costUsd: parsed.costUsd,
-    tokensIn: parsed.tokensIn,
-    tokensOut: parsed.tokensOut,
-    raw: parsed.raw,
+  const frozen = spec.env === undefined ? { ...spec } : { ...spec, env: { ...spec.env } }
+  const adapter = getAdapter(frozen.harness)
+  const built = buildCommand(frozen)
+  const prepared = prepareCommand(built)
+  let cleanupSafe = false
+  try {
+    let outcome: SubprocOutcome
+    try {
+      outcome = await runSubprocessAsync([built.cmd, ...built.args], {
+        cwd: built.cwd,
+        timeoutSeconds: frozen.timeoutSeconds,
+        extraEnv: built.env,
+        cancel: frozen.cancel,
+      })
+    } catch (error) {
+      // Only validation errors prove that no child was launched.
+      cleanupSafe = error instanceof HarnessError
+        && (error.code === 'invalid-options' || error.code === 'unsupported-capability')
+      throw error
+    }
+    cleanupSafe = true
+    const parsed = adapter.parseOutput(frozen, outcome)
+    return {
+      harness: frozen.harness,
+      model: built.model === undefined ? frozen.model || adapter.defaultModel : built.model,
+      exitCode: outcome.exitCode,
+      durationSeconds: outcome.durationSeconds,
+      stdout: outcome.stdout,
+      stderr: outcome.stderr,
+      timedOut: outcome.timedOut,
+      termination: outcome.termination,
+      signal: outcome.signal,
+      launchError: outcome.launchError,
+      costUsd: parsed.costUsd,
+      tokensIn: parsed.tokensIn,
+      tokensOut: parsed.tokensOut,
+      raw: parsed.raw,
+    }
+  } finally {
+    if (cleanupSafe) cleanupCommand(prepared)
   }
 }
 

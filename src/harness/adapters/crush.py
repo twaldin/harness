@@ -6,7 +6,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from harness._subproc import SubprocOutcome, write_instructions
+from harness._subproc import SubprocOutcome
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -16,6 +16,7 @@ from harness.base import (
     ReadyState,
     RunSpec,
     SessionTelemetry,
+    absolute_workdir,
 )
 from harness.pricing import derive_cost
 from harness.util import last_non_empty_join, strip_ansi
@@ -47,10 +48,12 @@ class CrushAdapter(Adapter):
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
         model = resolved.model
-        instructions_file = write_instructions(spec.workdir, self.instructions_filename, spec.instructions)
 
-        data_dir = _crush_data_dir(Path(spec.workdir), spec.env)
-        data_dir.mkdir(parents=True, exist_ok=True)
+        workdir = absolute_workdir(spec.workdir)
+        data_dir = _crush_data_dir(workdir, spec.env)
+        # The default per-workdir data dir is a harness artifact prepare creates;
+        # a CRUSH_DATA_DIR override is caller-owned upstream state.
+        directories = () if _crush_data_dir_override(spec.env) else (data_dir,)
 
         # Strict same-model fairness: pin both large and small model flags.
         args = [
@@ -63,7 +66,7 @@ class CrushAdapter(Adapter):
             model,
             spec.prompt,
         ]
-        return BuildCommand(cmd="crush", args=args, cwd=spec.workdir, env={}, instructions_file=instructions_file)
+        return self.finalize_command(spec, cmd="crush", args=args, directories=directories)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
         tokens_in, tokens_out, cost, _model = _read_crush_session_totals(Path(spec.workdir), spec.env)
@@ -110,8 +113,12 @@ class CrushAdapter(Adapter):
         return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
 
 
+def _crush_data_dir_override(extra_env: dict[str, str] | None = None) -> str | None:
+    return (extra_env or {}).get("CRUSH_DATA_DIR") or os.environ.get("CRUSH_DATA_DIR") or None
+
+
 def _crush_data_dir(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
-    env_path = (extra_env or {}).get("CRUSH_DATA_DIR") or os.environ.get("CRUSH_DATA_DIR")
+    env_path = _crush_data_dir_override(extra_env)
     if env_path:
         return Path(env_path).expanduser()
     return workdir / ".harness" / "crush-data"

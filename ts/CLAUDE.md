@@ -36,16 +36,17 @@ const myAdapter: Adapter = {
   name: 'mycli',
   instructionsFilename: 'AGENTS.md',     // inline instructions need adapter-specific handling
   defaultModel: 'mycli/default',
-  buildCommand(spec: RunSpec): BuildCommand { /* writes instructions, returns argv */ },
+  buildCommand(spec: RunSpec): BuildCommand { /* plans argv/env/cwd and instructions */ },
   parseOutput(spec, outcome): ParsedOutput { /* extracts cost + tokens */ },
 }
 register('mycli', myAdapter)
 ```
 
-`buildCommand` MAY write files (instructions, config) but MUST NOT spawn a
-subprocess. `parseOutput` MAY read files written by the CLI (sqlite, trajectory
-JSON) but MUST NOT block on long I/O. Both are pure with respect to network
-state.
+`buildCommand` plans without filesystem writes or subprocesses. Execution uses
+`prepareCommand` / `cleanupCommand`; external drivers retain the handle until
+their process tree has stopped. `parseOutput` MAY read files written by the CLI
+(sqlite, trajectory JSON) but MUST NOT block on long I/O. Both are pure with
+respect to network state.
 
 New adapters are wired in by adding an `import './<name>.js'` line to
 `src/adapters/index.ts`, a fixture at `../tests/fixtures/<name>.json` and the
@@ -82,8 +83,8 @@ assertions rather than the same generic loop. See the
 
 `tests/adapters/*-sessionlog.test.ts` covers selected session-log parsers:
 crush and kilo create temporary sqlite databases; continue-cli, factory-droid,
-openclaude and qwen use JSON/JSONL files. There is no opencode test in that
-directory. Python's `tests/test_*_db.py` covers opencode, kilo and crush schemas.
+openclaude and qwen use JSON/JSONL files. `opencode-parse.test.ts` covers
+per-run database selection. Python's `tests/test_*_db.py` covers all three schemas.
 
 ## Things to keep in lockstep
 

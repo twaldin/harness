@@ -26,7 +26,8 @@ harness/
 │   ├── cli.py                   Typer CLI entrypoint (harness.cli:app)
 │   ├── model_normalization.py   per-harness canonical model resolution
 │   ├── pricing.py               cost derivation from token counts
-│   ├── _subproc.py              subprocess runner + instructions writer
+│   ├── _subproc.py              subprocess runner
+│   ├── _instructions.py         owned instruction projection lifecycle
 │   └── adapters/                13 adapter modules, one per CLI
 ├── ts/                          TypeScript implementation (see ts/CLAUDE.md)
 │   ├── package.json             @twaldin/harness-ts (Bun build + test)
@@ -35,6 +36,7 @@ harness/
 │   ├── src/model-normalization.ts
 │   ├── src/pricing.ts
 │   ├── src/subproc.ts
+│   ├── src/instructions.ts      owned instruction projection lifecycle
 │   ├── src/util.ts
 │   └── src/adapters/            13 adapter modules, one per CLI
 ├── tests/                       pytest suite (Python)
@@ -67,10 +69,11 @@ see `src/harness/__init__.py`, `src/harness/base.py`, `ts/src/index.ts` and
 `ts/src/base.ts`.
 
 Permission policy defaults to upstream behavior; bypass is explicit opt-in.
-Reject unsupported backends, capabilities and conflicting native options
-before command-build side effects. CLI is the only implemented backend;
-RPC/SDK selection must not silently fall back. See SPEC for exact error codes,
-capabilities, migration, process-group ownership and lifecycle limits.
+Builders plan commands without file writes. Reject unsupported backend, permission,
+native-option and config-override requests before preparation. External drivers
+retain `prepareCommand` ownership until process teardown and then clean up.
+CLI is the only implemented backend; RPC/SDK selection must not silently fall back.
+See SPEC for exact errors, capabilities, migration and subprocess lifecycle limits.
 
 Field naming differs (`cost_usd` ↔ `costUsd`, `tokens_in` ↔ `tokensIn`,
 `timed_out` ↔ `timedOut`). The Python CLI's `harness run --json` emits
@@ -110,7 +113,7 @@ the recorded non-null parsed-payload expectations. Python's
 `tests/test_opencode_db.py`, `tests/test_kilo_db.py` and `tests/test_crush_db.py`
 exercise database schemas. TypeScript's session-log tests create temporary
 databases for crush and kilo, and JSON/JSONL files for selected other adapters;
-there is no opencode test in `ts/tests/adapters/`.
+`ts/tests/adapters/opencode-parse.test.ts` covers per-run database selection.
 
 ## Public API changes
 

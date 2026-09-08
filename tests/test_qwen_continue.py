@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from harness import RunSpec
+from harness import HarnessError, RunSpec
 from harness._subproc import SubprocOutcome
 from harness.adapters.continue_cli import ContinueCliAdapter
 from harness.adapters.qwen import QwenAdapter
@@ -37,11 +37,18 @@ def test_qwen_build_command_default_model(tmp_path):
     assert bc.args[bc.args.index("-m") + 1] == "qwen3-coder"
 
 
-def test_qwen_writes_instructions_file(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
+def test_qwen_projects_instructions_for_the_run(tmp_path, monkeypatch):
+    seen: dict = {}
+
+    def fake_run(cmd, *, cwd, **kw):
+        seen["qwen"] = (cwd / "QWEN.md").read_text()
+        return _stub()
+
+    monkeypatch.setattr("harness._subproc.run_subprocess", fake_run)
     spec = RunSpec(harness="qwen", prompt="x", workdir=tmp_path, instructions="be terse")
     QwenAdapter().run(spec)
-    assert (tmp_path / "QWEN.md").read_text() == "be terse"
+    assert seen["qwen"] == "be terse"
+    assert not (tmp_path / "QWEN.md").exists()
 
 
 def test_qwen_parses_result_array(tmp_path, monkeypatch):
@@ -101,11 +108,48 @@ def test_continue_build_command_default_model(tmp_path):
     assert bc.args[bc.args.index("--model") + 1] == "claude-sonnet-4-6"
 
 
-def test_continue_writes_instructions_file(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness._subproc.run_subprocess", lambda *a, **kw: _stub())
+def test_continue_projects_instructions_for_the_run(tmp_path, monkeypatch):
+    seen: dict = {}
+
+    def fake_run(cmd, *, cwd, **kw):
+        seen["cn"] = (cwd / "CONTINUE.md").read_text()
+        return _stub()
+
+    monkeypatch.setattr("harness._subproc.run_subprocess", fake_run)
     spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path, instructions="keep it brief")
     ContinueCliAdapter().run(spec)
-    assert (tmp_path / "CONTINUE.md").read_text() == "keep it brief"
+    assert seen["cn"] == "keep it brief"
+    assert not (tmp_path / "CONTINUE.md").exists()
+
+
+def test_continue_config_file_delegates_model_selection(tmp_path):
+    spec = RunSpec(harness="continue-cli", prompt="go", workdir=tmp_path, config_file=tmp_path / "cfg.yaml")
+    bc = ContinueCliAdapter().build_command(spec)
+    assert bc.args == ["-p", "--config", str(tmp_path / "cfg.yaml"), "--format", "json", "go"]
+    assert bc.model is None
+
+
+def test_continue_config_file_rejects_explicit_model(tmp_path):
+    spec = RunSpec(harness="continue-cli", prompt="go", workdir=tmp_path, model="gpt-5.4", config_file=tmp_path / "cfg.yaml")
+    with pytest.raises(HarnessError) as exc:
+        ContinueCliAdapter().build_command(spec)
+    assert exc.value.code == "unsupported-capability"
+
+
+def test_continue_openai_env_requires_caller_config_file(tmp_path):
+    spec = RunSpec(harness="continue-cli", prompt="go", workdir=tmp_path, env={"OPENAI_API_KEY": "sk-secret"})
+    with pytest.raises(HarnessError) as exc:
+        ContinueCliAdapter().build_command(spec)
+    assert exc.value.code == "unsupported-capability"
+    assert "sk-secret" not in str(exc.value)
+    assert list(tmp_path.iterdir()) == []
+
+    with_config = RunSpec(
+        harness="continue-cli", prompt="go", workdir=tmp_path, env={"OPENAI_API_KEY": "sk-secret"}, config_file=tmp_path / "c.yaml"
+    )
+    bc = ContinueCliAdapter().build_command(with_config)
+    assert bc.args == ["-p", "--config", str(tmp_path / "c.yaml"), "--format", "json", "go"]
+    assert bc.env["OPENAI_API_KEY"] == "sk-secret"
 
 
 def test_continue_parses_json_envelope(tmp_path, monkeypatch):

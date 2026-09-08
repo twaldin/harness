@@ -177,22 +177,45 @@ verify, then stop. Make the smallest possible change.""",
 ))
 ```
 
-`instructions` is written to the per-harness config file in `workdir` (`CLAUDE.md` for claude-code/openclaude, `AGENTS.md` for opencode/codex/pi/factory-droid/crush/kilo, `GEMINI.md` for gemini, `QWEN.md` for qwen, `CONTINUE.md` for continue-cli, `.aider.conf.yml` for aider). Filenames are baked into each adapter.
+`instructions` is temporarily projected into the adapter's instruction file in
+`workdir` (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, or `CONTINUE.md`).
+Aider uses `.harness-aider-instructions.md` through `--read`; swe-agent includes
+instructions in the prompt. `run` restores still-owned files when execution
+finishes. Use different workdirs for concurrent runs: overlapping preparation in
+one canonical workdir rejects instead of mixing instructions.
 
-### "Use from TypeScript — command construction only (no subprocess)"
+### "Prepare a command for an external host"
 
 ```typescript
-import { buildCommand } from '@twaldin/harness-ts'
+import { buildCommand, prepareCommand, cleanupCommand, runSubprocessAsync } from '@twaldin/harness-ts'
 
-const { cmd, args, cwd, env, instructionsFile } = buildCommand({
+const command = buildCommand({
   harness: 'claude-code',
   model: 'sonnet',
   prompt: 'Fix the failing tests.',
   workdir: '/tmp/repo',
   instructions: 'You are a careful engineer.',
 })
-// hand off to tmux, a process manager, or spawnSync
+// Building does not touch the filesystem. Retain this handle until execution stops.
+const prepared = prepareCommand(command)
+const { cmd, args, cwd, env } = prepared.command
+await runSubprocessAsync([cmd, ...args], { cwd, extraEnv: env })
+// A returned outcome confirms teardown. A thrown engine error requires recovery.
+cleanupCommand(prepared)
 ```
+
+Python exposes the same operations as `prepare_command` and `cleanup_command`.
+External tmux/PTY hosts must stop their owned process tree before cleanup.
+If a projected file was edited or replaced, cleanup raises `instruction-conflict`
+and keeps both the current file and the original backup for manual recovery.
+It never silently overwrites those edits or steals a stale lease.
+
+`RunSpec.executable` selects a bare binary name or absolute executable path.
+`config_home` / `configHome` and `config_file` / `configFile` select absolute
+upstream paths only where the adapter declares support. Unsupported choices
+reject; no files or credentials are copied. Omitted overrides preserve the
+caller-selected environment and host-local authentication. See the
+[configuration mappings and migration](SPEC.md#supported-configuration-overrides).
 
 ### "Use it as a hone mutator"
 
@@ -272,10 +295,11 @@ Add `--json` to emit a structured RunResult on stdout:
 
 Each adapter:
 
-1. Writes `spec.instructions` to its known filename in `spec.workdir` (if provided).
-2. Builds the CLI invocation for `spec.prompt` + `spec.model`.
-3. Calls the shared subprocess runner (env merge, cwd, timeout, capture).
-4. Parses any structured output the CLI emits and fills `RunResult.cost_usd` / `tokens_in` / `tokens_out` / `raw`.
+1. Plans the CLI invocation for `spec.prompt` + `spec.model`, with explicit cwd/env.
+2. Describes any instruction projection without creating files.
+3. For `run`, prepares the workdir lease, executes through the shared subprocess
+   runner, and parses output into `RunResult`.
+4. Restores only still-owned instruction artifacts and releases the lease.
 
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) for per-CLI flag details, cost-reporting quirks, and output shapes.
 

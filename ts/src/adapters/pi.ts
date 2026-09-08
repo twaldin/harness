@@ -1,7 +1,6 @@
 import { register } from '../registry.js'
-import { writeInstructions } from '../subproc.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
-import { validateRunSpec } from '../base.js'
+import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { deriveCost } from '../pricing.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -101,15 +100,11 @@ const piAdapter: Adapter = {
   defaultModel: 'sonnet',
 
   buildCommand(spec: RunSpec): BuildCommand {
-    const { model } = validateRunSpec(this, spec)
-    const instructionsFile = writeInstructions(spec.workdir, this.instructionsFilename, spec.instructions)
-    return {
+    const validated = validateRunSpec(this, spec)
+    return finalizeCommand(this, spec, validated, {
       cmd: 'pi',
-      args: ['--mode', 'json', '--no-session', '--model', model, spec.prompt],
-      cwd: spec.workdir,
-      env: {},
-      instructionsFile,
-    }
+      args: ['--mode', 'json', '--no-session', '--model', validated.model, spec.prompt],
+    })
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {

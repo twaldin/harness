@@ -12,12 +12,14 @@ harness/
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
 │   ├── adapters/*.py       (13 adapters)
-│   └── _subproc.py         (shared helpers)
+│   ├── _instructions.py    (owned projection lifecycle)
+│   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
     ├── package.json        (@twaldin/harness-ts)
     ├── src/base.ts
     ├── src/registry.ts
     ├── src/adapters/*.ts
+    ├── src/instructions.ts
     └── src/subproc.ts
 ```
 
@@ -36,15 +38,18 @@ The core headless API is described here. Both package roots also expose adapters
 interface RunSpec {
   harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "crush" | "kilo"
   prompt: string                   // the task (becomes positional arg or stdin)
-  workdir: string                  // absolute path; cwd for the subprocess
+  workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
-  instructions?: string            // content written to per-harness instructions file
+  instructions?: string            // temporarily projected into the adapter's instruction file
   timeoutSeconds?: number          // default 1800
   env?: Record<string, string>     // extra env vars merged onto process.env
   modelNoResolve?: boolean         // skip harness-specific rewriting; whitespace is still trimmed
   backend?: Backend               // default 'cli'; 'rpc' and 'sdk' explicitly unsupported today
   permissionPolicy?: PermissionPolicy // default 'upstream'; never inject bypass by default
   nativeOptions?: NativeOptions   // typed, agent-specific CLI options; mismatches are errors
+  executable?: string              // bare executable name or absolute path; no shell expansion
+  configHome?: string              // absolute, caller-selected upstream config/state home
+  configFile?: string              // absolute, caller-selected config file; supported adapters only
   cancel?: AbortSignal             // Python: threading.Event; explicit cancellation returns a result
 }
 
@@ -53,8 +58,11 @@ interface BuildCommand {
   cmd: string                      // executable name, e.g. "claude", "codex"
   args: string[]                   // full argv tail
   cwd: string                      // resolved workdir
-  env: Record<string, string>      // adapter-specified env additions (merge w/ process.env at exec time)
-  instructionsFile: string | null  // adapter wrote content here, null if no instructions
+  env: Record<string, string>      // adapter additions + caller env/overrides; inherit parent env at exec
+  instructionsFile: string | null  // planned path; building does not create it
+  instructionContent?: string      // exact bytes to encode as UTF-8 during preparation; empty is valid
+  directories?: string[]           // planned artifact directories created during preparation
+  model?: string | null            // requested/default reporting label; null when selected by config
 }
 
 // RunResult — after execution + output parsing
@@ -99,6 +107,8 @@ interface Capabilities {
   streaming: boolean
   cancellation: boolean
   sessions: boolean
+  configHomeEnv: string | null      // supported native home variable, not an isolation guarantee
+  configFileFlag: string | null     // supported native config-file flag
 }
 ```
 
@@ -121,9 +131,17 @@ getAdapter(name: string): Adapter
 // Report implemented support for the selected backend, not local availability.
 getCapabilities(name: string, backend?: Backend): Capabilities
 
-// Build the command WITHOUT executing. Writes the instructions file to workdir
-// as a side effect (consumers expect this — it's part of the "prepare workdir" step).
+// Plan argv/env/cwd and instruction projection WITHOUT writing files or executing.
 buildCommand(spec: RunSpec): BuildCommand
+
+// Acquire the workdir lease and prepare the planned files/directories.
+prepareCommand(command: BuildCommand): PreparedCommand
+
+// Restore only still-owned projections, then release the lease; idempotent on success.
+cleanupCommand(prepared: PreparedCommand): void
+
+// The caller passes this command to its host driver and retains the opaque handle.
+interface PreparedCommand { readonly command: BuildCommand }
 
 // Parse adapter output after execution. Called by run() internally, also callable
 // standalone by interactive consumers (flt) that exec'd the command themselves via tmux.
@@ -160,9 +178,10 @@ wording:
 | `unsupported-capability` | the adapter cannot honor the requested capability, such as bypass |
 | `invalid-options` | invalid backend/policy/native options, mismatched native kind, or conflicting choices |
 | `adapter-error` | other adapter prerequisite error, including a missing swe-agent wrapper |
+| `instruction-conflict` | an overlapping lease, unsafe projection path, or modified owned artifact prevents safe preparation/restoration |
 
-Selector/permission/native-option rejection happens before command construction
-writes instructions or config, and before any subprocess starts. A caller can
+Selector/permission/native-option/config-override rejection happens before
+preparation and before any subprocess starts. A caller can
 catch `HarnessError` without parsing its message. Existing message-only
 construction retains `adapter-error`.
 
@@ -486,10 +505,12 @@ Each adapter provides:
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
 | `defaultModel` | used when RunSpec.model is unset |
-| `buildCommand(spec)` | returns `{cmd, args, cwd, env, instructionsFile}` |
+| `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
-`buildCommand` MAY write files (instructions, config) but MUST NOT fork a subprocess.
+`buildCommand` MUST NOT write files, create directories, or fork a subprocess.
+Built-in builders apply the common launch finalizer so direct adapter calls and
+registry calls honor executable, cwd, env and supported config overrides alike.
 `parseOutput` MAY read files the CLI wrote (opencode/kilo/crush sqlite DBs, swe-agent trajectory JSON) but MUST NOT block on I/O > 5s.
 
 ### JSON-fixture-driven verification
@@ -534,16 +555,65 @@ Fixtures support drift prevention for the cases actually asserted; they do not p
 
 ## Environment handling
 
-Adapters MAY set env vars (for example `KILO_DB`, `KILO_CONFIG_CONTENT`, `CLAUDE_CODE_USE_OPENAI`; `swe-agent` also reads `SWE_WRAPPER`). Execution merges process environment, then `BuildCommand.env`, then `RunSpec.env`: the caller's explicit values win. `buildCommand` returns adapter additions, not a full copy of the effective process environment.
+Adapters MAY supply env additions (for example `KILO_DB`, `KILO_CONFIG_CONTENT`,
+`CLAUDE_CODE_USE_OPENAI`; `swe-agent` also reads `SWE_WRAPPER`).
+`BuildCommand.env` contains those additions followed by `RunSpec.env`, so explicit
+caller values win. An explicit `configHome` supplies the adapter's mapped variable;
+conflicting values in `RunSpec.env` reject rather than silently choosing one.
+Inherited values may be overridden by an explicit choice. Execution inherits the
+parent environment and overlays this command env without mutating either input.
+Harness does not enumerate managed homes or switch accounts.
 
-Credentials and account selection belong to the caller. Harness must not
-discover, copy or log secrets from unrelated configuration. Explicit `RunSpec.env`
-values pass to the child unchanged. Existing openclaude/continue-cli adapters
-also inspect caller-supplied OpenAI-compatible settings; continue-cli can write
-an API key into its generated workdir config. Treat that artifact as sensitive.
-This historical behavior is not a credential-isolation guarantee or permission
-to harvest credentials; full config/instruction isolation remains separately
-implementation-gated.
+Credentials and account selection belong to the caller. Harness does not discover,
+copy, serialize into generated config, or log credentials. Caller-selected
+host-local authentication remains available through inherited environment, explicit
+env additions, and the selected upstream configuration. `BuildCommand.env` can
+contain caller-supplied secrets: do not publish command objects or raw output.
+Configuration files are passed by path, never read or copied by the builder.
+
+### Supported configuration overrides
+
+| adapter | `configHome` mapping | `configFile` mapping |
+|---|---|---|
+| claude-code | `CLAUDE_CONFIG_DIR` | `--settings` |
+| codex | `CODEX_HOME` | unsupported |
+| aider | unsupported | `--config` |
+| continue-cli | unsupported | `--config` |
+| all others | unsupported | unsupported |
+
+An unsupported explicit override raises `unsupported-capability`. Home/file
+paths must be absolute. `executable` accepts a bare name resolved through the
+child's PATH or an absolute path; relative paths with separators and empty/NUL
+values reject with `invalid-options`. Workdir is normalized without changing
+process-global cwd. Preparation requires an existing caller-owned workdir.
+
+These mappings select existing upstream state, not a sandbox or an empty home.
+For example, Codex stores authentication alongside configuration under
+`CODEX_HOME`; pointing it at a new home does not copy authentication there.
+Managed settings, upstream project discovery and upstream writes still apply.
+Raw `HOME`, `XDG_*` and native env overrides remain caller-controlled; passing
+an env variable does not claim the upstream supports it or separates credentials.
+Harness does not rewrite a user's settings to make a model selection stick.
+An omitted/empty model retains the existing adapter default contract.
+
+Continue no longer generates YAML containing API keys. Its former explicit
+OpenAI-compatible env branch requires a caller-selected `configFile`.
+When using that file, omit `model`: the selected file owns model configuration,
+and an explicit model is rejected rather than discarded (`--model` in current
+Continue is a Hub model slug, not a native model ID). The result's model is
+unknown in this case. Aider no longer writes an empty `.agentelo-aider.yml`:
+upstream configuration or `configFile` applies, and textual instructions are
+projected into `.harness-aider-instructions.md` and supplied through `--read`.
+Its headless chat/input histories use the platform null device. Kilo preserves
+caller-selected `KILO_CONFIG_CONTENT`; it generates its single-model env default
+only when neither inherited nor explicit env selected that variable.
+
+Override evidence: [Claude settings](https://code.claude.com/docs/en/settings),
+[Codex configuration/state](https://developers.openai.com/codex/config-advanced/),
+[Aider options](https://aider.chat/docs/config/options.html), and
+[Continue CLI](https://github.com/continuedev/continue/blob/main/extensions/cli/README.md).
+Claude Code 2.1.220 and Codex 0.153.4 help were inspected locally. These are
+configuration/flag checks, not provider execution or credential-isolation proof.
 
 ---
 
@@ -634,13 +704,70 @@ documents `start_new_session`, signal return codes and process-creation limits;
 `exit` from pipe `close` and documents detached POSIX groups.
 
 The consumer owns workdir/worktree isolation, host drivers, auth selection and
-approval decisions. No code may change process-global cwd/env, discover or copy
-credentials, or install an SDK implicitly. Existing instruction writes overwrite
-the selected file; `run` does not automatically restore it. Projection helpers
-offer explicit backup/restore, not concurrency-safe ownership. Existing
-adapter-specific workdir config generation is documented in the matrix; it is
-not a guarantee of isolation from user config. Use caller-owned working
-directories and do not expose generated config, raw output or logs publicly.
+approval decisions. Harness owns only the lease and artifacts described below.
+No code may change process-global cwd/env, discover or copy credentials, or
+install an SDK implicitly.
+
+### Instruction preparation and restoration
+
+**Compatibility change:** `buildCommand` is now a plan, not a “prepare workdir”
+operation. External host drivers must call `prepareCommand`, retain its handle
+until their process and owned children have stopped, then call `cleanupCommand`.
+`run` and `runAsync` do this automatically after confirmed process teardown,
+including launch failure, successful cancellation and parsing failure. If the
+subprocess engine raises without confirming teardown, they propagate that error
+and retain the projection, original backup and lease for manual recovery. Stop
+any surviving owned process group before restoring those artifacts.
+Python exposes `prepare_command` and `cleanup_command` with equivalent semantics.
+No automatic cleanup occurs merely because a command was built.
+
+Preparation takes an exclusive `.harness-run.lock` directory in the canonical
+workdir. Python and TypeScript share this protocol across processes. All runs,
+even those without instructions, acquire the lease so they cannot observe another
+Harness run's temporary instructions. Overlapping runs in the same canonical
+workdir reject with `instruction-conflict`; different workdirs can run concurrently.
+An empty `.owner-<UUID>` directory identifies each lease independently of filesystem
+inode reuse. Cleanup verifies this marker before modifying files.
+The caller must give upstream processes separate workdirs and, when required,
+separate supported config/state locations. A shared external state directory
+explicitly selected by the caller is not isolated by this workdir lease.
+
+Projection rejects absolute/traversing filenames, symlinks below the canonical
+workdir (including dangling targets), nonregular targets, and hard-linked files.
+An existing regular file is moved, not copied, into the owned lease directory.
+Restoration preserves its bytes, inode and mode. New projected files are private
+to the owner; empty content creates an empty file. Parent directories are tracked:
+cleanup removes only owned empty directories, never preexisting ones or
+directories containing upstream-created artifacts.
+
+Cleanup checks the projected file's identity, content and mode, its parents,
+the lease and the backup before restoring. If another actor edited, deleted,
+replaced or redirected an owned artifact, cleanup raises `instruction-conflict`
+and preserves current content and the backup for manual recovery. It does not
+overwrite user edits, follow replacement symlinks, or steal a stale lease.
+Successful cleanup is idempotent on the same handle. Legacy
+`.harness-backup-*` files are unrelated content and are never consumed.
+
+After a conflict or uncatchable process crash, stop all affected processes,
+inspect the current file and backup, reconcile them manually, then remove the
+empty ownership marker and stale lease. Do not blindly delete the lease or call
+a new projection over it.
+The lease coordinates cooperative Harness callers; it is not a security boundary
+against a hostile process rewriting the filesystem between checks.
+
+`projectInstructions` / `project_instructions` use the same ownership protocol
+for explicit external projections. `replace` writes content plus a newline;
+`prepend` inserts content plus a blank separator before the original UTF-8 text.
+Optional `replaceBetweenMarkers: {start, end}` / `replace_between_markers=(start, end)`
+replaces the first well-ordered literal marker block, including both delimiters,
+with the content; otherwise the selected mode applies.
+Invalid modes/markers and `backup: false` reject before writes. A handle is
+process-local ownership, not a serializable cleanup recipe.
+
+`writeInstructions` / `write_instructions` now exclusively create a persistent
+caller-owned file. Existing files and unsafe symlinks reject instead of being
+truncated; null/None skips creation, while empty content is valid. Use projection
+or preparation for temporary files that need restoration.
 
 ## Optional pane and telemetry helpers
 

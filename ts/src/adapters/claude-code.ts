@@ -166,7 +166,7 @@ export function parseClaudeTranscript(path: string): SessionTelemetry {
       const cost = typeof obj['costUSD'] === 'number' ? obj['costUSD'] : obj['total_cost_usd']
       if (typeof cost === 'number' && !duplicate && costUsd !== null) {
         sawCost = true
-        const total = costUsd + cost
+        const total: number = costUsd + cost
         costUsd = Number.isFinite(total) ? total : null
       }
       const model = msg?.['model']

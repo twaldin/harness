@@ -1,10 +1,12 @@
 """Core types: RunSpec (input), BuildCommand (pre-exec), RunResult (output), Adapter (ABC)."""
 from __future__ import annotations
 
+import asyncio
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING, Literal, TypedDict, get_args
 
 from harness.model_normalization import normalize_model_for_harness
@@ -14,6 +16,7 @@ if TYPE_CHECKING:
 
 Backend = Literal["cli", "rpc", "sdk"]
 PermissionPolicy = Literal["upstream", "bypass"]
+Termination = Literal["exited", "signaled", "timed-out", "cancelled", "launch-failed"]
 ErrorCode = Literal[
     "adapter-error",
     "unknown-harness",
@@ -111,6 +114,9 @@ class RunSpec:
     `config_file`   — absolute path passed verbatim through the adapter's
                       `config_file_flag` (e.g. `--settings`). Never opened,
                       copied or created by harness.
+    `cancel`        — optional threading.Event. Setting it returns a cancelled
+                      result after owned-process cleanup; a set event launches
+                      nothing. Async Task.cancel instead propagates CancelledError.
     """
 
     harness: str
@@ -118,7 +124,7 @@ class RunSpec:
     workdir: Path
     model: str | None = None
     instructions: str | None = None
-    timeout_seconds: int = 1800
+    timeout_seconds: float = 1800
     env: dict[str, str] = field(default_factory=dict)
     model_no_resolve: bool = False
     backend: Backend = "cli"
@@ -127,6 +133,7 @@ class RunSpec:
     executable: str | None = None
     config_home: Path | None = None
     config_file: Path | None = None
+    cancel: Event | None = None
 
 
 @dataclass
@@ -241,6 +248,9 @@ class RunResult:
     tokens_in: int | None = None
     tokens_out: int | None = None
     raw: dict | list | None = None  # adapter-specific structured payload (parsed JSON, session info)
+    termination: Termination | None = None
+    signal: str | None = None
+    launch_error: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -559,16 +569,25 @@ class Adapter(ABC):
         spec = snapshot_run_spec(spec)
         bc = self._finalized(spec, self.build_command(spec))
         prepared = prepare_command(bc)
+        cleanup_safe = False
         try:
-            outcome = run_subprocess(
-                [bc.cmd] + bc.args,
-                cwd=bc.cwd,
-                timeout_seconds=spec.timeout_seconds,
-                extra_env=bc.env,
-            )
+            try:
+                outcome = run_subprocess(
+                    [bc.cmd] + bc.args,
+                    cwd=bc.cwd,
+                    timeout_seconds=spec.timeout_seconds,
+                    extra_env=bc.env,
+                    cancel=spec.cancel,
+                )
+            except (ValueError, NotImplementedError, KeyboardInterrupt, SystemExit):
+                # Validation precedes launch; control-flow exceptions follow teardown.
+                cleanup_safe = True
+                raise
+            cleanup_safe = True
             return self._run_result(spec, bc, outcome)
         finally:
-            cleanup_command(prepared)
+            if cleanup_safe:
+                cleanup_command(prepared)
 
     async def run_async(self, spec: RunSpec) -> RunResult:
         """Async headless invocation: build_command + prepare + async exec + parse_output + cleanup."""
@@ -578,16 +597,28 @@ class Adapter(ABC):
         spec = snapshot_run_spec(spec)
         bc = self._finalized(spec, self.build_command(spec))
         prepared = prepare_command(bc)
+        cleanup_safe = False
         try:
-            outcome = await run_subprocess_async(
-                [bc.cmd] + bc.args,
-                cwd=bc.cwd,
-                timeout_seconds=spec.timeout_seconds,
-                extra_env=bc.env,
-            )
+            try:
+                outcome = await run_subprocess_async(
+                    [bc.cmd] + bc.args,
+                    cwd=bc.cwd,
+                    timeout_seconds=spec.timeout_seconds,
+                    extra_env=bc.env,
+                    cancel=spec.cancel,
+                )
+            except asyncio.CancelledError as error:
+                # The engine chains a teardown failure as the cancellation's cause.
+                cleanup_safe = error.__cause__ is None
+                raise
+            except (ValueError, NotImplementedError, KeyboardInterrupt, SystemExit):
+                cleanup_safe = True
+                raise
+            cleanup_safe = True
             return self._run_result(spec, bc, outcome)
         finally:
-            cleanup_command(prepared)
+            if cleanup_safe:
+                cleanup_command(prepared)
 
     def _run_result(self, spec: RunSpec, built: BuildCommand, outcome: SubprocOutcome) -> RunResult:
         parsed = self.parse_output(spec, outcome)
@@ -599,6 +630,9 @@ class Adapter(ABC):
             stdout=outcome.stdout,
             stderr=outcome.stderr,
             timed_out=outcome.timed_out,
+            termination=outcome.termination,
+            signal=outcome.signal,
+            launch_error=outcome.launch_error,
             cost_usd=parsed.get("cost_usd"),
             tokens_in=parsed.get("tokens_in"),
             tokens_out=parsed.get("tokens_out"),

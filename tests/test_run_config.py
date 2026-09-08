@@ -361,3 +361,43 @@ while True:
         cancellation.set()
         if not task.done():
             await task
+
+
+@pytest.mark.parametrize("entrypoint", ["sync", "async", "cancelled-task"])
+async def test_failed_process_teardown_retains_instruction_ownership(workdir: Path, monkeypatch, entrypoint: str):
+    target = workdir / "AGENTS.md"
+    target.write_text("original")
+
+    def failed_teardown(*args, **kwargs):
+        raise PermissionError("synthetic process-group denial")
+
+    async def failed_async_teardown(*args, **kwargs):
+        if entrypoint == "cancelled-task":
+            raise asyncio.CancelledError() from PermissionError("synthetic process-group denial")
+        failed_teardown()
+
+    monkeypatch.setattr("harness._subproc.run_subprocess", failed_teardown)
+    monkeypatch.setattr("harness._subproc.run_subprocess_async", failed_async_teardown)
+    spec = _spec("codex", workdir, instructions="projected")
+    with pytest.raises((PermissionError, asyncio.CancelledError)):
+        if entrypoint == "sync":
+            run(spec)
+        else:
+            await run_async(spec)
+    assert target.read_text() == "projected"
+    assert (workdir / LOCK / "original-AGENTS.md").read_text() == "original"
+    assert (workdir / LOCK).exists()
+
+
+@pytest.mark.parametrize("entrypoint", ["sync", "async"])
+async def test_prelaunch_validation_releases_instruction_lease(workdir: Path, entrypoint: str):
+    target = workdir / "AGENTS.md"
+    target.write_text("original")
+    spec = _spec("codex", workdir, instructions="projected", timeout_seconds=-1)
+    with pytest.raises(ValueError):
+        if entrypoint == "sync":
+            run(spec)
+        else:
+            await run_async(spec)
+    assert target.read_text() == "original"
+    assert not (workdir / LOCK).exists()

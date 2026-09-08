@@ -1,7 +1,7 @@
 import type { Adapter, Backend, BuildCommand, Capabilities, ParsedOutput, RunResult, RunSpec, SubprocOutcome } from './base.js'
 import { HarnessError, finalizeCommand, resolveBackend, validateRunSpec } from './base.js'
 import { cleanupCommand, prepareCommand } from './instructions.js'
-import { runSubprocess, runSubprocessAsync } from './subproc.js'
+import { runSubprocessAsync } from './subproc.js'
 
 const registry = new Map<string, Adapter>()
 
@@ -42,7 +42,7 @@ export function getCapabilities(name: string, backend: Backend = 'cli'): Capabil
     configHomeEnv: adapter.configHomeEnv ?? null,
     configFileFlag: adapter.configFileFlag ?? null,
     streaming: false,
-    cancellation: false,
+    cancellation: true,
     sessions: false,
   }
 }
@@ -64,57 +64,59 @@ export function parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutpu
   return adapter.parseOutput(spec, outcome)
 }
 
-/** Caller-owned spec and env are copied up front so later mutation cannot leak into an in-flight run. */
-function snapshot(spec: RunSpec): RunSpec {
-  return spec.env === undefined ? { ...spec } : { ...spec, env: { ...spec.env } }
-}
-
-function toResult(spec: RunSpec, adapter: Adapter, built: BuildCommand, outcome: SubprocOutcome, parsed: ParsedOutput): RunResult {
-  return {
-    harness: spec.harness,
-    model: built.model === undefined ? spec.model || adapter.defaultModel : built.model,
-    exitCode: outcome.exitCode,
-    durationSeconds: outcome.durationSeconds,
-    stdout: outcome.stdout,
-    stderr: outcome.stderr,
-    timedOut: outcome.timedOut,
-    costUsd: parsed.costUsd,
-    tokensIn: parsed.tokensIn,
-    tokensOut: parsed.tokensOut,
-    raw: parsed.raw,
-  }
-}
-
-export async function run(spec: RunSpec): Promise<RunResult> {
-  const frozen = snapshot(spec)
+/** Caller-owned spec and env are copied before command planning and execution. */
+async function execute(spec: RunSpec): Promise<RunResult> {
+  const frozen = spec.env === undefined ? { ...spec } : { ...spec, env: { ...spec.env } }
   const adapter = getAdapter(frozen.harness)
   const built = buildCommand(frozen)
   const prepared = prepareCommand(built)
+  let cleanupSafe = false
   try {
-    const outcome = runSubprocess([built.cmd, ...built.args], {
-      cwd: built.cwd,
-      timeoutSeconds: frozen.timeoutSeconds,
-      extraEnv: built.env,
-    })
-    return toResult(frozen, adapter, built, outcome, adapter.parseOutput(frozen, outcome))
+    let outcome: SubprocOutcome
+    try {
+      outcome = await runSubprocessAsync([built.cmd, ...built.args], {
+        cwd: built.cwd,
+        timeoutSeconds: frozen.timeoutSeconds,
+        extraEnv: built.env,
+        cancel: frozen.cancel,
+      })
+    } catch (error) {
+      // Only validation errors prove that no child was launched.
+      cleanupSafe = error instanceof HarnessError
+        && (error.code === 'invalid-options' || error.code === 'unsupported-capability')
+      throw error
+    }
+    cleanupSafe = true
+    const parsed = adapter.parseOutput(frozen, outcome)
+    return {
+      harness: frozen.harness,
+      model: built.model === undefined ? frozen.model || adapter.defaultModel : built.model,
+      exitCode: outcome.exitCode,
+      durationSeconds: outcome.durationSeconds,
+      stdout: outcome.stdout,
+      stderr: outcome.stderr,
+      timedOut: outcome.timedOut,
+      termination: outcome.termination,
+      signal: outcome.signal,
+      launchError: outcome.launchError,
+      costUsd: parsed.costUsd,
+      tokensIn: parsed.tokensIn,
+      tokensOut: parsed.tokensOut,
+      raw: parsed.raw,
+    }
   } finally {
-    cleanupCommand(prepared)
+    if (cleanupSafe) cleanupCommand(prepared)
   }
 }
 
-export async function runAsync(spec: RunSpec): Promise<RunResult> {
-  const frozen = snapshot(spec)
-  const adapter = getAdapter(frozen.harness)
-  const built = buildCommand(frozen)
-  const prepared = prepareCommand(built)
-  try {
-    const outcome = await runSubprocessAsync([built.cmd, ...built.args], {
-      cwd: built.cwd,
-      timeoutSeconds: frozen.timeoutSeconds,
-      extraEnv: built.env,
-    })
-    return toResult(frozen, adapter, built, outcome, adapter.parseOutput(frozen, outcome))
-  } finally {
-    cleanupCommand(prepared)
-  }
+/**
+ * Full headless invocation. Both entry points execute in-process on the
+ * async engine (no event-loop blocking), so `spec.cancel` can abort either.
+ */
+export function run(spec: RunSpec): Promise<RunResult> {
+  return execute(spec)
+}
+
+export function runAsync(spec: RunSpec): Promise<RunResult> {
+  return execute(spec)
 }

@@ -5,8 +5,10 @@ export type {
   ReadyState, AgentStatus, SessionTelemetry, InstallMeta, ScrollKeys,
   Backend, PermissionPolicy, NativeOptions, ClaudeCodeOptions, CodexOptions,
   ClaudeCodeEffort, CodexSandbox, ErrorCode, Capabilities, ValidatedRunSpec,
+  Termination,
 } from './base.js'
 export type { InstructionProjection, ProjectInstructionsOptions, PreparedCommand } from './instructions.js'
+export type { RunSubprocessOptions } from './subproc.js'
 export { HarnessError, validateRunSpec } from './base.js'
 export { register, listAdapters, getAdapter, getCapabilities, buildCommand, parseOutput, run, runAsync } from './registry.js'
 export {

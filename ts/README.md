@@ -49,7 +49,7 @@ See the [shared migration and examples](../SPEC.md#permission-policy-and-migrati
 
 ### `run(spec: RunSpec): Promise<RunResult>`
 
-Full headless invocation: builds the command, executes it as a subprocess, parses output. Although it returns a Promise, `run()` uses synchronous subprocess execution and blocks the event loop until the agent exits or times out. Use `runAsync()` for concurrent calls.
+Full headless invocation: builds the command, executes it asynchronously, and parses output. `run()` and `runAsync()` both permit concurrent calls and accept `cancel: AbortSignal`.
 
 ```typescript
 import { run } from '@twaldin/harness-ts'
@@ -71,7 +71,7 @@ else console.log(`done — exit ${r.exitCode}, ${cost}`)
 
 ### `runAsync(spec: RunSpec): Promise<RunResult>`
 
-Same as `run()`, but uses async subprocess execution. Multiple `runAsync()` calls can run concurrently:
+Same asynchronous execution and cleanup as `run()`. Multiple calls can run concurrently:
 
 ```typescript
 import { runAsync } from '@twaldin/harness-ts'
@@ -98,12 +98,10 @@ const command = buildCommand({
   instructions: 'You are a careful engineer.',
 })
 const prepared = prepareCommand(command)
-try {
-  const { cmd, args, cwd, env } = prepared.command
-  await runSubprocessAsync([cmd, ...args], { cwd, extraEnv: env })
-} finally {
-  cleanupCommand(prepared)
-}
+const { cmd, args, cwd, env } = prepared.command
+await runSubprocessAsync([cmd, ...args], { cwd, extraEnv: env })
+// A returned outcome confirms teardown. A thrown engine error requires recovery.
+cleanupCommand(prepared)
 ```
 
 `run` and `runAsync` prepare and clean up automatically. Same-workdir overlap,
@@ -127,8 +125,8 @@ Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'co
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
 Reports implemented support without loading optional SDKs or probing local
-installation/auth. All current adapters use CLI and report streaming,
-cancellation and controlled sessions as unsupported. Pure pane/session-log
+installation/auth. All current adapters use CLI and support cancellation;
+streaming and controlled sessions remain unsupported. Pure pane/session-log
 helpers are not controlled sessions. Native options are typed per agent:
 
 ```typescript
@@ -161,16 +159,20 @@ interface RunSpec {
   executable?: string       // bare name or absolute path
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file
+  cancel?: AbortSignal       // abort returns a cancelled result after cleanup
 }
 
 interface RunResult {
   harness: string
   model: string | null
-  exitCode: number           // -1 on timeout
+  exitCode: number           // -1 for timeout/cancel/launch failure; termination disambiguates
   durationSeconds: number
   stdout: string
   stderr: string
   timedOut: boolean
+  termination?: Termination | null
+  signal?: string | null
+  launchError?: string | null
   costUsd: number | null     // reported or estimated cost; null when unavailable
   tokensIn: number | null
   tokensOut: number | null
@@ -189,9 +191,11 @@ registration, invalid options, unsupported backends/capabilities and adapter
 prerequisites. Re-registering the same adapter object is idempotent.
 See [SPEC errors](../SPEC.md#errors) for the exact codes.
 
-Non-zero exit and timeout are surfaced in `RunResult`. Launch errors and
-cancellation are not yet normalized across runtimes; see
-[execution limitations](../SPEC.md#ownership-and-execution).
+Non-zero exit, timeout, explicit cancellation and OS launch failure are surfaced
+in `RunResult`. `termination` distinguishes `exited`, `signaled`, `timed-out`,
+`cancelled` and `launch-failed`; `signal` and `launchError` retain signal names
+and OS error codes. See [ownership and execution](../SPEC.md#ownership-and-execution)
+for the macOS/Linux cleanup boundary and compatibility details.
 
 ---
 

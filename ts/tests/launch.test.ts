@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'os'
 import { join, relative } from 'path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { spawnSync } from 'node:child_process'
 import { HarnessError } from '../src/base.js'
 import type { Adapter, BuildCommand, ErrorCode, RunSpec } from '../src/base.js'
 import { cleanupCommand, prepareCommand } from '../src/instructions.js'
@@ -405,5 +406,46 @@ setInterval(() => {}, 1000);
         await invocation
       }
     })
+  }
+})
+
+test('failed process teardown retains instructions and recovery backup', () => {
+  for (const entrypoint of ['run', 'runAsync']) {
+    const workdir = tmpDir()
+    const result = spawnSync(process.execPath, ['-e', `
+      import assert from 'node:assert/strict';
+      import { mock } from 'bun:test';
+      import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+      const workdir = ${JSON.stringify(workdir)};
+      writeFileSync(workdir + '/AGENTS.md', 'original');
+      const failure = Object.assign(new Error('synthetic process-group denial'), { code: 'EPERM' });
+      mock.module(${JSON.stringify(join(import.meta.dir, '../src/subproc.ts'))}, () => ({
+        runSubprocessAsync: async () => { throw failure; },
+        runSubprocess: () => { throw failure; },
+      }));
+      // Import after fault injection; static imports would bind before the mock.
+      const harness = await import(${JSON.stringify(join(import.meta.dir, '../src/index.ts'))});
+      await assert.rejects(harness[${JSON.stringify(entrypoint)}]({
+        harness: 'codex', prompt: 'x', workdir, instructions: 'projected',
+        executable: '/nonexistent/synthetic-agent',
+      }), error => error === failure);
+      assert.equal(readFileSync(workdir + '/AGENTS.md', 'utf8'), 'projected');
+      assert.equal(readFileSync(workdir + '/.harness-run.lock/original-AGENTS.md', 'utf8'), 'original');
+      assert.equal(existsSync(workdir + '/.harness-run.lock'), true);
+    `], { encoding: 'utf-8' })
+    expect(result.status, result.stderr).toBe(0)
+  }
+})
+
+test('prelaunch validation releases the instruction lease', async () => {
+  for (const entrypoint of [run, runAsync]) {
+    const workdir = tmpDir()
+    const file = join(workdir, 'AGENTS.md')
+    writeFileSync(file, 'original')
+    await expectRejectCode(entrypoint({
+      harness: 'codex', prompt: 'x', workdir, instructions: 'projected', timeoutSeconds: -1,
+    }), 'invalid-options')
+    expect(readFileSync(file, 'utf-8')).toBe('original')
+    expect(existsSync(join(workdir, LOCK))).toBe(false)
   }
 })

@@ -78,7 +78,7 @@ All three open the DB read-only (`mode=ro` URI, 5s timeout) and tolerate
 `sqlite3.Error` by returning `None`. Python schema tests live in
 `tests/test_*_db.py`. TypeScript selects `bun:sqlite` under Bun and
 `better-sqlite3` under Node. Its session-log tests create temporary databases
-for crush and kilo, but do not cover opencode in that directory.
+for crush and kilo; `opencode-parse.test.ts` covers per-run database selection.
 
 `crush` pins `--model` and `--small-model` to the same value; `kilo` sets
 `model` and `small_model` in `KILO_CONFIG_CONTENT`. Both avoid helper-model drift.

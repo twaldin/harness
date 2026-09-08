@@ -50,6 +50,7 @@ interface RunSpec {
   executable?: string              // bare executable name or absolute path; no shell expansion
   configHome?: string              // absolute, caller-selected upstream config/state home
   configFile?: string              // absolute, caller-selected config file; supported adapters only
+  cancel?: AbortSignal             // Python: threading.Event; explicit cancellation returns a result
 }
 
 // BuildCommand — what to invoke, without invoking it (for interactive consumers like flt)
@@ -68,16 +69,21 @@ interface BuildCommand {
 interface RunResult {
   harness: string
   model: string | null
-  exitCode: number                 // -1 on timeout
+  exitCode: number                 // -1 for timeout/cancel/launch failure; termination disambiguates
   durationSeconds: number
   stdout: string
   stderr: string
   timedOut: boolean
+  termination?: Termination | null // always populated by execution; optional for legacy constructed results
+  signal?: string | null           // leader's terminating signal, e.g. SIGTERM
+  launchError?: string | null      // OS code such as ENOENT or EACCES
   costUsd: number | null           // null if adapter can't report cost
   tokensIn: number | null
   tokensOut: number | null
   raw: unknown | null              // adapter-specific structured payload (parsed JSON)
 }
+
+type Termination = 'exited' | 'signaled' | 'timed-out' | 'cancelled' | 'launch-failed'
 ```
 
 (Python equivalents are dataclasses with snake_case fields, such as `exit_code` and `cost_usd`; the TypeScript examples below use camelCase. The Python CLI's JSON output uses snake_case and omits `raw`.)
@@ -146,15 +152,16 @@ parseOutput(spec: RunSpec, outcome: SubprocOutcome): {
   raw: unknown | null
 }
 
-// Where SubprocOutcome = { exitCode, durationSeconds, stdout, stderr, timedOut }
+// SubprocOutcome has the execution fields of RunResult, including
+// termination, signal and launchError, without harness/model/metrics/raw.
 
-// Full headless invocation — buildCommand + exec + parseOutput. Blocks until complete.
-// py: synchronous (returns RunResult directly); ts: Promise<RunResult>, but synchronous subprocess execution blocks the event loop
+// Full headless invocation — buildCommand + exec + parseOutput.
+// py: synchronous RunResult; ts: non-blocking Promise<RunResult>.
 run(spec: RunSpec): Promise<RunResult>
 
-// Non-blocking headless invocation — same as run() but uses async subprocess execution.
-// Multiple runAsync() calls can run concurrently without blocking each other.
-// py: coroutine (asyncio.create_subprocess_exec); ts: Promise wrapping Node spawn()
+// Non-blocking headless invocation; independent calls can run concurrently.
+// py: coroutine using the shared runner in a shielded worker thread;
+// ts: the same asynchronous execution engine as run().
 runAsync(spec: RunSpec): Promise<RunResult>  // py: async def run_async(spec) -> RunResult
 ```
 
@@ -178,9 +185,12 @@ preparation and before any subprocess starts. A caller can
 catch `HarnessError` without parsing its message. Existing message-only
 construction retains `adapter-error`.
 
-Non-zero subprocess exit and timeout are represented in `RunResult`, not
-`HarnessError`. This is not a promise that every runtime failure is normalized:
-current spawn-error and cancellation limitations are described under
+Non-zero subprocess exit, timeout, explicit cancellation and OS launch failure
+are represented in `RunResult`, not `HarnessError`. Python task cancellation
+propagates `CancelledError` after cleanup. Invalid low-level arguments and
+unsupported operating systems raise before launch. Cleanup failures (including
+failure to reap the leader within the cleanup deadline) raise rather than
+returning a result that falsely implies completed cleanup. See
 [ownership and execution](#ownership-and-execution).
 
 ### Backend selection and capabilities
@@ -192,8 +202,9 @@ Selecting `rpc` or `sdk` currently raises `unsupported-backend` in both language
 importing Harness loads no optional SDK and does not initialize upstream settings.
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
-native option kind `"codex"`, and `false` for streaming, cancellation and sessions.
-All thirteen CLI adapters report those three booleans as false. They describe
+native option kind `"codex"`, `true` for cancellation, and `false` for streaming
+and sessions. All thirteen CLI adapters share these lifecycle capabilities.
+They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
 separate from a controllable live session. Capability queries perform no
@@ -628,22 +639,69 @@ Current execution behavior and limits:
 
 | concern | shipped behavior |
 |---|---|
-| sync execution | Python blocks; TypeScript `run()` returns a Promise but uses blocking `spawnSync` |
-| async execution | Python coroutine / TypeScript Promise; independent calls can run concurrently |
+| sync execution | Python `run` and both low-level `run_subprocess` / `runSubprocess` helpers block |
+| async execution | Python `run_async` is a coroutine; TS `run` and `runAsync` are non-blocking Promises |
 | stdin | closed by the headless entry points; there is no prompt/approval input channel |
-| output | stdout/stderr captured separately until exit; no output callback or backpressure API |
-| timeout | default 1800 seconds; `exitCode=-1`, `timedOut=true`; partial output may be available |
-| process cleanup | Python and TS sync terminate the direct child; TS async kills its owned process group with SIGKILL |
-| cancellation | no supported cross-language cancellation handle; cancelling a Python task is not a process-cleanup guarantee |
-| launch failure | Python may raise an OS exception; TS sync may return `-1`; TS async lacks a spawn-error listener |
-| signal reporting | not normalized separately; TS sync can misclassify SIGTERM as timeout |
-| memory/decoding | TS sync has a 100 MiB buffer limit; async capture is unbounded and TS decodes per chunk |
+| output | stdout/stderr captured separately; no output callback or backpressure API |
+| timeout | finite non-negative seconds, default 1800; zero expires immediately after launch; `exitCode=-1`, `timedOut=true` |
+| process cleanup | fresh owned POSIX process group; SIGTERM, then SIGKILL after 0.5 seconds if still present; drain/close within a further 1 second |
+| cancellation | optional `cancel`: Python `threading.Event`, TS `AbortSignal`; explicit cancellation returns `termination="cancelled"`, `exitCode=-1`, `timedOut=false` |
+| launch failure | `termination="launch-failed"`, `exitCode=-1`, `launchError` / `launch_error` carries the OS code |
+| signal reporting | `termination="signaled"`, negative signal number as exit code and a separate signal name; SIGTERM alone is not a timeout |
+| memory/decoding | captured output is memory-buffered; UTF-8 replacement decoding preserves characters split across reads |
 
-These are known limitations, not desired lifecycle guarantees. Lifecycle,
-streaming and conformance changes must land in both implementations before
-their capabilities become true. A timeout does not prove grandchildren died,
-a cancelled coroutine does not prove teardown, and a missing metric is not
-proof of a successful parse.
+`termination="exited"` covers both zero and non-zero ordinary exits. Timeout
+and cancellation retain their cause even if the leader handles SIGTERM and
+exits zero. `signal` records the leader's actual terminating signal, if any.
+The first terminal condition observed by the runner wins. After ordinary
+leader exit, cleanup stops leftover group members without changing the leader's
+result; inherited pipes must not turn a completed leader into a timeout.
+
+Python `Task.cancel()` sets a private stop event and waits for the shielded
+worker's cleanup before re-raising `CancelledError`, including repeated task
+cancellation during startup or output collection. Explicit `cancel.set()`
+instead returns a result in both Python entry points. TS callers pass
+`controller.signal` and call `controller.abort()`; use `run`/`runAsync` for
+in-flight event-loop cancellation. A pre-cancelled token launches nothing.
+The synchronous TS helper blocks its caller's event loop, so same-thread
+timers cannot deliver an abort while it runs.
+To retain its synchronous return type without blocking cleanup timers,
+`runSubprocess` uses a short-lived JS supervisor running the same async engine.
+The supervisor exits with that invocation; it is not a daemon. It requires
+an on-disk module and a Node/Bun `process.execPath` capable of loading it;
+compiled single-file Bun executables are not a supported hosting mode.
+
+Ownership is the newly created process group, not a global PID/name search.
+The direct child is reaped; descendants are stopped and reaped by their parents
+or the OS reaper. Deliberately detached descendants (`setsid`/new groups),
+remote/container processes, credential-changing children, and unrelated
+sessions are outside that boundary. If they retain inherited pipes, Harness
+closes its read endpoints at the cleanup deadline rather than waiting for EOF.
+It neither adopts arbitrary descendants nor starts a persistent supervisor.
+OS process creation and uninterruptible kernel waits cannot be bounded by a
+user-space library; deadlines apply once the OS returns control.
+
+Lifecycle support targets macOS and Linux; other platforms fail explicitly
+before process creation rather than pretending leader-only termination is
+tree cleanup. Deterministic conformance tests use synthetic processes, not
+authenticated provider calls. Local qualification: macOS 26.6 arm64,
+Python 3.11.15, Bun 1.3.14 and the built package under Node 26.6.0.
+The `subprocess lifecycle` workflow runs full suites and a packaged Node
+smoke on macOS and Linux with Python 3.10 and Node 22; its checks are the
+cross-platform acceptance gate. No Windows lifecycle support is claimed.
+
+Migration: existing ordinary exit codes, timeout sentinel, output and metric
+fields remain. Lifecycle fields are additive and may be omitted on manually
+constructed outcomes. Python OS launch errors now return a result; TS signal
+exits now expose the negative signal number rather than an ambiguous `-1`.
+TS `run()` remains Promise-returning but no longer blocks the event loop.
+No permission default, upstream model/config selection, or session state is
+changed by this lifecycle repair.
+
+References: [Python subprocess](https://docs.python.org/3/library/subprocess.html)
+documents `start_new_session`, signal return codes and process-creation limits;
+[Node child_process](https://nodejs.org/api/child_process.html) distinguishes
+`exit` from pipe `close` and documents detached POSIX groups.
 
 The consumer owns workdir/worktree isolation, host drivers, auth selection and
 approval decisions. Harness owns only the lease and artifacts described below.
@@ -655,7 +713,11 @@ install an SDK implicitly.
 **Compatibility change:** `buildCommand` is now a plan, not a “prepare workdir”
 operation. External host drivers must call `prepareCommand`, retain its handle
 until their process and owned children have stopped, then call `cleanupCommand`.
-`run` and `runAsync` do this automatically, including execution/parsing failures.
+`run` and `runAsync` do this automatically after confirmed process teardown,
+including launch failure, successful cancellation and parsing failure. If the
+subprocess engine raises without confirming teardown, they propagate that error
+and retain the projection, original backup and lease for manual recovery. Stop
+any surviving owned process group before restoring those artifacts.
 Python exposes `prepare_command` and `cleanup_command` with equivalent semantics.
 No automatic cleanup occurs merely because a command was built.
 

@@ -83,8 +83,8 @@ assertions rather than the same generic loop. See the
 
 `tests/adapters/*-sessionlog.test.ts` covers selected session-log parsers:
 crush and kilo create temporary sqlite databases; continue-cli, factory-droid,
-openclaude and qwen use JSON/JSONL files. There is no opencode test in that
-directory. Python's `tests/test_*_db.py` covers opencode, kilo and crush schemas.
+openclaude and qwen use JSON/JSONL files. `opencode-parse.test.ts` covers
+per-run database selection. Python's `tests/test_*_db.py` covers all three schemas.
 
 ## Things to keep in lockstep
 

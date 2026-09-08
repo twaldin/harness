@@ -8,6 +8,8 @@
   `cleanup_command` / `cleanupCommand` after their process tree stops.
   Same-workdir overlap and unsafe symlinks reject. Cleanup preserves changed
   user content and its original backup rather than overwriting either.
+  Cancellation restores instructions only after subprocess teardown; a teardown
+  failure retains instructions, backup and lease until manual recovery.
 - Added explicit executable and supported config-home/config-file selection in
   both languages. Caller-selected authentication and environment are retained;
   unsupported overrides reject without editing configuration. Continue no longer

@@ -113,7 +113,7 @@ the recorded non-null parsed-payload expectations. Python's
 `tests/test_opencode_db.py`, `tests/test_kilo_db.py` and `tests/test_crush_db.py`
 exercise database schemas. TypeScript's session-log tests create temporary
 databases for crush and kilo, and JSON/JSONL files for selected other adapters;
-there is no opencode test in `ts/tests/adapters/`.
+`ts/tests/adapters/opencode-parse.test.ts` covers per-run database selection.
 
 ## Public API changes
 
@@ -148,7 +148,8 @@ Keep the library narrow while qualifying optional agent SDK/protocol backends:
 - Prompt mutation, GEPA, training loops — `hone`'s job.
 - Vertex / OAuth proxy shims — context-specific, lives in the consumer.
 - Streaming subprocess output callbacks — not implemented. Python `run()` and
-  TypeScript `run()` block; `run_async()` / `runAsync()` provide async execution.
+  the low-level synchronous subprocess helpers block. Python `run_async()` and
+  TypeScript `run()` / `runAsync()` provide cancellable async execution.
 - Optional SDK/RPC backends are authorized scope but not implemented. They must
   satisfy SPEC ownership, permission, capability and compatibility requirements
   without importing SDKs for CLI callers or becoming a fleet/application layer.

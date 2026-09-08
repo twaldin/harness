@@ -49,6 +49,26 @@
   },
   "cases": [
     {
+      "name": "whitespace-model-omits-empty-flag",
+      "spec": {
+        "model": "   "
+      },
+      "expectedCommand": {
+        "cmd": "hermes",
+        "args": [
+          "chat",
+          "--cli",
+          "--quiet",
+          "--query=summarize the open TODO comments in this repository"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "   "
+      }
+    },
+    {
       "name": "nonzero-exit-keeps-session-id",
       "sampleOutput": {
         "exitCode": 1,

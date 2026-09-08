@@ -26,7 +26,7 @@ class HermesAdapter(Adapter):
             raise HarnessError("hermes requires a non-empty prompt for headless chat", code="invalid-options")
         # Top-level --oneshot implicitly bypasses approvals. Quiet chat does not.
         args = ["chat", "--cli", "--quiet"]
-        if resolved.model is not None and (spec.model or resolved.model):
+        if resolved.model:
             args.extend(["--model", resolved.model])
         args.extend(resolved.permission_args)
         # Equals form keeps leading '-' prompts from being parsed as flags.

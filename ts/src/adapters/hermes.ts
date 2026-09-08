@@ -17,7 +17,7 @@ const hermesAdapter: Adapter = {
     }
     // Top-level --oneshot implicitly bypasses approvals. Quiet chat does not.
     const args = ['chat', '--cli', '--quiet']
-    if (spec.model || resolved.model) args.push('--model', resolved.model)
+    if (resolved.model) args.push('--model', resolved.model)
     args.push(...resolved.permissionArgs, `--query=${spec.prompt}`)
     return finalizeCommand(this, spec, resolved, { cmd: 'hermes', args, model: spec.model || null })
   },

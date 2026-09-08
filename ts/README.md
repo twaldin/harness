@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, or cursor as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, or mistral-vibe as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -179,7 +179,7 @@ interface RunSpec {
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
   permissionPolicy?: 'upstream' | 'bypass' // default upstream
-  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
+  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | VibeOptions
   executable?: string       // bare name or absolute path
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file
@@ -226,6 +226,12 @@ Copilot also reports null token/USD totals, retaining its native JSONL events in
 `raw`. It uses `@github/copilot`, not `gh copilot`, and exposes explicit
 `{kind: 'copilot', allowTools: ['shell(git status)'], denyTools: ['write']}`.
 See [setup and coverage](../ADAPTER-MATRIX.md#copilot).
+
+Mistral Vibe uses `vibe --output streaming`, preserving completed history entries
+with null token/cost totals. `nativeOptions: {kind: 'mistral-vibe', agent: 'ask',
+trust: true}` selects the native agent and explicitly trusts workspace config for
+this run. Nonempty instructions require `trust: true`. Model aliases use child
+`VIBE_ACTIVE_MODEL`, not a CLI model flag. See [setup and limits](../ADAPTER-MATRIX.md#mistral-vibe).
 
 Cursor uses the standalone `agent` executable with print/stream-JSON output.
 Only explicit bypass adds `--force`; model/auth/config remain caller-selected.

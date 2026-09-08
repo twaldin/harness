@@ -11,9 +11,9 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The nineteen adapters below are registered in **both** implementations and have
+The twenty adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
-`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
+`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
@@ -50,6 +50,7 @@ versions below are dated observations, not a supported version range.
 | codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | Help-checked; provider smoke **failed**: configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. |
 | continue-cli | [`@continuedev/cli`; headless mode](https://docs.continue.dev/cli/headless-mode) (1.5.47) | not on PATH | Source-checked after command/rule/model repair. Headless JSON is model output, not usage telemetry. Default ask-tier tools are excluded; explicit bypass adds `--auto`. |
 | copilot | [`@github/copilot`; programmatic reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference) | 1.0.83, isolated npm install | Help-checked; bounded no-tool provider success and cancellation on macOS arm64. JSONL records retained; token/USD totals unavailable. See [coverage limits](#copilot). |
+| mistral-vibe | [`mistral-vibe`; official source](https://github.com/mistralai/mistral-vibe/tree/v2.25.0) | 2.25.0, isolated Python 3.12 install | Version/help and programmatic source checked; see [native smoke and provider limits](#mistral-vibe). |
 | crush | [`charmbracelet/tap/crush`; source](https://github.com/charmbracelet/crush) (v0.92.0) | v0.62.0 | Help-checked; upstream-shaped schema reproduction repairs nonexistent `sessions.model`. No provider/actual-run DB qualification. `--yolo` is not a `run` flag. |
 | factory-droid | [`droid`; official headless guide](https://docs.factory.ai/droid-exec/overview) (0.213.0) | 0.132.1, off PATH | Help-checked with explicit executable. Replaces nonexistent `@factory-ai/droid`. Managed/custom model IDs now remain caller-selected. Default is read-only; documented JSON has no usage/cost. |
 | gemini | [`@google/gemini-cli`; headless reference](https://geminicli.com/docs/cli/headless/) (0.58.0) | 0.37.0 | Help-checked; stats schema source-checked. Current docs deprecate `-y` in favor of `--approval-mode yolo`; installed `-y` still exists. Legacy session layout unqualified. |
@@ -71,7 +72,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `cline`, `copilot`, `cursor`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
 upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
@@ -97,11 +98,12 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | cline | unwired | unwired | foreground NDJSON only; no session resume or latest-session discovery |
 | goose | unwired | unwired | `complete` usage comes from stdout; no latest-session discovery or session ID in stream events |
 | copilot | unwired | unwired | native JSONL events only; no latest-session discovery |
+| mistral-vibe | unwired | unwired | completed history entries on stdout; no latest-session discovery |
 | cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
 
 ## Backend and permission capabilities
 
-All nineteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All twenty support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -135,6 +137,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto`; conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
+| mistral-vibe | `--auto-approve` |
 | cursor | `--force`; native explicit denies and team policy still apply |
 | crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
@@ -186,6 +189,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | cline        | when reported     | when reported                 | last top-level `run_result.usage`; partial streams retain raw events with null totals |
 | goose        | optional upstream cost (may be estimated) | optional cumulative totals | last JSONL `complete` event; partial stream without completion has null metrics |
 | copilot      | **null**          | **null**                      | JSONL native events retained; premium requests/AI credits are not USD or token totals |
+| mistral-vibe | **null** | **null** | JSONL completed history entries retained; no terminal usage totals |
 | cursor       | **null**          | optional uncached input / output | last JSONL `result.usage`; absent/invalid counts remain null |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
@@ -208,6 +212,7 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
   - **cursor** preserves native model IDs after trimming, including parameterized bracket overrides; omission uses native selection and reports null.
   - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
   - **goose** preserves explicit model IDs without provider inference; omitted/empty model delegates to upstream config and reports null.
+  - **mistral-vibe** preserves explicit model aliases after trimming via child `VIBE_ACTIVE_MODEL`; omitted model uses upstream configuration and reports null.
   - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
   - `crush`: `--model == --small-model`
@@ -857,6 +862,43 @@ group, **not** escaped extensions, remote tools or container runtimes. Their
 lifecycle remains caller/upstream-owned. Harness does not silently disable them
 or launch a supervisor. Authenticated providers, Linux upstream process cleanup,
 ACP providers and external extensions remain unqualified.
+
+## mistral-vibe
+
+- **Distribution / executable:** official [Mistral Vibe](https://github.com/mistralai/mistral-vibe/tree/v2.25.0), PyPI [`mistral-vibe`](https://pypi.org/project/mistral-vibe/2.25.0/), binary `vibe`. Python 3.12+; upstream targets UNIX. Install with `uv tool install mistral-vibe`, update with `uv tool upgrade mistral-vibe`, probe with `vibe --version`. Install metadata is caller-driven; Harness never installs or updates globally.
+- **Command:** `vibe --output streaming [--auto-approve] [--agent=NAME] [--trust] --prompt=PROMPT`. Prompt is nonempty and literal, including leading dashes/newlines. Uses the caller's workdir as cwd; never passes `--worktree`, creates a checkout, or deletes caller-owned worktrees.
+- **Model / configuration:** no Harness default or provider rewriting. Explicit trimmed `model` selects the upstream config alias through child `VIBE_ACTIVE_MODEL` (there is no native `--model` flag); a conflicting explicit `env.VIBE_ACTIVE_MODEL` rejects. Omission leaves upstream selection unchanged and reports null. `configHome` maps to `VIBE_HOME`; `configFile` is unsupported. Vibe reads its `config.toml`, `.env`, agents and state there, plus trusted project configuration. This is not a sandbox or a guarantee of isolated discovery.
+- **Trust / instructions:** `VibeOptions(trust=True)` / `{kind: 'mistral-vibe', trust: true}` emits `--trust`, trusting the workspace for this invocation without persisting the trust decision. This enables project configuration, hooks, agents and `AGENTS.md`, not just the projected instructions. Nonempty `instructions` requires this explicit opt-in; otherwise Harness rejects before writes/spawn. Shared instruction preparation restores the owned `AGENTS.md` after teardown. No implicit trust is granted for bypass.
+- **Permissions / agents:** `VibeOptions(agent="ask")` / `{kind: 'mistral-vibe', agent: 'ask'}` selects an exact built-in or custom profile. Omission uses upstream `default_agent` (stock `accept-edits`). Programmatic mode denies callbacks requiring user approval and disables native interactive question tools; auto-approved tools can still execute. `bypass` adds `--auto-approve`; without an explicit agent upstream selects its auto-approve profile, otherwise it applies auto-approval to the chosen profile. Trust and auto-approval are independent, explicit choices.
+- **Output / metrics:** streaming emits completed history entries, not token deltas. `raw` retains every complete JSON object in order: messages, reasoning, tool effects, answered callbacks, notices and unknown future objects. Malformed/nonobject lines and incomplete tails remain in stdout but are excluded from `raw`; no objects means null. History entries do not contain aggregate token/USD telemetry, so all metrics remain null. Denied tools or native notices can coexist with exit 0; inspect `raw` when that distinction matters. Native records never replace the actual process exit or Harness termination cause.
+- **Capabilities / exclusions:** shared one-shot CLI execution, raw stdout/stderr chunk callbacks, finite stdin, bounded capture, deadlines and cancellation. No RPC/SDK/ACP, controlled/resumable sessions, pane or session-log discovery. The CLI's `--max-turns`, `--max-price`, `--max-tokens`, tool filters, additional roots, resume, teleport and worktree options have no typed Harness mapping; unknown native fields reject. Use caller-selected native configuration where upstream supports it. Harness's timeout is a wall-clock limit, not a token/price budget.
+- **Authentication:** use caller-selected local `MISTRAL_API_KEY` / upstream setup, or configure a native compatible provider. Harness neither reads credentials itself nor changes accounts/configuration. Missing required credentials in programmatic mode fail without onboarding.
+
+### Qualification — 2026-09-08
+
+Official 2.25.0 distribution, installed `vibe --version` / `--help`, and
+[programmatic output](https://github.com/mistralai/mistral-vibe/blob/v2.25.0/vibe/cli/programmatic.py)
+were checked on macOS arm64 with Python 3.12.13. A disposable install, home,
+Vibe config and workdir exercised the real CLI against a loopback synthetic
+OpenAI-compatible provider: completed response, projected instructions reaching
+the request, an `ask` profile denying a shell write, explicit bypass allowing that
+write, and missing-auth exit 1. Denial returned exit 0 with the answered callback.
+These are native CLI checks with a synthetic provider, **not credentialed Mistral
+provider success**.
+
+Python `run` / `run_async` and the built package under Node `run` / `runAsync`
+also completed against that native CLI. Callback-triggered cancellation retained
+the completed user entry, returned `cancelled`, restored the original instruction
+file and left no matching Vibe process. These no-tool cancellation checks do not
+qualify arbitrary tool descendants.
+
+The qualified CLI's [LocalHarness](https://github.com/mistralai/mistral-vibe/blob/v2.25.0/vibe/app_server/local.py)
+uses an in-process app server and memory transport, not a detached shared daemon.
+Harness controls only its owned process tree; arbitrary configured MCP servers,
+hooks, remote/container tools and deliberately detached commands remain outside
+the teardown guarantee. Native provider authentication, billing/model availability,
+Linux upstream behavior, managed-shell rollout and arbitrary extensions are not
+qualified by the synthetic fixture suite.
 
 ---
 

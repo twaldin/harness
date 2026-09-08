@@ -51,8 +51,20 @@ export interface CopilotOptions {
   denyTools?: readonly string[]
 }
 
+export interface VibeOptions {
+  kind: 'mistral-vibe'
+  /** Emitted as `--agent=<value>`; omitted leaves the upstream config's active agent in charge. */
+  agent?: string
+  /**
+   * Emitted as the bare `--trust` flag when true. Vibe only reads a workspace
+   * `AGENTS.md` once the workspace is trusted, so a non-empty `RunSpec.instructions`
+   * requires `trust: true`; the harness never trusts implicitly.
+   */
+  trust?: boolean
+}
+
 /** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
-export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
+export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | VibeOptions
 
 export type OutputStream = 'stdout' | 'stderr'
 
@@ -398,8 +410,12 @@ type NativeField =
   | { readonly shape: 'rules'; readonly flag: string }
   /** Boolean emitted as `flag true|false`. */
   | { readonly shape: 'boolean'; readonly flag: string }
+  /** Boolean emitted as the bare `flag` when true and omitted when false. */
+  | { readonly shape: 'switch'; readonly flag: string }
   /** Non-empty NUL-free string emitted as `flag value`. */
   | { readonly shape: 'string'; readonly flag: string }
+  /** Non-blank NUL-free identifier emitted as `flag=value` (equals form survives names starting with '-'). */
+  | { readonly shape: 'name'; readonly flag: string }
 /** Per native-options kind: field name → schema. Field order is argv order. */
 const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Record<string, NativeField>>>> = {
   'claude-code': {
@@ -415,6 +431,10 @@ const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Reco
   copilot: {
     allowTools: { shape: 'rules', flag: '--allow-tool' },
     denyTools: { shape: 'rules', flag: '--deny-tool' },
+  },
+  'mistral-vibe': {
+    agent: { shape: 'name', flag: '--agent' },
+    trust: { shape: 'switch', flag: '--trust' },
   },
 }
 const NATIVE_OPTION_KINDS = Object.keys(NATIVE_OPTION_FIELDS).map((kind) => JSON.stringify(kind)).join(', ')
@@ -480,16 +500,22 @@ function resolveNativeOptions(adapter: Adapter, spec: RunSpec): ResolvedNativeOp
         )
       }
       args.push(field.flag, value)
-    } else if (field.shape === 'boolean') {
+    } else if (field.shape === 'boolean' || field.shape === 'switch') {
       if (typeof value !== 'boolean') {
         throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a boolean`, 'invalid-options')
       }
-      args.push(field.flag, value ? 'true' : 'false')
+      if (field.shape === 'boolean') args.push(field.flag, value ? 'true' : 'false')
+      else if (value) args.push(field.flag)
     } else if (field.shape === 'string') {
       if (typeof value !== 'string' || value === '' || value.includes('\0')) {
         throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a non-empty string without NUL bytes`, 'invalid-options')
       }
       args.push(field.flag, value)
+    } else if (field.shape === 'name') {
+      if (typeof value !== 'string' || value.trim() === '' || value.includes('\0')) {
+        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a non-blank string without NUL bytes`, 'invalid-options')
+      }
+      args.push(`${field.flag}=${value}`)
     } else {
       if (!isToolRuleList(value)) {
         throw new HarnessError(

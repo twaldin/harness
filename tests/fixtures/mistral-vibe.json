@@ -1,0 +1,494 @@
+{
+  "spec": {
+    "harness": "mistral-vibe",
+    "prompt": "Summarize the synthetic repository.",
+    "instructions": "Use only the synthetic repository.\n",
+    "nativeOptions": {
+      "kind": "mistral-vibe",
+      "trust": true
+    },
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "vibe",
+    "args": [
+      "--output",
+      "streaming",
+      "--trust",
+      "--prompt=Summarize the synthetic repository."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": "mistral-vibe",
+    "configHomeEnv": "VIBE_HOME",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.1,
+    "timedOut": false,
+    "stdout": "{\"id\": \"synthetic-entry\", \"sessionId\": \"synthetic-session\", \"turnId\": \"synthetic-turn\", \"createdAt\": 1, \"updatedAt\": 2, \"generationStatus\": \"completed\", \"relatedEntryId\": null, \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"One source file.\"}], \"source\": \"harness\", \"userDisplayContent\": null}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": [
+      {
+        "id": "synthetic-entry",
+        "sessionId": "synthetic-session",
+        "turnId": "synthetic-turn",
+        "createdAt": 1,
+        "updatedAt": 2,
+        "generationStatus": "completed",
+        "relatedEntryId": null,
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "One source file."
+          }
+        ],
+        "source": "harness",
+        "userDisplayContent": null
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "native-auth-failure",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": "Error: Missing API key for synthetic provider.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "partial-stream-retains-completed-history",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"id\": \"synthetic-entry\", \"sessionId\": \"synthetic-session\", \"turnId\": \"synthetic-turn\", \"createdAt\": 1, \"updatedAt\": 2, \"generationStatus\": \"completed\", \"relatedEntryId\": null, \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"One source file.\"}], \"source\": \"harness\", \"userDisplayContent\": null}\n{\"id\":",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "id": "synthetic-entry",
+            "sessionId": "synthetic-session",
+            "turnId": "synthetic-turn",
+            "createdAt": 1,
+            "updatedAt": 2,
+            "generationStatus": "completed",
+            "relatedEntryId": null,
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "One source file."
+              }
+            ],
+            "source": "harness",
+            "userDisplayContent": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "noise-and-nonobjects-ignored",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "null\n[]\n3\n{\"bad\":NaN}\nnot json\n{\"id\": \"synthetic-entry\", \"sessionId\": \"synthetic-session\", \"turnId\": \"synthetic-turn\", \"createdAt\": 1, \"updatedAt\": 2, \"generationStatus\": \"completed\", \"relatedEntryId\": null, \"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"One source file.\"}], \"source\": \"harness\", \"userDisplayContent\": null}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "id": "synthetic-entry",
+            "sessionId": "synthetic-session",
+            "turnId": "synthetic-turn",
+            "createdAt": 1,
+            "updatedAt": 2,
+            "generationStatus": "completed",
+            "relatedEntryId": null,
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "One source file."
+              }
+            ],
+            "source": "harness",
+            "userDisplayContent": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-object-preserved-without-invented-telemetry",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"future\",\"tokens\":50,\"cost\":1}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "future",
+            "tokens": 50,
+            "cost": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-output-has-no-history",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "upstream-does-not-trust-workspace",
+      "spec": {
+        "instructions": null,
+        "nativeOptions": null
+      },
+      "expectedCommand": {
+        "cmd": "vibe",
+        "args": [
+          "--output",
+          "streaming",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "literal-leading-dash-prompt",
+      "spec": {
+        "prompt": "--worktree=unwanted\nsecond line"
+      },
+      "expectedCommand": {
+        "cmd": "vibe",
+        "args": [
+          "--output",
+          "streaming",
+          "--trust",
+          "--prompt=--worktree=unwanted\nsecond line"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-model-alias",
+      "spec": {
+        "model": " vendor/custom "
+      },
+      "expectedCommand": {
+        "cmd": "vibe",
+        "args": [
+          "--output",
+          "streaming",
+          "--trust",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "VIBE_ACTIVE_MODEL": "vendor/custom"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": " vendor/custom "
+      }
+    },
+    {
+      "name": "explicit-agent-and-bypass",
+      "spec": {
+        "permissionPolicy": "bypass",
+        "nativeOptions": {
+          "kind": "mistral-vibe",
+          "agent": "ask",
+          "trust": true
+        }
+      },
+      "expectedCommand": {
+        "cmd": "vibe",
+        "args": [
+          "--output",
+          "streaming",
+          "--auto-approve",
+          "--agent=ask",
+          "--trust",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "config-and-executable-override",
+      "spec": {
+        "configHome": "<root>/vibe-home",
+        "executable": "<root>/vibe-custom"
+      },
+      "expectedCommand": {
+        "cmd": "<root>/vibe-custom",
+        "args": [
+          "--output",
+          "streaming",
+          "--trust",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "VIBE_HOME": "<root>/vibe-home"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "environment-model-remains-caller-selected",
+      "spec": {
+        "env": {
+          "VIBE_ACTIVE_MODEL": "local"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "vibe",
+        "args": [
+          "--output",
+          "streaming",
+          "--trust",
+          "--prompt=Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "VIBE_ACTIVE_MODEL": "local"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "empty-prompt-rejected",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "instructions-require-explicit-trust",
+      "spec": {
+        "nativeOptions": null
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "false-trust-does-not-load-instructions",
+      "spec": {
+        "nativeOptions": {
+          "kind": "mistral-vibe",
+          "trust": false
+        }
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "conflicting-model-selection",
+      "spec": {
+        "model": "local",
+        "env": {
+          "VIBE_ACTIVE_MODEL": "other"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "config-home-conflict",
+      "spec": {
+        "configHome": "<root>/vibe-home",
+        "env": {
+          "VIBE_HOME": "<root>/other"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "config-file-unsupported",
+      "spec": {
+        "configFile": "<root>/config.toml"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "native-worktree-unsupported",
+      "spec": {
+        "nativeOptions": {
+          "kind": "mistral-vibe",
+          "trust": true,
+          "worktree": "unwanted"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "invalid-agent",
+      "spec": {
+        "nativeOptions": {
+          "kind": "mistral-vibe",
+          "trust": true,
+          "agent": "  "
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "invalid-trust",
+      "spec": {
+        "nativeOptions": {
+          "kind": "mistral-vibe",
+          "trust": "true"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "denied-callback-preserved-on-zero-exit",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"id\": \"synthetic-callback\", \"sessionId\": \"synthetic-session\", \"turnId\": \"synthetic-turn\", \"createdAt\": 1, \"updatedAt\": 2, \"generationStatus\": \"completed\", \"relatedEntryId\": \"synthetic-call\", \"type\": \"callback\", \"callbackId\": \"synthetic-callback-id\", \"title\": \"Allow bash?\", \"detail\": {\"kind\": \"approval\", \"effect\": {\"toolName\": \"bash\", \"display\": {\"summary\": \"bash: printf owned > smoke-owned.txt\", \"content\": null, \"suffix\": \"\", \"verb\": \"Running\", \"message\": \"printf owned > smoke-owned.txt\", \"settledVerb\": \"Ran\", \"settledMessage\": \"printf owned > smoke-owned.txt\", \"statusText\": \"Running command\"}, \"kind\": \"shell\", \"input\": {\"command\": \"printf owned > smoke-owned.txt\"}}, \"requiredPermissions\": [{\"scope\": \"command_pattern\", \"invocationPattern\": \"printf owned <redirect>\", \"sessionPattern\": \"printf *\", \"label\": \"printf *\"}], \"choices\": [\"approve\", \"approve_for_session\", \"approve_permanently\", \"deny\", \"cancel_turn\"], \"relatedEntryId\": \"synthetic-call\"}, \"state\": {\"status\": \"answered\", \"output\": {\"type\": \"approval\", \"decision\": {\"type\": \"deny\"}, \"feedback\": null}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "id": "synthetic-callback",
+            "sessionId": "synthetic-session",
+            "turnId": "synthetic-turn",
+            "createdAt": 1,
+            "updatedAt": 2,
+            "generationStatus": "completed",
+            "relatedEntryId": "synthetic-call",
+            "type": "callback",
+            "callbackId": "synthetic-callback-id",
+            "title": "Allow bash?",
+            "detail": {
+              "kind": "approval",
+              "effect": {
+                "toolName": "bash",
+                "display": {
+                  "summary": "bash: printf owned > smoke-owned.txt",
+                  "content": null,
+                  "suffix": "",
+                  "verb": "Running",
+                  "message": "printf owned > smoke-owned.txt",
+                  "settledVerb": "Ran",
+                  "settledMessage": "printf owned > smoke-owned.txt",
+                  "statusText": "Running command"
+                },
+                "kind": "shell",
+                "input": {
+                  "command": "printf owned > smoke-owned.txt"
+                }
+              },
+              "requiredPermissions": [
+                {
+                  "scope": "command_pattern",
+                  "invocationPattern": "printf owned <redirect>",
+                  "sessionPattern": "printf *",
+                  "label": "printf *"
+                }
+              ],
+              "choices": [
+                "approve",
+                "approve_for_session",
+                "approve_permanently",
+                "deny",
+                "cancel_turn"
+              ],
+              "relatedEntryId": "synthetic-call"
+            },
+            "state": {
+              "status": "answered",
+              "output": {
+                "type": "approval",
+                "decision": {
+                  "type": "deny"
+                },
+                "feedback": null
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

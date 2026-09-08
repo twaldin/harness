@@ -16,6 +16,7 @@ from harness import (
     HarnessError,
     RunSpec,
     SubprocOutcome,
+    VibeOptions,
     build_command,
     get_adapter,
     get_capabilities,
@@ -42,6 +43,7 @@ BYPASS_ARGS = {
     "omp": ("--auto-approve",),
     "continue-cli": ("--auto",),
     "cline": ("--auto-approve", "true"),
+    "mistral-vibe": ("--auto-approve",),
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
 ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
@@ -50,6 +52,9 @@ NO_BYPASS = ["crush", "opencode", "pi", "swe-agent"]
 
 def _spec(harness: str, workdir: Path, **kw) -> RunSpec:
     env = {"SWE_WRAPPER": str(_wrapper(workdir))} if harness == "swe-agent" else {}
+    if harness == "mistral-vibe":
+        # vibe reads a projected AGENTS.md only from a trusted workspace.
+        kw.setdefault("native_options", VibeOptions(trust=True))
     return RunSpec(harness=harness, prompt="do it", workdir=workdir, instructions="be careful", env=env, **kw)
 
 
@@ -253,6 +258,7 @@ def test_native_kind_is_fixed():
     assert ClaudeCodeOptions().kind == "claude-code"
     assert CodexOptions().kind == "codex"
     assert ClineOptions().kind == "cline"
+    assert VibeOptions().kind == "mistral-vibe"
     with pytest.raises(TypeError):
         ClaudeCodeOptions(kind="codex")  # type: ignore[call-arg]
 
@@ -271,6 +277,7 @@ CONFIG_MAPPINGS = {
     "continue-cli": (None, "--config"),
     "omp": ("PI_CODING_AGENT_DIR", "--config"),
     "cline": ("CLINE_DIR", None),
+    "mistral-vibe": ("VIBE_HOME", None),
 }
 
 
@@ -278,7 +285,7 @@ CONFIG_MAPPINGS = {
 def test_capabilities_reflect_shipped_support(name: str):
     caps = get_capabilities(name)
     expected_policies = ("upstream", "bypass") if name in BYPASS_ARGS or name in BYPASS_ENVS else ("upstream",)
-    expected_native = name if name in ("claude-code", "codex", "cline", "copilot") else None
+    expected_native = name if name in ("claude-code", "codex", "cline", "copilot", "mistral-vibe") else None
     home_env, file_flag = CONFIG_MAPPINGS.get(name, (None, None))
     assert caps == Capabilities(
         backend="cli",

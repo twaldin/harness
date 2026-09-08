@@ -2,7 +2,6 @@
   "spec": {
     "harness": "claude-code",
     "prompt": "fix the failing test in test_main.py",
-    "workdir": "/tmp/harness-fixture-cc",
     "model": "sonnet",
     "instructions": "You are a careful engineer.\n",
     "timeoutSeconds": 300
@@ -19,7 +18,24 @@
       "--append-system-prompt",
       "You are a careful engineer.\n"
     ],
-    "instructionsFile": "/tmp/harness-fixture-cc/CLAUDE.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/CLAUDE.md",
+    "directories": [],
+    "model": "sonnet"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": "claude-code",
+    "configHomeEnv": "CLAUDE_CONFIG_DIR",
+    "configFileFlag": "--settings",
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -31,6 +47,60 @@
   "expectedParsed": {
     "costUsd": 0.0342,
     "tokensIn": 1823,
-    "tokensOut": 412
-  }
+    "tokensOut": 412,
+    "raw": {
+      "type": "result",
+      "result": "fixed",
+      "usage": {
+        "input_tokens": 1823,
+        "output_tokens": 412
+      },
+      "total_cost_usd": 0.0342
+    }
+  },
+  "cases": [
+    {
+      "name": "fenced-result-preserved",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 3.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"result\":\"```python\\nprint(42)\\n```\",\"usage\":{\"input_tokens\":10,\"output_tokens\":4},\"total_cost_usd\":0.001}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.001,
+        "tokensIn": 10,
+        "tokensOut": 4,
+        "raw": {
+          "type": "result",
+          "result": "```python\nprint(42)\n```",
+          "usage": {
+            "input_tokens": 10,
+            "output_tokens": 4
+          },
+          "total_cost_usd": 0.001
+        }
+      }
+    },
+    {
+      "name": "result-without-usage",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"result\":\"done\"}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": {
+          "type": "result",
+          "result": "done"
+        }
+      }
+    }
+  ]
 }

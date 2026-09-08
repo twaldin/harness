@@ -2,7 +2,6 @@
   "spec": {
     "harness": "crush",
     "prompt": "fix lint warnings",
-    "workdir": "/tmp/harness-fixture-crush",
     "model": "gpt-5.4",
     "instructions": "No refactors.\n",
     "timeoutSeconds": 900
@@ -12,14 +11,32 @@
     "args": [
       "run",
       "--data-dir",
-      "/tmp/harness-fixture-crush/.harness/crush-data",
+      "<workdir>/.harness/crush-data",
       "--model",
       "gpt-5.4",
       "--small-model",
       "gpt-5.4",
       "fix lint warnings"
     ],
-    "instructionsFile": "/tmp/harness-fixture-crush/AGENTS.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [
+      "<workdir>/.harness/crush-data"
+    ],
+    "model": "gpt-5.4"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -29,9 +46,27 @@
     "stderr": ""
   },
   "expectedParsed": {
+    "costUsd": 0.0114,
+    "tokensIn": 742,
+    "tokensOut": 198,
+    "raw": null
+  },
+  "artifacts": [
+    {
+      "kind": "sqlite",
+      "path": "<workdir>/.harness/crush-data/crush.db",
+      "sql": [
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, cost REAL, model TEXT, updated_at INTEGER)",
+        "INSERT INTO sessions VALUES ('stale-root', NULL, 99999, 99999, 99.0, 'gpt-5.4', 10)",
+        "INSERT INTO sessions VALUES ('child', 'stale-root', 88888, 88888, 88.0, 'gpt-5.4', 300)",
+        "INSERT INTO sessions VALUES ('latest-root', NULL, 742, 198, 0.0114, 'gpt-5.4', 200)"
+      ]
+    }
+  ],
+  "expectedParsedWithoutArtifacts": {
     "costUsd": null,
     "tokensIn": null,
     "tokensOut": null,
-    "note": "crush token/cost values are read from crush.db after exit. With no DB fixture in this test, parseOutput returns null metrics."
+    "raw": null
   }
 }

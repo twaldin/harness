@@ -2,31 +2,49 @@
   "spec": {
     "harness": "swe-agent",
     "prompt": "fix the off-by-one in pagination",
-    "workdir": "/tmp/harness-fixture-swe",
     "model": "gpt-5.4",
     "instructions": "Be surgical.\n",
     "timeoutSeconds": 1800,
     "env": {
-      "SWE_WRAPPER": "/tmp/harness-fixture-swe/fake-wrapper.py"
+      "SWE_WRAPPER": "<root>/fake-wrapper.py"
     }
   },
   "expectedCommand": {
     "cmd": "python3",
     "args": [
-      "/tmp/harness-fixture-swe/fake-wrapper.py",
+      "<root>/fake-wrapper.py",
       "--model",
       "openai/gpt-5.4",
       "--task",
       "Be surgical.\n\n---\n\nfix the off-by-one in pagination",
       "--cwd",
-      "/tmp/harness-fixture-swe",
+      "<workdir>",
       "--cost-limit",
       "10.0",
       "--output",
-      "/tmp/harness-fixture-swe/.harness/swe-traj.json"
+      "<workdir>/.harness/swe-traj.json"
     ],
+    "cwd": "<workdir>",
+    "env": {
+      "SWE_WRAPPER": "<root>/fake-wrapper.py"
+    },
     "instructionsFile": null,
-    "note": "swe-agent does NOT write an instructions file — it folds instructions into the --task arg. Fixture requires SWE_WRAPPER in env to exist on disk (create with `touch /tmp/harness-fixture-swe/fake-wrapper.py` before running)."
+    "directories": [
+      "<workdir>/.harness"
+    ],
+    "model": "gpt-5.4"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -35,20 +53,161 @@
     "stdout": "done",
     "stderr": ""
   },
-  "trajectoryFile": {
-    "path": "/tmp/harness-fixture-swe/.harness/swe-traj.json",
-    "content": {
-      "info": { "model_stats": { "instance_cost": 0.234 } },
-      "messages": [
-        { "extra": { "response": { "usage": { "prompt_tokens": 1500, "completion_tokens": 400 } } } },
-        { "extra": { "response": { "usage": { "input_tokens": 800, "output_tokens": 200 } } } }
-      ]
-    },
-    "note": "Test must write this file before calling parseOutput, since swe-agent reads the trajectory post-exit."
-  },
   "expectedParsed": {
     "costUsd": 0.234,
     "tokensIn": 2300,
-    "tokensOut": 600
-  }
+    "tokensOut": 600,
+    "raw": {
+      "info": {
+        "model_stats": {
+          "instance_cost": 0.234
+        }
+      },
+      "messages": [
+        {
+          "extra": {
+            "response": {
+              "usage": {
+                "prompt_tokens": 1500,
+                "completion_tokens": 400
+              }
+            }
+          }
+        },
+        {
+          "extra": {
+            "response": {
+              "usage": {
+                "input_tokens": 800,
+                "output_tokens": 200
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "artifacts": [
+    {
+      "kind": "json",
+      "path": "<workdir>/.harness/swe-traj.json",
+      "content": {
+        "info": {
+          "model_stats": {
+            "instance_cost": 0.234
+          }
+        },
+        "messages": [
+          {
+            "extra": {
+              "response": {
+                "usage": {
+                  "prompt_tokens": 1500,
+                  "completion_tokens": 400
+                }
+              }
+            }
+          },
+          {
+            "extra": {
+              "response": {
+                "usage": {
+                  "input_tokens": 800,
+                  "output_tokens": 200
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expectedParsedWithoutArtifacts": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": null
+  },
+  "cases": [
+    {
+      "name": "zero-usage-wins-over-alternate-keys",
+      "expectedParsed": {
+        "costUsd": 0.05,
+        "tokensIn": 800,
+        "tokensOut": 200,
+        "raw": {
+          "info": {
+            "model_stats": {
+              "instance_cost": 0.05
+            }
+          },
+          "messages": [
+            {
+              "extra": {
+                "response": {
+                  "usage": {
+                    "prompt_tokens": 0,
+                    "input_tokens": 700,
+                    "completion_tokens": 0,
+                    "output_tokens": 50
+                  }
+                }
+              }
+            },
+            {
+              "extra": {
+                "response": {
+                  "usage": {
+                    "prompt_tokens": null,
+                    "input_tokens": 800,
+                    "completion_tokens": null,
+                    "output_tokens": 200
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "artifacts": [
+        {
+          "kind": "json",
+          "path": "<workdir>/.harness/swe-traj.json",
+          "content": {
+            "info": {
+              "model_stats": {
+                "instance_cost": 0.05
+              }
+            },
+            "messages": [
+              {
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "prompt_tokens": 0,
+                      "input_tokens": 700,
+                      "completion_tokens": 0,
+                      "output_tokens": 50
+                    }
+                  }
+                }
+              },
+              {
+                "extra": {
+                  "response": {
+                    "usage": {
+                      "prompt_tokens": null,
+                      "input_tokens": 800,
+                      "completion_tokens": null,
+                      "output_tokens": 200
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
 }

@@ -174,8 +174,8 @@ def _parse_pi_events(stdout: str) -> tuple[int | None, int | None, float | None,
     """Walk the JSON event stream and sum assistant-message usage.
 
     Prefers the `agent_end` event's full `messages` array (authoritative final
-    state). Falls back to summing per-`turn_end` assistant messages if
-    `agent_end` is absent (e.g., truncated / timed-out output).
+    state). Falls back to summing per-`turn_end` assistant messages when no
+    `agent_end` carries a `messages` list (e.g., truncated / timed-out output).
     """
     events: list = []
     for line in stdout.splitlines():
@@ -194,8 +194,8 @@ def _parse_pi_events(stdout: str) -> tuple[int | None, int | None, float | None,
 
     # Preferred: agent_end.messages
     for ev in reversed(events):
-        if ev.get("type") == "agent_end":
-            tokens_in, tokens_out, cost = _sum_assistant_usage(ev.get("messages") or [])
+        if ev.get("type") == "agent_end" and isinstance(ev.get("messages"), list):
+            tokens_in, tokens_out, cost = _sum_assistant_usage(ev["messages"])
             return tokens_in, tokens_out, cost, events
 
     # Fallback: sum usage from each turn_end's assistant message

@@ -128,11 +128,15 @@ class OpenCodeAdapter(Adapter):
 
 
 def _opencode_db_path(extra_env: dict[str, str] | None = None) -> Path:
-    """Default opencode DB location; override via OPENCODE_DB env var."""
-    env_path = (extra_env or {}).get("OPENCODE_DB") or os.environ.get("OPENCODE_DB")
-    if env_path:
-        return Path(env_path).expanduser()
-    return Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+    """DB location as the CLI run sees it: caller env over inherited env, with
+    `OPENCODE_DB` explicit, then `XDG_DATA_HOME`, then the platform default."""
+    env = {**os.environ, **(extra_env or {})}
+    explicit = env.get("OPENCODE_DB")
+    if explicit:
+        return Path(explicit).expanduser()
+    data_home = env.get("XDG_DATA_HOME")
+    base = Path(data_home) if data_home else Path.home() / ".local" / "share"
+    return base / "opencode" / "opencode.db"
 
 
 def _read_opencode_session_totals(

@@ -531,43 +531,46 @@ registry calls honor executable, cwd, env and supported config overrides alike.
 
 ### JSON-fixture-driven verification
 
-Every adapter has a matching fixture at `tests/fixtures/<name>.json`:
+Every registered adapter MUST have a matching `tests/fixtures/<name>.json`.
+Both language loaders discover these files and require their names to equal
+the registry; adding an adapter or fixture alone fails conformance.
 
-```json
-{
-  "spec": {
-    "harness": "claude-code",
-    "prompt": "fix the bug in main.py",
-    "workdir": "/tmp/harness-fixture",
-    "model": "sonnet",
-    "instructions": "You are a careful engineer.\n",
-    "timeoutSeconds": 300
-  },
-  "expectedCommand": {
-    "cmd": "claude",
-    "args": ["-p", "fix the bug in main.py", "--model", "sonnet", "--output-format", "json", "--append-system-prompt", "You are a careful engineer.\n"],
-    "instructionsFile": "/tmp/harness-fixture/CLAUDE.md"
-  },
-  "sampleOutput": {
-    "stdout": "...",
-    "stderr": "",
-    "exitCode": 0,
-    "durationSeconds": 12.3,
-    "timedOut": false
-  },
-  "expectedParsed": {
-    "costUsd": 0.0342,
-    "tokensIn": 1823,
-    "tokensOut": 412
-  }
-}
-```
+| fixture field | shared assertion |
+|---|---|
+| `spec` | synthetic caller input; `<root>` and `<workdir>` resolve to fresh temporary directories |
+| `expectedCommand` | exact executable, argv, cwd, env additions, instruction path, planned directories and resolved model; building writes nothing |
+| `capabilities` | complete capability record; unsupported backend, permission, native-option and config requests reject before preparation |
+| `sampleOutput` / `expectedParsed` | identical parsed metrics and structured `raw` payload |
+| `artifacts` | optional synthetic SQLite statements or trajectory JSON, created before direct parsing and by the substitute CLI during execution |
+| `expectedParsedWithoutArtifacts` | explicit missing-artifact result, required when `artifacts` are declared |
+| `cases` | optional named edge cases overriding `spec` fields or replacing output, artifacts, expected command/parsed result; `expectedError` declares pre-launch rejection |
 
-Both suites load the shared fixtures, but the assertions are not identical. TypeScript compares command arguments and instruction paths exactly; Python uses adapter-specific checks and temporary-path substitutions. Database fixtures with an `expectedParsed.note` cover missing-DB/null results rather than asserting the recorded non-null metrics.
+See [the Claude fixture](tests/fixtures/claude-code.json) for stdout parsing and
+[the OpenCode fixture](tests/fixtures/opencode.json) for database-backed parsing.
+Database expectations are asserted against synthetic populated databases, not
+skipped through prose notes. Existing schema/session-specific regression suites
+remain complementary coverage.
 
-Fixtures support drift prevention for the cases actually asserted; they do not prove byte-level equivalence of all behavior. New adapters need explicit test registration in `tests/test_fixtures.py` and `ts/tests/fixtures.test.ts`, not just a new JSON file.
+The same Python and TypeScript fixture assertions also drive each adapter's
+public run entry points through `tests/fixtures/fixture_cli.py`, an explicit
+substitute executable. The child records actual argv/cwd/selected env and
+projected instructions, emits fixture output, and writes declared artifacts.
+Assertions cover parsed results, lifecycle metadata and owned cleanup. No
+installed coding-agent CLI or live database is used.
 
----
+`tests/subprocess_cases.json` supplies shared scenarios and expected observations
+for spawn errors, stdin EOF, signals, deadlines, cancellation, grandchildren,
+output floods and UTF-8/capture boundaries. Python runs them against both
+subprocess entry points; TypeScript runs applicable entry points against source
+under Bun and the built package under Node. Callback acknowledgements force
+split UTF-8 writes into separate reads. Each language's coverage guard rejects
+unknown expectations, missing categories or cases without an applicable runner.
+TypeScript's blocking helper cannot deliver callbacks or in-flight same-thread
+abort signals; those cases explicitly select its async entry point.
+
+This is offline, credential-free library conformance, not upstream CLI, model,
+authentication or SDK qualification. [CONTRIBUTING.md](CONTRIBUTING.md#offline-conformance-versus-live-smoke)
+declares platform coverage and the separate opt-in real-provider commands.
 
 ## Environment handling
 
@@ -1032,8 +1035,8 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.4` and TypeScript `0.2.8`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.5` and TypeScript `0.2.9`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
-This source-tree contract change does not publish a package, create a release tag
-or change those versions. A separately authorized coordinated release must account
-for the permission-default compatibility change and existing version skew.
+The paired fixture-update patch bumps do not publish packages or create release
+tags. A separately authorized coordinated release must account for the
+permission-default compatibility change and existing version skew.

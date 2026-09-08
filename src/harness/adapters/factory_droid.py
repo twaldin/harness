@@ -76,8 +76,8 @@ class FactoryDroidAdapter(Adapter):
 
         return {
             "cost_usd": cost,
-            "tokens_in": _to_int(usage.get("input_tokens") or usage.get("input")),
-            "tokens_out": _to_int(usage.get("output_tokens") or usage.get("output")),
+            "tokens_in": _to_int(_first_present(usage, "input_tokens", "input")),
+            "tokens_out": _to_int(_first_present(usage, "output_tokens", "output")),
             "raw": raw,
         }
 
@@ -148,8 +148,8 @@ class FactoryDroidAdapter(Adapter):
 
         return SessionTelemetry(
             path,
-            _to_int(usage.get("input_tokens") or usage.get("input")),
-            _to_int(usage.get("output_tokens") or usage.get("output")),
+            _to_int(_first_present(usage, "input_tokens", "input")),
+            _to_int(_first_present(usage, "output_tokens", "output")),
             cost,
             raw.get("model") if isinstance(raw.get("model"), str) else None,
             raw,
@@ -178,6 +178,12 @@ def _parse_last_json_object(stdout: str) -> dict | None:
             return parsed
 
     return None
+
+
+def _first_present(usage: dict, primary: str, fallback: str) -> object:
+    """`usage[primary]` unless it is missing/null; an explicit 0 is a real count."""
+    value = usage.get(primary)
+    return usage.get(fallback) if value is None else value
 
 
 def _to_int(v: object) -> int | None:

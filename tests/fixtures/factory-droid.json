@@ -2,7 +2,6 @@
   "spec": {
     "harness": "factory-droid",
     "prompt": "fix flaky test retries",
-    "workdir": "/tmp/harness-fixture-droid",
     "model": "custom:gpt-5.4",
     "instructions": "Keep changes minimal.\n",
     "timeoutSeconds": 600
@@ -19,7 +18,24 @@
       "custom:gpt-5.4",
       "fix flaky test retries"
     ],
-    "instructionsFile": "/tmp/harness-fixture-droid/AGENTS.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": "custom:gpt-5.4"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -31,6 +47,67 @@
   "expectedParsed": {
     "costUsd": 0.0061,
     "tokensIn": 420,
-    "tokensOut": 133
-  }
+    "tokensOut": 133,
+    "raw": {
+      "type": "result",
+      "subtype": "success",
+      "usage": {
+        "input_tokens": 420,
+        "output_tokens": 133
+      },
+      "total_cost_usd": 0.0061
+    }
+  },
+  "cases": [
+    {
+      "name": "zero-usage-wins-over-alternate-keys",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 9.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"usage\":{\"input_tokens\":0,\"input\":950,\"output_tokens\":0,\"output\":380},\"total_cost_usd\":0}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "raw": {
+          "type": "result",
+          "subtype": "success",
+          "usage": {
+            "input_tokens": 0,
+            "input": 950,
+            "output_tokens": 0,
+            "output": 380
+          },
+          "total_cost_usd": 0
+        }
+      }
+    },
+    {
+      "name": "alternate-usage-keys-fill-null-or-missing",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 9.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"subtype\":\"success\",\"usage\":{\"input_tokens\":null,\"input\":12,\"output\":3}}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 12,
+        "tokensOut": 3,
+        "raw": {
+          "type": "result",
+          "subtype": "success",
+          "usage": {
+            "input_tokens": null,
+            "input": 12,
+            "output": 3
+          }
+        }
+      }
+    }
+  ]
 }

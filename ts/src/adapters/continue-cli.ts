@@ -72,7 +72,8 @@ const continueCliAdapter: Adapter = {
     const { model, configArgs, configFile } = validated
 
     if (configFile !== null) {
-      if ((spec.model ?? '').trim() !== '') {
+      // Any explicit model (even whitespace) is rejected; empty/omitted defers to the file like Python.
+      if (spec.model) {
         throw new HarnessError(
           'continue-cli configFile selects the model itself (cn --model is a Hub slug); omit spec.model or drop configFile',
           'unsupported-capability',

@@ -189,8 +189,8 @@ def _read_swe_trajectory(
         if not isinstance(usage, dict):
             continue
         saw_usage = True
-        tokens_in += int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-        tokens_out += int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+        tokens_in += int(_usage_count(usage, "prompt_tokens", "input_tokens"))
+        tokens_out += int(_usage_count(usage, "completion_tokens", "output_tokens"))
 
     if model is None and stats:
         for key in stats.keys():
@@ -205,3 +205,13 @@ def _read_swe_trajectory(
         model,
         traj,
     )
+
+
+def _usage_count(usage: dict, primary: str, fallback: str) -> object:
+    """`usage[primary]` unless missing/null, then `usage[fallback]`, then 0. An
+    explicit 0 is a real count and does not fall through."""
+    for key in (primary, fallback):
+        value = usage.get(key)
+        if value is not None:
+            return value
+    return 0

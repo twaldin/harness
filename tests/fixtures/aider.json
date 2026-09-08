@@ -2,7 +2,6 @@
   "spec": {
     "harness": "aider",
     "prompt": "add type hints to utils.py",
-    "workdir": "/tmp/harness-fixture-aider",
     "model": "openrouter/anthropic/claude-sonnet-4.6",
     "instructions": "Preserve existing behavior when adding type hints.\n",
     "timeoutSeconds": 900
@@ -11,7 +10,7 @@
     "cmd": "aider",
     "args": [
       "--read",
-      "/tmp/harness-fixture-aider/.harness-aider-instructions.md",
+      "<workdir>/.harness-aider-instructions.md",
       "--no-restore-chat-history",
       "--chat-history-file",
       "/dev/null",
@@ -25,7 +24,24 @@
       "--no-analytics",
       "--no-show-model-warnings"
     ],
-    "instructionsFile": "/tmp/harness-fixture-aider/.harness-aider-instructions.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/.harness-aider-instructions.md",
+    "directories": [],
+    "model": "openrouter/anthropic/claude-sonnet-4.6"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": "--config",
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -37,6 +53,57 @@
   "expectedParsed": {
     "costUsd": null,
     "tokensIn": 12300,
-    "tokensOut": 2145
-  }
+    "tokensOut": 2145,
+    "raw": null
+  },
+  "cases": [
+    {
+      "name": "fractional-counts",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 20.5,
+        "timedOut": false,
+        "stdout": "Tokens: 12.3456k sent, 2,145.9 received\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 12346,
+        "tokensOut": 2145,
+        "raw": null
+      }
+    },
+    {
+      "name": "abbreviated-counts-round-ties-to-even",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 20.5,
+        "timedOut": false,
+        "stdout": "Tokens: 12.3445k sent, 12.3455k received\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": 12344,
+        "tokensOut": 12346,
+        "raw": null
+      }
+    },
+    {
+      "name": "malformed-counts-are-null",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 20.5,
+        "timedOut": false,
+        "stdout": "Tokens: 1.2.3k sent, ... received\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    }
+  ]
 }

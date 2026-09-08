@@ -2,7 +2,6 @@
   "spec": {
     "harness": "pi",
     "prompt": "list every .ts file in src and report the count",
-    "workdir": "/tmp/harness-fixture-pi",
     "model": "sonnet",
     "instructions": "Be terse.\n",
     "timeoutSeconds": 600
@@ -17,18 +16,274 @@
       "sonnet",
       "list every .ts file in src and report the count"
     ],
-    "instructionsFile": "/tmp/harness-fixture-pi/AGENTS.md"
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": "sonnet"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
     "durationSeconds": 4.8,
     "timedOut": false,
-    "stdout": "{\"type\":\"session\",\"version\":3,\"id\":\"abc\",\"timestamp\":\"2026-04-22T00:00:00Z\",\"cwd\":\"/tmp/harness-fixture-pi\"}\n{\"type\":\"agent_start\"}\n{\"type\":\"turn_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}},\"toolResults\":[]}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"user\",\"content\":\"list every .ts file in src and report the count\"},{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}}]}\n",
+    "stdout": "{\"type\":\"session\",\"version\":3,\"id\":\"abc\",\"timestamp\":\"2026-04-22T00:00:00Z\",\"cwd\":\"<workdir>\"}\n{\"type\":\"agent_start\"}\n{\"type\":\"turn_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}},\"toolResults\":[]}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"user\",\"content\":\"list every .ts file in src and report the count\"},{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}}]}\n",
     "stderr": ""
   },
   "expectedParsed": {
     "costUsd": 0.0087,
     "tokensIn": 1200,
-    "tokensOut": 340
-  }
+    "tokensOut": 340,
+    "raw": [
+      {
+        "type": "session",
+        "version": 3,
+        "id": "abc",
+        "timestamp": "2026-04-22T00:00:00Z",
+        "cwd": "<workdir>"
+      },
+      {
+        "type": "agent_start"
+      },
+      {
+        "type": "turn_start"
+      },
+      {
+        "type": "message_end",
+        "message": {
+          "role": "assistant",
+          "usage": {
+            "input": 1200,
+            "output": 340,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 1540,
+            "cost": {
+              "input": 0.0036,
+              "output": 0.0051,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0087
+            }
+          }
+        }
+      },
+      {
+        "type": "turn_end",
+        "message": {
+          "role": "assistant",
+          "usage": {
+            "input": 1200,
+            "output": 340,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 1540,
+            "cost": {
+              "input": 0.0036,
+              "output": 0.0051,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0087
+            }
+          }
+        },
+        "toolResults": []
+      },
+      {
+        "type": "agent_end",
+        "messages": [
+          {
+            "role": "user",
+            "content": "list every .ts file in src and report the count"
+          },
+          {
+            "role": "assistant",
+            "usage": {
+              "input": 1200,
+              "output": 340,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "totalTokens": 1540,
+              "cost": {
+                "input": 0.0036,
+                "output": 0.0051,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0.0087
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "agent-end-without-messages",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 6.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"session\",\"version\":3,\"id\":\"abc\",\"timestamp\":\"2026-04-22T00:00:00Z\",\"cwd\":\"<workdir>\"}\n{\"type\":\"agent_start\"}\n{\"type\":\"turn_start\"}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}},\"toolResults\":[]}\n{\"type\":\"turn_start\"}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":800,\"output\":160,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":960,\"cost\":{\"input\":0.0024,\"output\":0.0019,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0043}}},\"toolResults\":[]}\n{\"type\":\"agent_end\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.013,
+        "tokensIn": 2000,
+        "tokensOut": 500,
+        "raw": [
+          {
+            "type": "session",
+            "version": 3,
+            "id": "abc",
+            "timestamp": "2026-04-22T00:00:00Z",
+            "cwd": "<workdir>"
+          },
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 1200,
+                "output": 340,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "totalTokens": 1540,
+                "cost": {
+                  "input": 0.0036,
+                  "output": 0.0051,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0.0087
+                }
+              }
+            },
+            "toolResults": []
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 800,
+                "output": 160,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "totalTokens": 960,
+                "cost": {
+                  "input": 0.0024,
+                  "output": 0.0019,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0.0043
+                }
+              }
+            },
+            "toolResults": []
+          },
+          {
+            "type": "agent_end"
+          }
+        ]
+      }
+    },
+    {
+      "name": "partial-tail-keeps-complete-records",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 2.4,
+        "timedOut": false,
+        "stdout": "{\"type\":\"session\",\"version\":3,\"id\":\"abc\",\"timestamp\":\"2026-04-22T00:00:00Z\",\"cwd\":\"<workdir>\"}\n{\"type\":\"agent_start\"}\n{\"type\":\"turn_start\"}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":1200,\"output\":340,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":1540,\"cost\":{\"input\":0.0036,\"output\":0.0051,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.0087}}},\"toolResults\":[]}\n{\"type\":\"agent_end\",\"messa",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.0087,
+        "tokensIn": 1200,
+        "tokensOut": 340,
+        "raw": [
+          {
+            "type": "session",
+            "version": 3,
+            "id": "abc",
+            "timestamp": "2026-04-22T00:00:00Z",
+            "cwd": "<workdir>"
+          },
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "turn_start"
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 1200,
+                "output": 340,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "totalTokens": 1540,
+                "cost": {
+                  "input": 0.0036,
+                  "output": 0.0051,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0.0087
+                }
+              }
+            },
+            "toolResults": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-assistant-usage",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.3,
+        "timedOut": false,
+        "stdout": "{\"type\":\"session\",\"version\":3,\"id\":\"abc\",\"timestamp\":\"2026-04-22T00:00:00Z\",\"cwd\":\"<workdir>\"}\n{\"type\":\"agent_start\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "session",
+            "version": 3,
+            "id": "abc",
+            "timestamp": "2026-04-22T00:00:00Z",
+            "cwd": "<workdir>"
+          },
+          {
+            "type": "agent_start"
+          }
+        ]
+      }
+    }
+  ]
 }

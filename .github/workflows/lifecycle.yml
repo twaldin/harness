@@ -31,12 +31,20 @@ jobs:
           bun-version: '1.3.14'
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --extra dev
-      - run: PYTHONPATH=src uv run pytest tests/
+      # Dependency installation above may use the network. All tests below use
+      # deterministic local children, no provider CLI or credentials.
+      - name: Python offline conformance
+        run: PYTHONPATH=src uv run --offline pytest tests/
       - run: bun install --frozen-lockfile
         working-directory: ts
-      - run: bun test
+      - name: TypeScript offline conformance (Bun)
+        run: bun test
+        working-directory: ts
+      - name: Type-check source and conformance tests
+        run: bun x tsc --noEmit --rootDir . --allowJs
         working-directory: ts
       - run: bun run build
         working-directory: ts
-      - run: node tests/node-lifecycle.mjs
+      - name: Built-package subprocess smoke (Node)
+        run: node tests/node-lifecycle.mjs
         working-directory: ts

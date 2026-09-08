@@ -24,6 +24,35 @@ cd ts && bun test
 
 All tests must pass in both. If you add a fixture, both impls must parse it.
 
+### Offline conformance versus live smoke
+
+Ordinary `pytest` and `bun test` runs use synthetic fixtures and local child
+executables, not installed coding-agent CLIs, provider accounts or network calls.
+Dependency installation may use the network; CI runs Python tests with
+`uv run --offline` after installing dependencies. Fixture logs contain only
+synthetic prompts, usage and identifiers; keep real credentials and conversations
+out of public fixtures.
+
+The `subprocess lifecycle` workflow gates macOS and Linux (GitHub
+`macos-latest` / `ubuntu-latest`) with Python 3.10, Bun 1.3.14 and Node 22.
+After `bun run build`, run `node tests/node-lifecycle.mjs` from `ts/` to check
+the packaged subprocess engine under Node as well as the source under Bun.
+No Windows lifecycle coverage or support is claimed.
+
+Type-check source and tests from `ts/` with
+`bun x tsc --noEmit --rootDir . --allowJs`; the build checks source declarations.
+
+Real-provider checks are separate, explicit operator actions:
+
+- Python: `PYTHONPATH=src uv run python scripts/smoke_gpt54.py --harness <name>`.
+- TypeScript: from `ts/`, `bun tests/e2e-claude.ts --live`.
+
+These require an installed provider CLI and caller-selected local authentication,
+may incur cost, and retain upstream permission defaults. Never run them in
+ordinary CI. Record provider/runtime versions and the exercised behavior
+separately; passing synthetic conformance does not qualify upstream flags,
+authentication or model availability.
+
 ## Style
 
 - Python: type hints on public functions, no `Any` in adapter surfaces, `from __future__ import annotations` at the top.
@@ -120,7 +149,14 @@ rather than discarding them.
 
 ### 3. Add a fixture
 
-Create `tests/fixtures/<name>.json` following the shape in [SPEC.md](SPEC.md#json-fixture-driven-verification). Add Python tests in `tests/test_fixtures.py` and the adapter name to `ADAPTER_NAMES` in `ts/tests/fixtures.test.ts`; neither suite discovers new fixture files automatically. TypeScript compares command arguments exactly; Python uses adapter-specific assertions and temporary-path substitutions. See SPEC.md for the database-fixture limitations.
+Create `tests/fixtures/<name>.json` following the [shared fixture contract](SPEC.md#json-fixture-driven-verification).
+Both loaders discover fixtures and require names to match the registry. Supply
+exact command, capability and parser expectations; declare synthetic artifacts
+and missing-artifact expectations for database/trajectory parsers. Named `cases`
+carry edge inputs and expected results or rejection codes. The loaders run the
+same assertions in both languages, including real substitute-executable runs.
+Extend `tests/subprocess_cases.json` for a new engine scenario instead of
+maintaining independent expected outcomes in each language.
 
 ### 4. Document it
 

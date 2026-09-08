@@ -88,8 +88,8 @@ Patch versions MAY diverge for implementation-only fixes (e.g. a Node prebuild
 bump that doesn't apply to the Python wheel). Anything that touches SPEC.md or
 the fixture set bumps both simultaneously.
 
-Current manifests do not meet that alignment: Python is `0.3.4` and
-TypeScript is `0.2.8`. This is recorded skew, not a new release policy.
+Current manifests do not meet that alignment: Python is `0.3.5` and
+TypeScript is `0.2.9`. This is recorded skew, not a new release policy.
 
 ## How parity is enforced
 
@@ -98,22 +98,21 @@ version works:
 
 1. **SPEC.md is the shared contract.** Contract changes update both implementations
    in one PR. Its future-backend implementation gates are not shipped APIs.
-2. **Shared golden fixtures.** Each adapter has a fixture at
-   `tests/fixtures/<name>.json` containing a sample `RunSpec`, an
-   `expectedCommand`, a sample subprocess outcome, and `expectedParsed`
-   (cost + tokens). Both suites load these files, but their assertions differ:
-   TypeScript compares command arguments exactly; Python uses adapter-specific
-   checks, including selected flags and temporary-path substitutions.
-   Updating a fixture alone does not add an adapter to either test suite;
-   add coverage to both loaders.
+2. **Shared behavioral fixtures.** Both loaders discover
+   `tests/fixtures/<name>.json`, require fixture names to match the registry,
+   and assert the same command, parser and capability cases. Each adapter also
+   runs through an explicit synthetic executable, with owned cleanup checked.
+   `tests/subprocess_cases.json` supplies shared lifecycle/I/O expectations for
+   Python, Bun and the built package under Node. See
+   [SPEC.md](SPEC.md#json-fixture-driven-verification) for fixture fields and
+   [CONTRIBUTING.md](CONTRIBUTING.md#offline-conformance-versus-live-smoke) for
+   platform coverage and the separate provider-smoke boundary.
 
 Database adapters (`opencode`, `kilo`, `crush`) read sqlite session DBs after
-the CLI exits. Their golden-fixture tests cover missing-DB/null metrics, not
-the recorded non-null parsed-payload expectations. Python's
-`tests/test_opencode_db.py`, `tests/test_kilo_db.py` and `tests/test_crush_db.py`
-exercise database schemas. TypeScript's session-log tests create temporary
-databases for crush and kilo, and JSON/JSONL files for selected other adapters;
-`ts/tests/adapters/opencode-parse.test.ts` covers per-run database selection.
+the CLI exits. Shared fixtures assert populated synthetic databases and explicit
+missing-artifact results; `swe-agent` does the same for trajectory JSON.
+Python's `tests/test_*_db.py` and TypeScript's adapter/session-log tests retain
+additional schema, selection and telemetry edge coverage.
 
 ## Public API changes
 

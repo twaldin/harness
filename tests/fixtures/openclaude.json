@@ -2,7 +2,6 @@
   "spec": {
     "harness": "openclaude",
     "prompt": "write a one-line changelog entry",
-    "workdir": "/tmp/harness-fixture-openclaude",
     "model": "gpt-5.4",
     "instructions": "Output exactly one sentence.\n",
     "timeoutSeconds": 600,
@@ -21,7 +20,29 @@
       "--append-system-prompt",
       "Output exactly one sentence.\n"
     ],
-    "instructionsFile": "/tmp/harness-fixture-openclaude/CLAUDE.md"
+    "cwd": "<workdir>",
+    "env": {
+      "OPENAI_API_KEY": "test-key",
+      "OPENAI_BASE_URL": "https://api.openai.example/v1",
+      "CLAUDE_CODE_USE_OPENAI": "1",
+      "OPENAI_MODEL": "gpt-5.4"
+    },
+    "instructionsFile": "<workdir>/CLAUDE.md",
+    "directories": [],
+    "model": "gpt-5.4"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
   },
   "sampleOutput": {
     "exitCode": 0,
@@ -33,6 +54,15 @@
   "expectedParsed": {
     "costUsd": 0.0042,
     "tokensIn": 310,
-    "tokensOut": 77
+    "tokensOut": 77,
+    "raw": {
+      "type": "result",
+      "subtype": "success",
+      "usage": {
+        "input_tokens": 310,
+        "output_tokens": 77
+      },
+      "total_cost_usd": 0.0042
+    }
   }
 }

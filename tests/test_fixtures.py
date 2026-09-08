@@ -1,43 +1,110 @@
-"""Golden fixture tests — load each fixtures/<name>.json, assert buildCommand and parseOutput.
+"""Shared adapter fixtures — one generic loop over tests/fixtures/<name>.json.
 
-Fixture JSONs use camelCase keys (matching the SPEC interface). We convert to
-snake_case here so the Python types stay idiomatic.
+Every registered adapter needs a fixture and every fixture an adapter. Each
+fixture pins, for both language implementations:
+
+* `expectedCommand`  — the exact normalized command plan (`build_command`),
+* `capabilities`     — what `get_capabilities` declares, and therefore which
+                       spec fields the adapter must reject,
+* `expectedParsed`   — what `parse_output` yields for `sampleOutput` once the
+                       declared `artifacts` (sqlite DBs, trajectory files) exist,
+* `expectedParsedWithoutArtifacts` — the explicit all-null result when they don't,
+* a real `run` through `fixtures/fixture_cli.py`, a deterministic substitute
+  for the CLI that records what it observed and replays `sampleOutput`.
+
+Fixture JSONs use camelCase keys (matching the SPEC interface) and the
+placeholders `<workdir>` / `<root>` for the fresh temporary directories each
+test creates; Python maps those to snake_case dataclasses here.
 """
 from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import stat
+import shlex
+import sys
 from pathlib import Path
 
 import pytest
 
-import harness.adapters  # noqa: F401 — populates registry
-from harness._subproc import SubprocOutcome
-from harness.base import RunSpec
-from harness.registry import get_adapter
+from harness import (
+    BuildCommand,
+    ClaudeCodeOptions,
+    CodexOptions,
+    HarnessError,
+    RunSpec,
+    SubprocOutcome,
+    build_command,
+    get_capabilities,
+    list_adapters,
+    parse_output,
+    run,
+    run_async,
+)
+from harness.base import Capabilities
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+FIXTURE_CLI = FIXTURES_DIR / "fixture_cli.py"
+FIXTURE_NAMES = sorted(p.stem for p in FIXTURES_DIR.glob("*.json"))
+FIXTURE_KEYS = {"spec", "expectedCommand", "capabilities", "sampleOutput", "expectedParsed"}
+ARTIFACT_KEYS = FIXTURE_KEYS | {"artifacts", "expectedParsedWithoutArtifacts"}
+VARIANTS = [
+    (f"{name}/{variant['name']}", variant)
+    for name in FIXTURE_NAMES
+    for variant in json.loads((FIXTURES_DIR / f"{name}.json").read_text()).get("cases", [])
+]
+RUN_CASE_NAMES = FIXTURE_NAMES + [name for name, variant in VARIANTS if "expectedError" not in variant]
+ERROR_CASE_NAMES = [name for name, variant in VARIANTS if "expectedError" in variant]
+LOCK = ".harness-run.lock"
+#: Ambient state that would change a command plan or a parser result.
+AMBIENT_ENV = ("OPENCODE_DB", "KILO_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME")
 
 
-def _load_fixture(name: str) -> dict:
-    return json.loads((FIXTURES_DIR / f"{name}.json").read_text())
+def _substitute(value, mapping: dict[str, str]):
+    if isinstance(value, str):
+        for placeholder, path in mapping.items():
+            value = value.replace(placeholder, path)
+        return value
+    if isinstance(value, list):
+        return [_substitute(item, mapping) for item in value]
+    if isinstance(value, dict):
+        return {key: _substitute(item, mapping) for key, item in value.items()}
+    return value
 
 
-def _make_spec(raw: dict) -> RunSpec:
-    """Build RunSpec from fixture camelCase spec dict."""
-    return RunSpec(
-        harness=raw["harness"],
-        prompt=raw["prompt"],
-        workdir=Path(raw["workdir"]),
-        model=raw.get("model"),
-        instructions=raw.get("instructions"),
-        timeout_seconds=raw.get("timeoutSeconds", 1800),
-        env=raw.get("env", {}),
-    )
+def _load_fixture(case_id: str, root: Path, workdir: Path) -> dict:
+    name, _, variant_name = case_id.partition("/")
+    fixture = json.loads((FIXTURES_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    variants = fixture.pop("cases", [])
+    assert len({variant["name"] for variant in variants}) == len(variants), f"{name}: duplicate case names"
+    expected_keys = ARTIFACT_KEYS if "artifacts" in fixture else FIXTURE_KEYS
+    assert set(fixture) == expected_keys, f"{name}.json keys {sorted(fixture)}; expected {sorted(expected_keys)}"
+    if variant_name:
+        variant = next(variant for variant in variants if variant["name"] == variant_name)
+        assert set(variant) <= {"name", "spec", "sampleOutput", "expectedParsed", "artifacts", "expectedCommand", "expectedError"}
+        fixture = {
+            **fixture,
+            **{key: value for key, value in variant.items() if key not in ("name", "spec")},
+            "spec": {**fixture["spec"], **variant.get("spec", {})},
+        }
+    return _substitute(fixture, {"<workdir>": str(workdir), "<root>": str(root)})
+
+
+def _make_spec(raw: dict, workdir: Path, **overrides) -> RunSpec:
+    names = {
+        "timeoutSeconds": "timeout_seconds", "modelNoResolve": "model_no_resolve",
+        "permissionPolicy": "permission_policy", "nativeOptions": "native_options",
+        "configHome": "config_home", "configFile": "config_file",
+    }
+    fields = {names.get(key, key): value for key, value in raw.items()}
+    fields["workdir"] = workdir
+    fields["env"] = dict(raw.get("env", {}))
+    fields.update(overrides)
+    return RunSpec(**fields)
 
 
 def _make_outcome(raw: dict) -> SubprocOutcome:
-    """Build SubprocOutcome from fixture sampleOutput dict."""
     return SubprocOutcome(
         exit_code=raw["exitCode"],
         duration_seconds=raw["durationSeconds"],
@@ -47,583 +114,229 @@ def _make_outcome(raw: dict) -> SubprocOutcome:
     )
 
 
-def _normalize_parsed(expected: dict) -> dict:
-    """Convert camelCase expectedParsed keys to snake_case, drop non-data fields."""
-    mapping = {
-        "costUsd": "cost_usd",
-        "tokensIn": "tokens_in",
-        "tokensOut": "tokens_out",
-        "raw": "raw",
-    }
-    return {mapping[k]: v for k, v in expected.items() if k in mapping}
-
-
-# ── Fixture: claude-code ────────────────────────────────────────────────────
-
-
-def test_claude_code_build_command(tmp_path):
-    fx = _load_fixture("claude-code")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,  # use tmp so file writes succeed
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
+def _expected_command(raw: dict) -> BuildCommand:
+    instructions_file = raw["instructionsFile"]
+    return BuildCommand(
+        cmd=raw["cmd"],
+        args=list(raw["args"]),
+        cwd=Path(raw["cwd"]),
+        env=dict(raw["env"]),
+        instructions_file=Path(instructions_file) if instructions_file is not None else None,
+        instruction_content=raw.get("instructionContent"),
+        directories=tuple(Path(d) for d in raw["directories"]),
+        model=raw["model"],
     )
-    adapter = get_adapter("claude-code")
-    bc = adapter.build_command(spec)
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == fx["expectedCommand"]["args"]
-    assert bc.instructions_file == tmp_path / "CLAUDE.md"
-    assert bc.instruction_content == spec.instructions
-    assert list(tmp_path.iterdir()) == []
 
 
-def test_claude_code_parse_output():
-    fx = _load_fixture("claude-code")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("claude-code")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: codex ──────────────────────────────────────────────────────────
-
-
-def test_codex_build_command(tmp_path):
-    fx = _load_fixture("codex")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
+def _expected_capabilities(raw: dict) -> Capabilities:
+    return Capabilities(
+        backend=raw["backend"],
+        permission_policies=tuple(raw["permissionPolicies"]),
+        native_options=raw["nativeOptions"],
+        streaming=raw["streaming"],
+        cancellation=raw["cancellation"],
+        sessions=raw["sessions"],
+        config_home_env=raw["configHomeEnv"],
+        config_file_flag=raw["configFileFlag"],
     )
-    adapter = get_adapter("codex")
-    bc = adapter.build_command(spec)
-
-    expected_args = list(fx["expectedCommand"]["args"])
-    # workdir in args will use tmp_path; patch the fixture's workdir value
-    fixture_workdir = fx["spec"]["workdir"]
-    actual_args = [str(tmp_path) if a == fixture_workdir else a for a in expected_args]
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == actual_args
-    assert bc.instructions_file == tmp_path / "AGENTS.md"
 
 
-def test_codex_parse_output():
-    fx = _load_fixture("codex")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("codex")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == expected["cost_usd"]
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
+def _expected_parsed(raw: dict) -> dict:
+    return {"cost_usd": raw["costUsd"], "tokens_in": raw["tokensIn"], "tokens_out": raw["tokensOut"], "raw": raw["raw"]}
 
 
-# ── Fixture: gemini ─────────────────────────────────────────────────────────
+def _write_artifacts(artifacts: list[dict]) -> None:
+    for artifact in artifacts:
+        path = Path(artifact["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if artifact["kind"] == "sqlite":
+            conn = sqlite3.connect(path)
+            for statement in artifact["sql"]:
+                conn.execute(statement)
+            conn.commit()
+            conn.close()
+        elif artifact["kind"] == "json":
+            path.write_text(json.dumps(artifact["content"]), encoding="utf-8")
+        else:
+            raise AssertionError(f"unknown artifact kind {artifact['kind']!r}")
 
 
-def test_gemini_build_command(tmp_path):
-    fx = _load_fixture("gemini")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
+def _prepare_spec_inputs(fixture: dict, root: Path) -> None:
+    """Files the builder itself requires to exist (swe-agent checks its wrapper)."""
+    wrapper = fixture["spec"].get("env", {}).get("SWE_WRAPPER")
+    if wrapper is not None:
+        Path(wrapper).write_text("# stub wrapper; never executed\n", encoding="utf-8")
+
+
+@pytest.fixture
+def case(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    """A fixture resolved against a fresh root/workdir pair with ambient state cleared."""
+    for key in AMBIENT_ENV:
+        monkeypatch.delenv(key, raising=False)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    fixture = _load_fixture(request.param, tmp_path, workdir)
+    _prepare_spec_inputs(fixture, tmp_path)
+    return {"name": fixture["spec"]["harness"], "root": tmp_path, "workdir": workdir, **fixture}
+
+
+def _cases(names: list[str]):
+    return pytest.mark.parametrize("case", names, indirect=True, ids=names)
+
+
+def test_registry_matches_fixtures():
+    assert list_adapters() == FIXTURE_NAMES
+
+
+@_cases(RUN_CASE_NAMES)
+def test_build_command_matches_fixture(case: dict):
+    workdir: Path = case["workdir"]
+    spec = _make_spec(case["spec"], workdir)
+    expected = _expected_command(case["expectedCommand"])
+    if expected.instructions_file is not None:
+        expected.instruction_content = spec.instructions
+    before = sorted(workdir.iterdir())
+
+    built = build_command(spec)
+
+    assert built == expected
+    assert sorted(workdir.iterdir()) == before
+    assert spec.env == case["spec"].get("env", {})  # never mutated
+
+
+@_cases(FIXTURE_NAMES)
+def test_capabilities_match_fixture(case: dict, tmp_path: Path):
+    workdir: Path = case["workdir"]
+    caps = case["capabilities"]
+    assert get_capabilities(case["name"]) == _expected_capabilities(caps)
+
+    def build(**overrides) -> BuildCommand:
+        return build_command(_make_spec(case["spec"], workdir, **overrides))
+
+    def rejects(code: str, **overrides) -> None:
+        with pytest.raises(HarnessError) as exc:
+            build(**overrides)
+        assert exc.value.code == code
+        assert sorted(workdir.iterdir()) == []
+
+    if "bypass" not in caps["permissionPolicies"]:
+        rejects("unsupported-capability", permission_policy="bypass")
+
+    home = tmp_path / "config-home"
+    if caps["configHomeEnv"] is not None:
+        assert build(config_home=home).env[caps["configHomeEnv"]] == str(home)
+    else:
+        rejects("unsupported-capability", config_home=home)
+
+    config_file = tmp_path / "config-file"
+    if caps["configFileFlag"] is not None:
+        args = build(config_file=config_file, model=None).args
+        assert args[args.index(caps["configFileFlag"]) + 1] == str(config_file)
+    else:
+        rejects("unsupported-capability", config_file=config_file)
+
+    for options in (ClaudeCodeOptions(), CodexOptions()):
+        if options.kind != caps["nativeOptions"]:
+            rejects("invalid-options", native_options=options)
+
+    for backend in ("rpc", "sdk"):
+        rejects("unsupported-backend", backend=backend)
+
+
+@_cases(RUN_CASE_NAMES)
+def test_parse_output_matches_fixture(case: dict):
+    _write_artifacts(case.get("artifacts", []))
+    spec = _make_spec(case["spec"], case["workdir"])
+    parsed = parse_output(spec, _make_outcome(case["sampleOutput"]))
+    assert parsed == _expected_parsed(case["expectedParsed"])
+
+
+@_cases([name for name in FIXTURE_NAMES if "artifacts" in json.loads((FIXTURES_DIR / f"{name}.json").read_text())])
+def test_parse_output_without_artifacts_is_explicitly_null(case: dict):
+    spec = _make_spec(case["spec"], case["workdir"])
+    parsed = parse_output(spec, _make_outcome(case["sampleOutput"]))
+    assert parsed == _expected_parsed(case["expectedParsedWithoutArtifacts"])
+    assert parsed == {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
+
+
+@_cases(ERROR_CASE_NAMES)
+def test_invalid_case_rejects_before_preparation(case: dict):
+    with pytest.raises(HarnessError) as exc:
+        build_command(_make_spec(case["spec"], case["workdir"]))
+    assert exc.value.code == case["expectedError"]
+    assert list(case["workdir"].iterdir()) == []
+
+
+def _substitute_cli(root: Path) -> Path:
+    """Shell wrapper that execs the shared fixture CLI; usable as `RunSpec.executable`."""
+    exe = root / "bin" / "fixture-cli"
+    exe.parent.mkdir()
+    exe.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(FIXTURE_CLI))} "$@"\n', encoding="utf-8")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    return exe
+
+
+@pytest.mark.parametrize("entrypoint", ["run", "run_async"])
+@_cases(RUN_CASE_NAMES)
+async def test_run_executes_fixture_cli(case: dict, entrypoint: str):
+    root: Path = case["root"]
+    workdir: Path = case["workdir"]
+    expected = _expected_command(case["expectedCommand"])
+    sample = case["sampleOutput"]
+    artifacts = case.get("artifacts", [])
+    record_path = root / "record.json"
+    manifest = root / "run.json"
+    manifest.write_text(json.dumps({
+        "record": str(record_path),
+        "envKeys": sorted(expected.env),
+        "artifacts": artifacts,
+        "stdout": sample["stdout"],
+        "stderr": sample["stderr"],
+        "exitCode": sample["exitCode"],
+    }), encoding="utf-8")
+    spec = _make_spec(
+        case["spec"],
+        workdir,
+        executable=str(_substitute_cli(root)),
+        env={**case["spec"].get("env", {}), "HARNESS_FIXTURE_RUN": str(manifest)},
     )
-    adapter = get_adapter("gemini")
-    bc = adapter.build_command(spec)
 
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == fx["expectedCommand"]["args"]
-    assert bc.instructions_file == tmp_path / "GEMINI.md"
+    result = run(spec) if entrypoint == "run" else await run_async(spec)
 
+    # Lifecycle metadata shared by every adapter.
+    assert result.harness == case["name"]
+    assert result.model == expected.model
+    assert (result.exit_code, result.timed_out, result.termination) == (sample["exitCode"], False, "exited")
+    assert (result.signal, result.launch_error, result.callback_error, result.parse_error) == (None, None, None, None)
+    assert (result.stdout, result.stderr) == (sample["stdout"], sample["stderr"])
+    assert (result.stdout_truncated, result.stderr_truncated) == (False, False)
+    assert result.ok
 
-def test_gemini_parse_output():
-    fx = _load_fixture("gemini")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("gemini")
-    parsed = adapter.parse_output(spec, outcome)
+    # What the substitute CLI observed at launch.
+    seen = json.loads(record_path.read_text(encoding="utf-8"))
+    assert seen["cwd"] == os.path.realpath(workdir)
+    assert seen["argv"] == expected.args
+    assert seen["env"] == expected.env
+    assert LOCK in seen["entries"]
+    for directory in expected.directories:
+        assert directory.relative_to(workdir).parts[0] in seen["entries"]
+    if expected.instructions_file is None:
+        assert seen["files"] == {}
+    else:
+        assert seen["files"] == {expected.instructions_file.name: spec.instructions}
 
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == expected["cost_usd"]
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: opencode ───────────────────────────────────────────────────────
-
-
-def test_opencode_build_command(tmp_path):
-    fx = _load_fixture("opencode")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
+    # The parser saw the artifacts the CLI wrote.
+    parsed = _expected_parsed(case["expectedParsed"])
+    assert (result.cost_usd, result.tokens_in, result.tokens_out, result.raw) == (
+        parsed["cost_usd"], parsed["tokens_in"], parsed["tokens_out"], parsed["raw"],
     )
-    adapter = get_adapter("opencode")
-    bc = adapter.build_command(spec)
 
-    fixture_workdir = fx["spec"]["workdir"]
-    expected_args = [str(tmp_path) if a == fixture_workdir else a for a in fx["expectedCommand"]["args"]]
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == expected_args
-    assert bc.instructions_file == tmp_path / "AGENTS.md"
-
-
-def test_opencode_parse_output_no_db(tmp_path, monkeypatch):
-    """When no DB exists, all values are null."""
-    fx = _load_fixture("opencode")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env={"OPENCODE_DB": str(tmp_path / "no-such.db")},
-    )
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("opencode")
-    parsed = adapter.parse_output(spec, outcome)
-
-    assert parsed["cost_usd"] is None
-    assert parsed["tokens_in"] is None
-    assert parsed["tokens_out"] is None
-
-
-# ── Fixture: aider ──────────────────────────────────────────────────────────
-
-
-def test_aider_build_command(tmp_path):
-    # The shared fixture still records the pre-TWA-66 argv (agentelo config and
-    # history files); the planned argv is asserted here until Main updates it.
-    fx = _load_fixture("aider")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("aider")
-    bc = adapter.build_command(spec)
-
-    instructions_file = tmp_path / ".harness-aider-instructions.md"
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == [
-        "--read", str(instructions_file),
-        "--no-restore-chat-history",
-        "--chat-history-file", os.devnull,
-        "--input-history-file", os.devnull,
-        "--model", spec.model,
-        "--message", spec.prompt,
-        "--no-auto-commits",
-        "--no-analytics",
-        "--no-show-model-warnings",
-    ]
-    assert bc.instructions_file == instructions_file
-    assert bc.instruction_content == spec.instructions
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_aider_parse_output():
-    fx = _load_fixture("aider")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("aider")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == expected["cost_usd"]
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: swe-agent ──────────────────────────────────────────────────────
-
-
-def test_swe_agent_build_command(tmp_path):
-    fx = _load_fixture("swe-agent")
-    wrapper = tmp_path / "fake-wrapper.py"
-    wrapper.write_text("# stub\n")
-
-    spec = RunSpec(
-        harness="swe-agent",
-        prompt=fx["spec"]["prompt"],
-        workdir=tmp_path,
-        model=fx["spec"].get("model"),
-        instructions=fx["spec"].get("instructions"),
-        timeout_seconds=fx["spec"].get("timeoutSeconds", 1800),
-        env={"SWE_WRAPPER": str(wrapper)},
-    )
-    adapter = get_adapter("swe-agent")
-    bc = adapter.build_command(spec)
-
-    assert bc.cmd == "python3"
-    assert bc.args[0] == str(wrapper)
-    assert "--model" in bc.args
-    assert bc.args[bc.args.index("--model") + 1] == fx["expectedCommand"]["args"][2]
-    assert "--task" in bc.args
-    task = bc.args[bc.args.index("--task") + 1]
-    assert fx["spec"]["instructions"].rstrip() in task
-    assert fx["spec"]["prompt"] in task
-    assert bc.instructions_file is None
-    assert bc.directories == (tmp_path / ".harness",)
-    assert list(tmp_path.iterdir()) == [wrapper]
-
-
-def test_swe_agent_parse_output(tmp_path):
-    fx = _load_fixture("swe-agent")
-    traj_data = fx["trajectoryFile"]["content"]
-    traj_dir = tmp_path / ".harness"
-    traj_dir.mkdir()
-    (traj_dir / "swe-traj.json").write_text(json.dumps(traj_data))
-
-    spec = RunSpec(
-        harness="swe-agent",
-        prompt=fx["spec"]["prompt"],
-        workdir=tmp_path,
-        model=fx["spec"].get("model"),
-        instructions=fx["spec"].get("instructions"),
-        timeout_seconds=fx["spec"].get("timeoutSeconds", 1800),
-        env={},
-    )
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("swe-agent")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: qwen ───────────────────────────────────────────────────────────
-
-
-def test_qwen_build_command(tmp_path):
-    fx = _load_fixture("qwen")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("qwen")
-    bc = adapter.build_command(spec)
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == fx["expectedCommand"]["args"]
-    assert bc.instructions_file == tmp_path / "QWEN.md"
-    assert bc.instruction_content == spec.instructions
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_qwen_parse_output():
-    fx = _load_fixture("qwen")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("qwen")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == expected["cost_usd"]
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: continue-cli ───────────────────────────────────────────────────
-
-
-def test_continue_cli_build_command(tmp_path):
-    fx = _load_fixture("continue-cli")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("continue-cli")
-    bc = adapter.build_command(spec)
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == fx["expectedCommand"]["args"]
-    assert bc.instructions_file == tmp_path / "CONTINUE.md"
-    assert bc.instruction_content == spec.instructions
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_continue_cli_parse_output():
-    fx = _load_fixture("continue-cli")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("continue-cli")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-
-def test_pi_build_command(tmp_path):
-    fx = _load_fixture("pi")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("pi")
-    bc = adapter.build_command(spec)
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == fx["expectedCommand"]["args"]
-    assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert bc.instruction_content == spec.instructions
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_pi_parse_output():
-    fx = _load_fixture("pi")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("pi")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: factory-droid ──────────────────────────────────────────────────
-
-
-def test_factory_droid_build_command(tmp_path):
-    fx = _load_fixture("factory-droid")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("factory-droid")
-    bc = adapter.build_command(spec)
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == fx["expectedCommand"]["args"]
-    assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert bc.instruction_content == spec.instructions
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_factory_droid_parse_output():
-    fx = _load_fixture("factory-droid")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("factory-droid")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: openclaude ─────────────────────────────────────────────────────
-
-
-def test_openclaude_build_command(tmp_path):
-    fx = _load_fixture("openclaude")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("openclaude")
-    bc = adapter.build_command(spec)
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == fx["expectedCommand"]["args"]
-    assert bc.instructions_file == tmp_path / "CLAUDE.md"
-    assert bc.instruction_content == spec.instructions
-    assert list(tmp_path.iterdir()) == []
-    assert bc.env["CLAUDE_CODE_USE_OPENAI"] == "1"
-    assert bc.env["OPENAI_MODEL"] == "gpt-5.4"
-
-
-def test_openclaude_parse_output():
-    fx = _load_fixture("openclaude")
-    spec = _make_spec(fx["spec"])
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("openclaude")
-    parsed = adapter.parse_output(spec, outcome)
-
-    expected = _normalize_parsed(fx["expectedParsed"])
-    assert parsed["cost_usd"] == pytest.approx(expected["cost_usd"])
-    assert parsed["tokens_in"] == expected["tokens_in"]
-    assert parsed["tokens_out"] == expected["tokens_out"]
-
-
-# ── Fixture: crush ──────────────────────────────────────────────────────────
-
-
-def test_crush_build_command(tmp_path):
-    fx = _load_fixture("crush")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("crush")
-    bc = adapter.build_command(spec)
-
-    fixture_workdir = fx["spec"]["workdir"]
-    expected_args = [
-        str(tmp_path / ".harness" / "crush-data") if a == f"{fixture_workdir}/.harness/crush-data" else a
-        for a in fx["expectedCommand"]["args"]
-    ]
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == expected_args
-    assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert bc.instruction_content == spec.instructions
-    assert bc.directories == (tmp_path / ".harness" / "crush-data",)
-    assert list(tmp_path.iterdir()) == []
-    assert bc.args[bc.args.index("--model") + 1] == bc.args[bc.args.index("--small-model") + 1]
-
-
-def test_crush_parse_output_no_db(tmp_path):
-    fx = _load_fixture("crush")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("crush")
-    parsed = adapter.parse_output(spec, outcome)
-
-    assert parsed["cost_usd"] is None
-    assert parsed["tokens_in"] is None
-    assert parsed["tokens_out"] is None
-
-
-# ── Fixture: kilo ───────────────────────────────────────────────────────────
-
-
-def test_kilo_build_command(tmp_path):
-    fx = _load_fixture("kilo")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    adapter = get_adapter("kilo")
-    bc = adapter.build_command(spec)
-
-    fixture_workdir = fx["spec"]["workdir"]
-    expected_args = [str(tmp_path) if a == fixture_workdir else a for a in fx["expectedCommand"]["args"]]
-
-    assert bc.cmd == fx["expectedCommand"]["cmd"]
-    assert bc.args == expected_args
-    assert bc.instructions_file == tmp_path / "AGENTS.md"
-    assert bc.instruction_content == spec.instructions
-    assert bc.directories == (tmp_path / ".harness" / "kilo",)
-    assert list(tmp_path.iterdir()) == []
-    assert bc.env["KILO_DB"] == str(tmp_path / ".harness" / "kilo" / "kilo.db")
-    cfg = json.loads(bc.env["KILO_CONFIG_CONTENT"])
-    assert cfg["model"] == "openai/gpt-5.4"
-    assert cfg["small_model"] == "openai/gpt-5.4"
-    assert cfg["default_agent"] == "build"
-
-
-def test_kilo_parse_output_no_db(tmp_path):
-    fx = _load_fixture("kilo")
-    spec = _make_spec(fx["spec"])
-    spec = RunSpec(
-        harness=spec.harness,
-        prompt=spec.prompt,
-        workdir=tmp_path,
-        model=spec.model,
-        instructions=spec.instructions,
-        timeout_seconds=spec.timeout_seconds,
-        env=spec.env,
-    )
-    outcome = _make_outcome(fx["sampleOutput"])
-    adapter = get_adapter("kilo")
-    parsed = adapter.parse_output(spec, outcome)
-
-    assert parsed["cost_usd"] is None
-    assert parsed["tokens_in"] is None
-    assert parsed["tokens_out"] is None
+    # Owned projection and lease are gone; CLI-written artifacts survive; empty planned dirs are pruned.
+    assert not (workdir / LOCK).exists()
+    if expected.instructions_file is not None:
+        assert not expected.instructions_file.exists()
+    for directory in expected.directories:
+        written = any(Path(a["path"]).is_relative_to(directory) for a in artifacts)
+        assert directory.exists() == written
+    for artifact in artifacts:
+        assert Path(artifact["path"]).is_file()

@@ -1,8 +1,8 @@
 # harness
 
-`harness` is a dual-language (Python + TypeScript) adapter library that wraps eighteen
+`harness` is a dual-language (Python + TypeScript) adapter library that wraps nineteen
 AI coding-agent CLIs — `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`,
-`aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `cline`, `copilot` —
+`aider`, `amp`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `cline`, `copilot` —
 behind a shared `RunSpec → RunResult` contract. Both implementations sit in
 this monorepo. [SPEC.md](SPEC.md) defines the shared contract and distinguishes
 shipped CLI behavior from future RPC/SDK implementation requirements.
@@ -28,7 +28,7 @@ harness/
 │   ├── pricing.py               cost derivation from token counts
 │   ├── _subproc.py              subprocess runner
 │   ├── _instructions.py         owned instruction projection lifecycle
-│   └── adapters/                18 adapter modules, one per CLI
+│   └── adapters/                19 adapter modules, one per CLI
 ├── ts/                          TypeScript implementation (see ts/CLAUDE.md)
 │   ├── package.json             @twaldin/harness-ts (Bun build + test)
 │   ├── src/base.ts              mirror of Python base.py types
@@ -38,7 +38,7 @@ harness/
 │   ├── src/subproc.ts
 │   ├── src/instructions.ts      owned instruction projection lifecycle
 │   ├── src/util.ts
-│   └── src/adapters/            18 adapter modules, one per CLI
+│   └── src/adapters/            19 adapter modules, one per CLI
 ├── tests/                       pytest suite (Python)
 └── ts/tests/                    bun test suite (TypeScript)
 ```
@@ -57,7 +57,7 @@ Both implementations provide the core headless API described in
 - Functions: `listAdapters()`, `getAdapter()`, `getCapabilities()`,
   `buildCommand(spec)`, `parseOutput(spec, outcome)`, `run(spec)`,
   `runAsync(spec)` (Python uses snake_case names).
-- Adapters: eighteen registered names, exact strings — `aider`, `claude-code`,
+- Adapters: nineteen registered names, exact strings — `aider`, `amp`, `claude-code`,
   `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`,
   `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`. Lookup is case-sensitive.
 

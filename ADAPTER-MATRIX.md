@@ -11,8 +11,8 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The eighteen adapters below are registered in **both** implementations and have
-shared fixture files: `aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`,
+The nineteen adapters below are registered in **both** implementations and have
+shared fixture files: `aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`,
 `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
@@ -45,6 +45,7 @@ versions below are dated observations, not a supported version range.
 
 | Adapter | Primary installation / source | Installed observation | Qualification and material limit |
 |---|---|---|---|
+| amp | [official native installer](https://ampcode.com/docs/cli); [execute mode](https://ampcode.com/docs/cli/execute-mode) | isolated Darwin arm64 `0.0.1788868861-g921679` (2026-09-08), checksum verified | Help/version and bounded local native run checked. Configured account returned Out of Credits in JSONL with process exit zero; no successful provider coverage. See [limits](#amp). |
 | aider | [`aider-chat`; CLI options](https://aider.chat/docs/config/options.html) (0.86.2; Python >=3.10,<3.13) | not on PATH | Source-checked; cached and multiple-message usage reports repaired against upstream emission. Rounded token scraper only; no session helper/provider qualification. |
 | claude-code | [`@anthropic-ai/claude-code`; CLI reference](https://code.claude.com/docs/en/cli-reference) (registry 2.1.263) | 2.1.220 | Help-checked; JSON usage/cost source documented. Current pane/cutoff/config-root qualification remains TWA-96. |
 | codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | Help-checked; provider smoke **failed**: configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. |
@@ -70,7 +71,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `cline`, `copilot`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `amp`, `cline`, `copilot`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
 upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
@@ -96,10 +97,11 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | cline | unwired | unwired | foreground NDJSON only; no session resume or latest-session discovery |
 | goose | unwired | unwired | `complete` usage comes from stdout; no latest-session discovery or session ID in stream events |
 | copilot | unwired | unwired | native JSONL events only; no latest-session discovery |
+| amp | unwired | unwired | `session_id` retained in JSONL; no latest-thread discovery or continuation |
 
 ## Backend and permission capabilities
 
-All eighteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All nineteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -109,7 +111,7 @@ OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
-OMP, Cline and Copilot add install metadata but no pane or session-log heuristics.
+Amp, OMP, Cline and Copilot add install metadata but no pane or session-log heuristics.
 These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
@@ -133,9 +135,9 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto`; conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
-| crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
+| amp, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
-Claude Code, Codex, Cline and Copilot have typed native options:
+Amp, Claude Code, Codex, Cline and Copilot have typed native options:
 `ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
 `CodexOptions.sandbox` / `{kind: 'codex', sandbox}` adds `--sandbox`;
 `ClineOptions.provider` and `auto_approve` / `{kind: 'cline', provider, autoApprove}`
@@ -145,18 +147,83 @@ See [SPEC permission migration](SPEC.md#permission-policy-and-migration).
 `CopilotOptions.allow_tools` / `deny_tools` (TS `allowTools` / `denyTools`)
 emit explicit repeated `--allow-tool=<rule>` / `--deny-tool=<rule>` flags.
 Native denial takes precedence over grants and bypass.
+`AmpOptions.mode` / `{kind: 'amp', mode}` emits `--mode <value>` for a built-in
+or plugin mode; explicit model IDs are unsupported.
 
 Configuration selection is also explicit: `executable` selects the binary;
 `configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
 Codex, `HERMES_HOME` for Hermes, `GOOSE_PATH_ROOT` for Goose, `CLINE_DIR` for Cline, `COPILOT_HOME` for Copilot, and
 `PI_CODING_AGENT_DIR` plus `--profile default` for OMP. `configFile` maps to
-Claude Code `--settings`, or `--config` for Aider, Continue and OMP.
+Claude Code `--settings`, Amp `--settings-file`, or `--config` for Aider, Continue and OMP.
 Other adapters reject these typed overrides. Existing
 caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
 official sources, and limits.
 
 ---
+
+## amp
+
+- **Distribution:** the official [native installer](https://ampcode.com/install.sh)
+  installs `amp` under `~/.amp/bin` and links it onto PATH. The documented setup
+  is `curl -fsSL https://ampcode.com/install.sh | bash`; inspect it before running.
+  Install metadata deliberately has no argv for this shell pipeline.
+  `amp version` probes the version; `amp update` updates it. Harness never installs
+  or updates it during a run. Caller env `AMP_SKIP_UPDATE_CHECK=1` disables Amp's
+  automatic update checks; Harness leaves caller configuration authoritative.
+  Authenticate with the caller's existing `amp login` session or set
+  `AMP_API_KEY` to an Amp access token from Settings → Security. The current
+  [execute guide](https://ampcode.com/docs/cli/execute-mode) requires an
+  `sgamp_` access token in that environment variable, not a short-lived login
+  session token. Harness neither discovers nor copies credentials.
+- **Command:** `amp --executor local --stream-json [--mode <mode>]
+  --execute=<prompt> [--settings-file <path>]`, cwd = workdir, instructions =
+  `AGENTS.md`. Prompt must be nonempty; finite stdin is additional input.
+  Equals-form prompt protects leading dashes. No `--orb-execute`, `--no-tui`
+  runner, continuation, remote orb or runner is selected.
+- **Model/config:** no direct model flag. Omit `model` (reported as null);
+  explicit nonempty models reject, even with `modelNoResolve`.
+  `AmpOptions(mode="low")` / `{kind: 'amp', mode: 'low'}` selects a mode.
+  Current help accepts `low`, `medium`, `high`, `ultra` and plugin mode keys or
+  labels; Amp owns model/reasoning/tool routing. The observed default was
+  `medium`; older execute docs still call it Standard. `configFile` replaces
+  user settings, not workspace/managed settings or credentials. `configHome`
+  is unsupported; `AMP_HOME` is an installer location, not an isolation mapping.
+- **Permissions:** [current upstream docs](https://ampcode.com/docs/tools#permissions)
+  say tools run without approval by default. `upstream` does not mean read-only,
+  sandboxed, or confirmation-required. Installed help also lists legacy
+  permission settings; selected settings/plugins remain authoritative. No
+  current bypass CLI flag is qualified, so explicit `bypass` rejects. Use caller
+  settings/policy plugins or an isolated environment for tool restrictions.
+  IDE context, plugins and MCP remain upstream configuration, not silently
+  disabled by Harness.
+- **Output:** [JSONL schema](https://ampcode.com/docs/cli/streaming-json).
+  Ordered complete object events remain in `raw`, including native `session_id`,
+  mode, messages, tool activity and failures. Thread identity is not a controlled
+  session handle. The native CLI creates and normally archives a new thread;
+  Harness does not delete it or scrape unrelated thread history.
+  Input/output totals prefer final top-level result usage, otherwise sum observed
+  top-level assistant usage per field. Cache counts stay raw; missing usage
+  and USD remain null. Partial output preserves completed records/counts.
+  See [exact accounting](SPEC.md#amp).
+- **Failure:** `result.is_error` is a native semantic failure even if process
+  exit is zero. Inspect raw in addition to Harness termination/exit status.
+  Stream capture/callbacks, timeout and cancellation use the shared owned-process
+  lifecycle. Remote operations, stream-JSON input, thinking blocks, feature flags,
+  plugin readiness controls and session APIs are not exposed by this adapter.
+- **Dated evidence (2026-09-08):** checksum-verified isolated native release
+  `0.0.1788868861-g921679` on macOS arm64 accepted local execute/JSONL/settings
+  flags and completed a bounded no-tool probe in about five seconds. Public
+  Python async and built-package Node runs also retained/streamed the native
+  error (21.3s and 7.2s within 30s limits). Python sync timeout and Node abort
+  stopped native startup in 0.10s and 0.12s; these do not qualify tool-child teardown.
+  Native init reported an empty tool/MCP set and the configured account returned
+  `Out of Credits`, `is_error: true`, process exit 0. No account switch, credit
+  purchase, global install/config change or package publication was performed.
+  Successful provider completion, real tool-child teardown, plugins/MCP,
+  remote execution and Linux native behavior remain unqualified. Deterministic
+  shared fixtures are separate evidence, not provider success.
+
 
 ## Cost + token reporting at a glance
 
@@ -183,6 +250,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | cline        | when reported     | when reported                 | last top-level `run_result.usage`; partial streams retain raw events with null totals |
 | goose        | optional upstream cost (may be estimated) | optional cumulative totals | last JSONL `complete` event; partial stream without completion has null metrics |
 | copilot      | **null**          | **null**                      | JSONL native events retained; premium requests/AI credits are not USD or token totals |
+| amp          | **null**          | optional result totals / observed assistant sums | top-level JSONL usage; cache fields remain raw |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
@@ -190,7 +258,7 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
 
 ## Cross-cutting: model normalization
 
-- Canonical model names (for example `gpt-5.4`) are accepted across adapters.
+- Canonical model names (for example `gpt-5.4`) are accepted where the CLI exposes model selection.
 - Harness normalizes model IDs at `buildCommand` time:
   - **Provider-required CLIs** (`opencode`, `swe-agent`, `aider`, `kilo`) get `provider/model` forms.
   - **Bare-model CLIs** (`codex`, `claude-code`, `openclaude`, `qwen`, `gemini`) get known provider prefixes stripped.
@@ -203,7 +271,8 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
   - **copilot** preserves explicit model IDs after trimming; omitted model delegates to upstream selection and reports null.
   - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
   - **goose** preserves explicit model IDs without provider inference; omitted/empty model delegates to upstream config and reports null.
-  - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
+  - **amp** rejects explicit nonempty model IDs. `AmpOptions.mode` selects an upstream mode, not a model.
+  - `modelNoResolve` / `model_no_resolve` bypasses normalization, not capability checks; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
   - `crush`: `--model == --small-model`
   - `kilo`: default `model == small_model` via `KILO_CONFIG_CONTENT`; an existing caller-selected config is preserved

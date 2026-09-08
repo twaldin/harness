@@ -8,6 +8,7 @@ Importing this package registers every shipped adapter.
 from harness.base import (
     Adapter,
     AgentStatus,
+    AmpOptions,
     Backend,
     BuildCommand,
     Capabilities,
@@ -72,6 +73,7 @@ import harness.adapters  # noqa: E402,F401 — registers the shipped adapters
 __all__ = [
     "Adapter",
     "AgentStatus",
+    "AmpOptions",
     "Backend",
     "BuildCommand",
     "Capabilities",

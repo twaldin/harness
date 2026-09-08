@@ -51,8 +51,14 @@ export interface CopilotOptions {
   denyTools?: readonly string[]
 }
 
+export interface AmpOptions {
+  kind: 'amp'
+  /** Emitted as `--mode <value>`: a nonblank built-in or plugin mode key/label, passed verbatim. */
+  mode?: string
+}
+
 /** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
-export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
+export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions
 
 export type OutputStream = 'stdout' | 'stderr'
 
@@ -400,6 +406,8 @@ type NativeField =
   | { readonly shape: 'boolean'; readonly flag: string }
   /** Non-empty NUL-free string emitted as `flag value`. */
   | { readonly shape: 'string'; readonly flag: string }
+  /** Non-blank NUL-free string emitted as `flag value` (upstream resolves it at runtime). */
+  | { readonly shape: 'nonblank'; readonly flag: string }
 /** Per native-options kind: field name → schema. Field order is argv order. */
 const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Record<string, NativeField>>>> = {
   'claude-code': {
@@ -415,6 +423,9 @@ const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Reco
   copilot: {
     allowTools: { shape: 'rules', flag: '--allow-tool' },
     denyTools: { shape: 'rules', flag: '--deny-tool' },
+  },
+  amp: {
+    mode: { shape: 'nonblank', flag: '--mode' },
   },
 }
 const NATIVE_OPTION_KINDS = Object.keys(NATIVE_OPTION_FIELDS).map((kind) => JSON.stringify(kind)).join(', ')
@@ -485,9 +496,11 @@ function resolveNativeOptions(adapter: Adapter, spec: RunSpec): ResolvedNativeOp
         throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a boolean`, 'invalid-options')
       }
       args.push(field.flag, value ? 'true' : 'false')
-    } else if (field.shape === 'string') {
-      if (typeof value !== 'string' || value === '' || value.includes('\0')) {
-        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a non-empty string without NUL bytes`, 'invalid-options')
+    } else if (field.shape === 'string' || field.shape === 'nonblank') {
+      const empty = typeof value === 'string' && (field.shape === 'nonblank' ? value.trim() === '' : value === '')
+      if (typeof value !== 'string' || empty || value.includes('\0')) {
+        const expected = field.shape === 'nonblank' ? 'non-blank' : 'non-empty'
+        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a ${expected} string without NUL bytes`, 'invalid-options')
       }
       args.push(field.flag, value)
     } else {

@@ -41,7 +41,7 @@ ErrorCode = Literal[
     "protocol-error",
     "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "amp"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 #: Signal the runner sends the owned process group once before escalating to
@@ -124,7 +124,19 @@ class CopilotOptions:
     deny_tools: tuple[str, ...] | list[str] | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
+@dataclass(frozen=True)
+class AmpOptions:
+    """Typed `amp` CLI knobs. `mode` is emitted as `--mode <value>`.
+
+    Amp resolves the value against its built-in and plugin agent modes at
+    runtime (key or label), so it is a non-blank, NUL-free string passed
+    through verbatim rather than an enum. Omitted: upstream config decides.
+    """
+
+    kind: Literal["amp"] = field(default="amp", init=False)
+    mode: str | None = None
+
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions
 
 
 @dataclass
@@ -158,7 +170,7 @@ class RunSpec:
                       rejected with `unsupported-capability` when the adapter
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
-                      `CodexOptions`, `ClineOptions`, `CopilotOptions`). The kind must match `harness`.
+                      `CodexOptions`, `ClineOptions`, `CopilotOptions`, `AmpOptions`). The kind must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -571,9 +583,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions or CopilotOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions or AmpOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -616,6 +628,10 @@ class Adapter(ABC):
                     "cline auto_approve conflicts with permission_policy='bypass' (bypass is --auto-approve true); choose one",
                     code="invalid-options",
                 )
+        elif isinstance(native, AmpOptions):
+            mode = native.mode
+            if mode is not None and (not isinstance(mode, str) or not mode.strip() or "\0" in mode):
+                raise HarnessError("amp mode must be None or a non-blank string without NUL bytes", code="invalid-options")
 
     def resolve_run_spec(self, spec: RunSpec) -> ResolvedSpec:
         """Validate `spec` and resolve the adapter-facing model and extra argv.
@@ -643,6 +659,8 @@ class Adapter(ABC):
                 *(f"--allow-tool={rule}" for rule in native.allow_tools or ()),
                 *(f"--deny-tool={rule}" for rule in native.deny_tools or ()),
             )
+        elif isinstance(native, AmpOptions) and native.mode is not None:
+            native_args = ("--mode", native.mode)
         config_args: tuple[str, ...] = ()
         if spec.config_file is not None:
             config_args = (self.config_file_flag, str(Path(spec.config_file)))  # type: ignore[assignment]

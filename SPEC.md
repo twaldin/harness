@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (18 adapters)
+│   ├── adapters/*.py       (19 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "cline" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "copilot" | "goose"
+  harness: string                  // registered adapter name; see Registry below
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -123,11 +123,15 @@ interface CopilotOptions {
   allowTools?: readonly string[]
   denyTools?: readonly string[]
 }
-type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
+interface AmpOptions {
+  kind: 'amp'
+  mode?: string                    // built-in or plugin mode, not a model ID
+}
+type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions
 interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
-  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | null
+  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -137,7 +141,7 @@ interface Capabilities {
 ```
 
 Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
-`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions` and `CopilotOptions` with equivalent values.
+`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions` and `AmpOptions` with equivalent values.
 Construct native options as `ClaudeCodeOptions(effort="high")`,
 `CodexOptions(sandbox="read-only")`,
 `ClineOptions(provider="openai-compatible", auto_approve=False)` or
@@ -146,6 +150,9 @@ their `kind` is fixed by the dataclass. Copilot rule collections accept tuples
 or lists in Python and arrays in TypeScript. Empty collections emit no flags.
 Each member must be a nonempty, non-whitespace, NUL-free string; valid native
 rules are preserved verbatim, including upstream's comma/filter syntax.
+`AmpOptions(mode="low")` / `{kind: 'amp', mode: 'low'}` selects an Amp mode,
+including a plugin mode key or label. It must be a nonblank, NUL-free string;
+Harness preserves it verbatim and does not equate a mode with a model.
 Native options are a discriminated union, not an untyped bag passed to an
 arbitrary upstream. New variants land with a real implementation in both languages.
 
@@ -242,7 +249,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All eighteen CLI adapters share these lifecycle capabilities.
+for sessions. All nineteen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -275,7 +282,7 @@ approval request by silently escalating.
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
 
-The other four adapters reject `"bypass"` as unsupported; a missing mapping is
+The other five adapters (including Amp) reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
 silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 `--sandbox`, and cannot be combined with `"bypass"` because that would override
@@ -611,6 +618,32 @@ exit code or Harness termination cause. Omitted model leaves upstream selection
 in charge and reports null. See the [adapter reference](ADAPTER-MATRIX.md#copilot)
 for setup, explicit permissions and qualification limits.
 
+### amp
+
+Local `--executor local --stream-json --execute=<prompt>` only. Nonempty
+`model` requests reject as `unsupported-capability`; model reporting is null.
+`AmpOptions.mode` selects an upstream mode, not a model. Empty prompts reject;
+finite stdin supplements the prompt. Remote orbs/runners, thread continuation,
+streaming JSON input, thinking output and controlled RPC/SDK sessions are not
+exposed. See [setup and permissions](ADAPTER-MATRIX.md#amp).
+
+`raw` preserves every complete JSON object line, including `session_id`,
+native errors, cache usage and unknown event types; null if none. Malformed,
+non-object and incomplete lines are ignored; stdout itself is preserved under
+the shared capture limit. `tokensIn` and `tokensOut` independently prefer valid
+`input_tokens` / `output_tokens` from the last top-level `result.usage`;
+missing/invalid fields fall back to sums of observed top-level
+`assistant.message.usage` fields. Parent-tool events are retained but not counted.
+Counts and their sums must be nonnegative safe integers; missing counts are null, reported
+zero remains zero. Cache read/creation counts stay in raw, not `tokensIn`,
+matching the Claude headless convention. Partial output reports observed counts,
+not an estimate of the full run. Cost is null: the documented stream does not
+report USD and Amp's mode routing does not establish a price.
+
+Native provider failures can emit `result.is_error: true` and still exit zero.
+Callers must inspect the terminal event; Harness preserves the process exit
+and termination status rather than converting a native error into a parse failure.
+
 ---
 
 ## Adapter contract
@@ -621,7 +654,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `hermes`, `goose` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `hermes`, `goose` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -702,6 +735,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | cline | `CLINE_DIR` | unsupported |
 | goose | `GOOSE_PATH_ROOT` | unsupported |
 | copilot | `COPILOT_HOME` | unsupported |
+| amp | unsupported | `--settings-file` (custom user settings; workspace/managed settings still apply) |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -1298,7 +1332,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

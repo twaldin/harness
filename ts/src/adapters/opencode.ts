@@ -1,121 +1,9 @@
 import { register } from '../registry.js'
 import type { Adapter, BuildCommand, ParsedOutput, RunSpec, SubprocOutcome, SessionTelemetry } from '../base.js'
-import { homedir } from 'os'
-import { existsSync } from 'fs'
-import { basename, join, resolve } from 'path'
-import { createRequire } from 'module'
 import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
-import { deriveCost } from '../pricing.js'
-
-/** DB location as the CLI run would see it: caller env first, then inherited env, then the platform default. */
-function openCodeDbPath(extraEnv: Record<string, string> | undefined): string {
-  const env = { ...process.env, ...(extraEnv ?? {}) }
-  const explicit = env['OPENCODE_DB']
-  if (explicit) return explicit.replace(/^~/, homedir())
-  const dataHome = env['XDG_DATA_HOME'] || join(env['HOME'] || homedir(), '.local', 'share')
-  return join(dataHome, 'opencode', 'opencode.db')
-}
-
-// Opencode writes token/cost totals to a sqlite DB post-exit. Runtime detection:
-// bun doesn't support better-sqlite3's native bindings (oven-sh/bun#4290), so we
-// use bun:sqlite when running under bun and better-sqlite3 on node. Same query,
-// different driver. If neither is available we return null — correctness-safe.
-
-interface SqliteDriver {
-  get(sql: string, ...params: unknown[]): unknown
-  close(): void
-}
-
-function openDb(dbPath: string): SqliteDriver | null {
-  const isBun = typeof (globalThis as unknown as { Bun?: unknown }).Bun !== 'undefined'
-  const requireFn = createRequire(import.meta.url)
-  if (isBun) {
-    try {
-      // bun:sqlite is a built-in, accessible via require in bun
-      const mod = requireFn('bun:sqlite') as { Database: new (p: string, o?: unknown) => {
-        prepare(s: string): { get(...p: unknown[]): unknown }
-        close(): void
-      } }
-      const db = new mod.Database(dbPath, { readonly: true })
-      return {
-        get: (sql, ...params) => db.prepare(sql).get(...params),
-        close: () => db.close(),
-      }
-    } catch {
-      return null
-    }
-  }
-  try {
-    const Database = requireFn('better-sqlite3') as new (p: string, o?: unknown) => {
-      prepare(s: string): { get(...p: unknown[]): unknown }
-      close(): void
-    }
-    const db = new Database(dbPath, { readonly: true, timeout: 5000 })
-    return {
-      get: (sql, ...params) => db.prepare(sql).get(...params),
-      close: () => db.close(),
-    }
-  } catch {
-    return null
-  }
-}
-
-function readOpenCodeSessionTotals(
-  workdir: string,
-  dbPath: string,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
-  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
-
-  let resolvedWorkdir = workdir
-  try {
-    resolvedWorkdir = resolve(workdir)
-  } catch {
-    // keep raw
-  }
-  const wdBasename = basename(resolvedWorkdir)
-
-  const db = openDb(dbPath)
-  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
-
-  try {
-    // The model comes from assistant rows' data.modelID (session.model is NULL
-    // or a JSON object upstream) and is reported only when every row that
-    // names a model agrees on one.
-    const row = db.get(
-      `
-      SELECT
-        COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
-        COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
-        COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-        CASE WHEN COUNT(DISTINCT json_extract(data, '$.modelID')) = 1
-                  AND COUNT(NULLIF(json_extract(data, '$.modelID'), '')) = COUNT(*)
-             THEN MAX(json_extract(data, '$.modelID')) END       AS model,
-        COUNT(*)                                                 AS row_count
-      FROM message
-      WHERE session_id IN (
-        SELECT id FROM session WHERE directory LIKE ? ORDER BY time_updated DESC LIMIT 1
-      )
-      AND json_extract(data, '$.role') = 'assistant'
-    `,
-      `%${wdBasename}%`,
-    ) as { tokens_in: number; tokens_out: number; cost: number; model: unknown; row_count: number } | undefined
-
-    if (!row || row.row_count === 0) {
-      return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
-    }
-    return {
-      tokensIn: Math.round(row.tokens_in),
-      tokensOut: Math.round(row.tokens_out),
-      costUsd: row.cost,
-      model: typeof row.model === 'string' ? row.model : null,
-    }
-  } catch {
-    return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
-  } finally {
-    db.close()
-  }
-}
+import { resolve } from 'path'
+import { NO_TOTALS, candidateDbPaths, identityRaw, parseSelector, readOpenCodeRun, runSessionID, telemetryFor } from '../session-db.js'
 
 const openCodeAdapter: Adapter = {
   name: 'opencode',
@@ -128,13 +16,18 @@ const openCodeAdapter: Adapter = {
     const { model, workdir } = validated
     return finalizeCommand(this, spec, validated, {
       cmd: 'opencode',
-      args: ['run', '--dir', workdir, '--model', model, spec.prompt],
+      args: ['run', '--format', 'json', '--dir', workdir, '--model', model, spec.prompt],
     })
   },
 
-  parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
-    const { tokensIn, tokensOut, costUsd } = readOpenCodeSessionTotals(spec.workdir, openCodeDbPath(spec.env))
-    return { costUsd, tokensIn, tokensOut, raw: null }
+  // Telemetry is correlated by the native session ID the JSON event stream
+  // reports; the SQLite row for exactly that session is read afterwards.
+  parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
+    const sessionID = runSessionID(outcome.stdout)
+    if (sessionID === null) return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
+    const env = { ...process.env, ...(spec.env ?? {}) }
+    const { tokensIn, tokensOut, costUsd } = readOpenCodeRun(candidateDbPaths(env, 'opencode', env['OPENCODE_DB'], resolve(spec.workdir)), sessionID)
+    return { costUsd, tokensIn, tokensOut, raw: identityRaw(sessionID, costUsd) }
   },
 }
 
@@ -174,27 +67,17 @@ openCodeAdapter.detectStatus = function (pane: string) {
   return 'unknown'
 }
 
-// opencode telemetry already lives in SQLite; re-use the existing reader.
-openCodeAdapter.sessionLogPath = function (workdir: string, _since?: number): string | null {
-  // Path is shared SQLite — return DB path so consumer knows where to look.
-  const dbPath = openCodeDbPath(undefined)
-  return existsSync(dbPath) ? `${dbPath}#session(${basename(resolve(workdir))})` : null
+// opencode telemetry lives in the shared SQLite store keyed by native session
+// ID; without that identity there is no session log to name.
+openCodeAdapter.sessionLogPath = function (_workdir: string, _since?: number): string | null {
+  return null
 }
 
+/** Accepts only an explicit `<database path>#session=<percent-encoded native ID>` selector. */
 openCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
-  const dbPath = path.split('#')[0] ?? path
-  const wdHint = path.split('session(')[1]?.replace(/\)$/, '') ?? ''
-  if (!existsSync(dbPath)) {
-    return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
-  }
-  const result = readOpenCodeSessionTotals(wdHint || '/', dbPath)
-  // SQLite cost can be 0 when opencode used a custom provider (no upstream
-  // pricing): fall back to deriveCost from tokens when the session model is known.
-  let cost = result.costUsd
-  if ((cost == null || cost === 0) && result.tokensIn != null && (result.tokensIn > 0 || (result.tokensOut ?? 0) > 0)) {
-    cost = deriveCost(result.model, result.tokensIn, result.tokensOut) ?? cost
-  }
-  return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd: cost, model: result.model, raw: null }
+  const selector = parseSelector(path)
+  if (selector === null) return telemetryFor(path, NO_TOTALS, null)
+  return telemetryFor(path, readOpenCodeRun([selector.dbPath], selector.sessionID), selector.sessionID)
 }
 
 openCodeAdapter.installMeta = {

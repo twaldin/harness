@@ -69,11 +69,12 @@ still returns `None` for cost.
 Three adapters read sqlite session DBs after the CLI exits — substantially
 different from the stdout-parsers:
 
-- **`opencode`** — DB at `~/.local/share/opencode/opencode.db` (or `OPENCODE_DB`).
-  Match the latest session whose directory contains the resolved workdir basename.
-- **`kilo` / `crush`** — Force a deterministic per-workdir DB path under
-  `<workdir>/.harness/...` via env vars (`KILO_DB`) or `--data-dir`. Keeps
-  benchmark containers isolated from shared user state.
+- **`opencode`** — resolve explicit `OPENCODE_DB` against upstream data storage,
+  or require one exact native-ID match across channel databases.
+- **`kilo` / `crush`** — default to per-workdir storage; caller overrides remain
+  authoritative. All database adapters require observed native identity.
+  See [matrix](../../ADAPTER-MATRIX.md#opencode) for selectors and path/accounting
+  semantics; workdir/time discovery returns null and zero is never repriced.
 
 All three open the DB read-only (`mode=ro` URI, 5s timeout) and tolerate
 `sqlite3.Error` by returning `None`. Python schema tests live in

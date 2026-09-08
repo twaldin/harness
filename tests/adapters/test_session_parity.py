@@ -76,13 +76,16 @@ def _setup_home_fixture(tmp_path: Path, adapter: str) -> tuple[Path, Path]:
 
 
 def _setup_sqlite_fixture(tmp_path: Path, adapter: str) -> Path:
+    """Two sessions per DB: the run's own (`s1`) and a newer, fatter decoy the
+    old latest-row heuristics would have picked. Returns the DB path."""
     workdir = tmp_path / "repo"
     workdir.mkdir(parents=True, exist_ok=True)
 
     if adapter == "crush":
         d = workdir / ".harness" / "crush-data"
         d.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(d / "crush.db")
+        db_path = d / "crush.db"
+        db = sqlite3.connect(db_path)
         db.executescript(
             """
             CREATE TABLE sessions (
@@ -94,31 +97,38 @@ def _setup_sqlite_fixture(tmp_path: Path, adapter: str) -> Path:
                 updated_at INTEGER
             );
             CREATE TABLE messages (
-                id TEXT PRIMARY KEY, session_id TEXT, role TEXT, model TEXT, created_at INTEGER
+                id TEXT PRIMARY KEY, session_id TEXT, role TEXT, model TEXT, provider TEXT, created_at INTEGER
             );
             INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, updated_at)
             VALUES ('s1', NULL, 70, 11, 0.004, 1);
-            INSERT INTO messages VALUES ('m1', 's1', 'assistant', 'gpt-5.4', 1);
+            INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, updated_at)
+            VALUES ('s2', NULL, 99999, 99999, 99.0, 2);
+            INSERT INTO messages VALUES ('m1', 's1', 'assistant', 'gpt-5.4', 'openai', 1);
+            INSERT INTO messages VALUES ('m2', 's2', 'assistant', 'gpt-5.4', 'openai', 2);
             """
         )
         db.commit()
         db.close()
-    elif adapter == "kilo":
+    else:
         d = workdir / ".harness" / "kilo"
         d.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(d / "kilo.db")
+        db_path = d / "kilo.db"
+        db = sqlite3.connect(db_path)
         db.executescript(
             """
             CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL);
             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL);
             INSERT INTO session (id, directory, time_updated) VALUES ('s1', '/tmp/repo', 1);
+            INSERT INTO session (id, directory, time_updated) VALUES ('s2', '/tmp/repo', 2);
             INSERT INTO message (id, session_id, data)
-            VALUES ('m1', 's1', '{"role":"assistant","tokens":{"input":90,"output":30},"cost":0.004}');
+            VALUES ('m1', 's1', '{"role":"assistant","providerID":"openai","modelID":"gpt-5.4","tokens":{"input":90,"output":30},"cost":0.004}');
+            INSERT INTO message (id, session_id, data)
+            VALUES ('m2', 's2', '{"role":"assistant","providerID":"openai","modelID":"gpt-5.4","tokens":{"input":99999,"output":99999},"cost":99.0}');
             """
         )
         db.commit()
         db.close()
-    return workdir
+    return db_path
 
 
 @pytest.mark.parametrize("adapter", ["continue-cli", "factory-droid", "qwen", "gemini", "openclaude", "claude-code"])
@@ -157,7 +167,8 @@ def test_session_log_path_and_parse_parity_sqlite(adapter: str, tmp_path: Path, 
     if shutil.which("bun") is None:
         pytest.skip("bun not available")
 
-    workdir = _setup_sqlite_fixture(tmp_path, adapter)
+    db_path = _setup_sqlite_fixture(tmp_path, adapter)
+    workdir = db_path.parents[2]
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
@@ -165,17 +176,26 @@ def test_session_log_path_and_parse_parity_sqlite(adapter: str, tmp_path: Path, 
     env = os.environ.copy()
     env["HOME"] = str(home)
 
+    # The DB alone cannot identify a run's session: both runtimes decline to
+    # invent a path and only parse an explicit exact-ID selector.
     py_adapter = get_adapter(adapter)
-    py_path = py_adapter.session_log_path(workdir)
-    ts_path = _ts_call(adapter, "sessionLogPath", str(workdir), env)
-    assert py_path == ts_path
+    assert py_adapter.session_log_path(workdir) is None
+    assert _ts_call(adapter, "sessionLogPath", str(workdir), env) is None
 
-    py_parsed = _py_telemetry_dict(py_adapter.parse_session_log(py_path))
-    ts_parsed = _ts_call(adapter, "parseSessionLog", py_path, env)
+    selector = f"{db_path}#session=s1"
+    py_parsed = _py_telemetry_dict(py_adapter.parse_session_log(selector))
+    ts_parsed = _ts_call(adapter, "parseSessionLog", selector, env)
     assert py_parsed == ts_parsed
     expected_tokens = (70, 11) if adapter == "crush" else (90, 30)
     assert (py_parsed["tokensIn"], py_parsed["tokensOut"]) == expected_tokens
     assert py_parsed["costUsd"] == 0.004
+    assert py_parsed["model"] == "gpt-5.4"
+    assert py_parsed["raw"] == {"sessionID": "s1", "costSource": "reported"}
+
+    for stale in (str(db_path), f"{db_path}#session(repo)"):
+        py_stale = _py_telemetry_dict(py_adapter.parse_session_log(stale))
+        assert py_stale == _ts_call(adapter, "parseSessionLog", stale, env)
+        assert (py_stale["tokensIn"], py_stale["raw"]) == (None, None)
 
 
 @pytest.mark.parametrize(

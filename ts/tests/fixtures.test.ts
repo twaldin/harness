@@ -18,7 +18,7 @@
  * makes the same assertions.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, dirname, join, relative } from 'path'
 import { Database } from 'bun:sqlite'
@@ -34,7 +34,7 @@ const FIXTURE_KEYS = ['spec', 'expectedCommand', 'capabilities', 'sampleOutput',
 const ARTIFACT_KEYS = [...FIXTURE_KEYS, 'artifacts', 'expectedParsedWithoutArtifacts']
 const LOCK = '.harness-run.lock'
 /** Ambient state that would change a command plan or a parser result. */
-const AMBIENT_ENV = ['HOME', 'OPENCODE_DB', 'KILO_DB', 'KILO_CONFIG_CONTENT', 'CRUSH_DATA_DIR', 'SWE_WRAPPER', 'XDG_DATA_HOME', 'CLINE_TOOL_APPROVAL_MODE']
+const AMBIENT_ENV = ['HOME', 'OPENCODE_DB', 'OPENCODE_DISABLE_CHANNEL_DB', 'KILO_DB', 'KILO_DISABLE_CHANNEL_DB', 'KILO_CONFIG_CONTENT', 'CRUSH_DATA_DIR', 'SWE_WRAPPER', 'XDG_DATA_HOME', 'CLINE_TOOL_APPROVAL_MODE']
 /** Spec fields where JSON `null` is a real value rather than "not provided". */
 const NULLABLE_SPEC_FIELDS = ['timeoutSeconds', 'inactivityTimeoutSeconds', 'stdin']
 
@@ -212,6 +212,7 @@ function writeArtifacts(artifacts: Artifact[]): void {
       const db = new Database(artifact.path)
       for (const statement of artifact.sql) db.run(statement)
       db.close()
+      chmodSync(artifact.path, 0o444)
     } else {
       writeFileSync(artifact.path, JSON.stringify(artifact.content), 'utf-8')
     }
@@ -344,7 +345,6 @@ for (const name of FIXTURE_NAMES) {
         const c = freshCase(name)
         const parsed = parseOutput(makeSpec(c.spec, c.workdir), c.sampleOutput)
         expect(parsed).toEqual(c.expectedParsedWithoutArtifacts!)
-        expect(parsed).toEqual({ costUsd: null, tokensIn: null, tokensOut: null, raw: null })
       })
     }
 

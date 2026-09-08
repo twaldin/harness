@@ -78,22 +78,21 @@ async def test_shared_case(case: dict, tmp_path: Path):
 
 
 async def test_completed_turn_keeps_native_payloads_and_session_alive(tmp_path: Path):
-    session = await open_session(_spec("success", tmp_path))
-    turn = session.start_turn("hello")
-    events = [event async for event in turn.events]
-    result = await turn.result
-    assert result.raw is not None and result.raw["type"] == "agent_end"
-    assert result.raw["messages"][0]["usage"] == {"input": 2, "output": 3, "cost": {"total": 0}}
-    assert result.exit_code is None and result.signal is None
-    assert all(event.turn_id == turn.id and event.session_id == session.reference.session_id for event in events)
-    assert events[0].type == "response" and events[0].request_id is not None
-    assert events[0].raw["command"] == "prompt" and events[0].raw["success"] is True
-    assert not session.closed and session.active is None
-    follow_up = session.start_turn("again")
-    assert follow_up.id != turn.id
-    assert (await follow_up.result).status == "completed"
-    assert session.reference.session_id == result.session_id
-    await session.close()
+    async with await open_session(_spec("success", tmp_path)) as session:
+        turn = session.start_turn("hello")
+        events = [event async for event in turn.events]
+        result = await turn.result
+        assert result.raw is not None and result.raw["type"] == "agent_end"
+        assert result.raw["messages"][0]["usage"] == {"input": 2, "output": 3, "cost": {"total": 0}}
+        assert result.exit_code is None and result.signal is None
+        assert all(event.turn_id == turn.id and event.session_id == session.reference.session_id for event in events)
+        assert events[0].type == "response" and events[0].request_id is not None
+        assert events[0].raw["command"] == "prompt" and events[0].raw["success"] is True
+        assert not session.closed and session.active is None
+        follow_up = session.start_turn("again")
+        assert follow_up.id != turn.id
+        assert (await follow_up.result).status == "completed"
+        assert session.reference.session_id == result.session_id
 
 
 async def test_stderr_is_captured_bounded(tmp_path: Path):
@@ -171,7 +170,8 @@ async def test_open_session_rejects_before_spawn(tmp_path: Path, overrides: dict
     options = dict(harness="pi", workdir=tmp_path, backend="rpc", executable=HELPER)
     options.update(overrides)
     with pytest.raises(HarnessError) as info:
-        await open_session(SessionSpec(**options))  # type: ignore[arg-type]
+        async with await open_session(SessionSpec(**options)):
+            pass
     assert info.value.code == code
     assert not (tmp_path / LOCK_DIRNAME).exists()
     assert not (tmp_path / "synthetic-session.jsonl").exists()
@@ -179,7 +179,8 @@ async def test_open_session_rejects_before_spawn(tmp_path: Path, overrides: dict
 
 async def test_open_session_missing_executable_is_launch_failed(tmp_path: Path):
     with pytest.raises(HarnessError) as info:
-        await open_session(_spec("success", tmp_path, executable=str(tmp_path / "missing-pi"), instructions="X"))
+        async with await open_session(_spec("success", tmp_path, executable=str(tmp_path / "missing-pi"), instructions="X")):
+            pass
     assert info.value.code == "launch-failed"
     assert not (tmp_path / "AGENTS.md").exists()
     assert not (tmp_path / LOCK_DIRNAME).exists()
@@ -188,7 +189,8 @@ async def test_open_session_missing_executable_is_launch_failed(tmp_path: Path):
 @pytest.mark.parametrize(("case", "fragment"), [("startup_hang", "get_state"), ("bad_state", "sessionId")])
 async def test_open_session_handshake_failures_are_protocol_errors(tmp_path: Path, case: str, fragment: str):
     with pytest.raises(HarnessError) as info:
-        await open_session(_spec(case, tmp_path))
+        async with await open_session(_spec(case, tmp_path)):
+            pass
     assert info.value.code == "protocol-error"
     assert fragment in str(info.value)
     assert not (tmp_path / LOCK_DIRNAME).exists()
@@ -258,15 +260,14 @@ async def test_interrupt_before_prompt_ack_keeps_slot_until_both_acks(tmp_path: 
 
 
 async def test_unacknowledged_abort_tears_down(tmp_path: Path):
-    session = await open_session(_spec("abort_hang", tmp_path))
-    turn = session.start_turn("hello")
-    await _first_event(turn)
-    await session.interrupt()
-    result = await turn.result
-    assert result.status == "protocol-error"
-    assert "abort" in (result.error or "")
-    assert session.closed
-    await session.close()
+    async with await open_session(_spec("abort_hang", tmp_path)) as session:
+        turn = session.start_turn("hello")
+        await _first_event(turn)
+        await session.interrupt()
+        result = await turn.result
+        assert result.status == "protocol-error"
+        assert "abort" in (result.error or "")
+        assert session.closed
 
 
 # ── disposal ────────────────────────────────────────────────────────────────
@@ -274,40 +275,40 @@ async def test_unacknowledged_abort_tears_down(tmp_path: Path):
 
 async def test_close_settles_active_turn_and_restores_instructions(tmp_path: Path):
     (tmp_path / "AGENTS.md").write_text("original rules\n")
-    session = await open_session(_spec("close", tmp_path, instructions="live rules"))
-    assert (tmp_path / "AGENTS.md").read_text() == "live rules"
-    turn = session.start_turn("hello")
-    await _first_event(turn)
-    await asyncio.gather(session.close(), session.close())
-    result = await turn.result
-    assert result.status == "closed" and result.error is None
-    assert result.signal == "SIGTERM"
-    assert (tmp_path / "AGENTS.md").read_text() == "original rules\n"
-    assert not (tmp_path / LOCK_DIRNAME).exists()
-    assert [event.type async for event in turn.events] == ["agent_start"]
-    assert [event async for event in session.events] == [] and session.closed
-    await session.close()
+    async with await open_session(_spec("close", tmp_path, instructions="live rules")) as session:
+        assert (tmp_path / "AGENTS.md").read_text() == "live rules"
+        turn = session.start_turn("hello")
+        await _first_event(turn)
+        await asyncio.gather(session.close(), session.close())
+        result = await turn.result
+        assert result.status == "closed" and result.error is None
+        assert result.signal == "SIGTERM"
+        assert (tmp_path / "AGENTS.md").read_text() == "original rules\n"
+        assert not (tmp_path / LOCK_DIRNAME).exists()
+        assert [event.type async for event in turn.events] == ["agent_start"]
+        assert [event async for event in session.events] == [] and session.closed
+        await session.close()
 
 
 async def test_close_kills_sigterm_ignoring_descendant(tmp_path: Path):
-    session = await open_session(_spec("descendant", tmp_path, instructions="live rules"))
-    turn = session.start_turn("hello")
-    await _first_event(turn)
-    pid_file = tmp_path / "synthetic-child.pid"
-    for _ in range(200):
-        if pid_file.exists() and pid_file.read_text():
-            break
-        await asyncio.sleep(0.02)
-    pid = int(pid_file.read_text())
-    loop = asyncio.get_running_loop()
-    started = loop.time()
-    await session.close()
-    assert loop.time() - started < 3.0
-    assert (await turn.result).status == "closed"
-    with pytest.raises(ProcessLookupError):
-        os.kill(pid, 0)
-    assert not (tmp_path / "AGENTS.md").exists()
-    assert not (tmp_path / LOCK_DIRNAME).exists()
+    async with await open_session(_spec("descendant", tmp_path, instructions="live rules")) as session:
+        turn = session.start_turn("hello")
+        await _first_event(turn)
+        pid_file = tmp_path / "synthetic-child.pid"
+        for _ in range(200):
+            if pid_file.exists() and pid_file.read_text():
+                break
+            await asyncio.sleep(0.02)
+        pid = int(pid_file.read_text())
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await session.close()
+        assert loop.time() - started < 3.0
+        assert (await turn.result).status == "closed"
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        assert not (tmp_path / "AGENTS.md").exists()
+        assert not (tmp_path / LOCK_DIRNAME).exists()
 
 
 async def test_leader_exit_stops_descendant_without_inherited_stdio(tmp_path: Path):
@@ -363,16 +364,15 @@ async def test_idle_frames_flow_through_session_events(tmp_path: Path):
 
 
 async def test_unconsumed_overflow_fails_loudly_but_keeps_buffered_events(tmp_path: Path):
-    session = await open_session(_spec("flood", tmp_path, max_buffer_bytes=4096))
-    turn = session.start_turn("hello")
-    result = await turn.result
-    assert result.status == "protocol-error" and result.events_truncated
-    assert "max_buffer_bytes" in (result.error or "")
-    buffered = [event async for event in turn.events]
-    assert buffered and buffered[0].type == "response"
-    assert sum(len(json.dumps(e.raw, ensure_ascii=False).encode()) for e in buffered) <= 4096
-    assert session.closed
-    await session.close()
+    async with await open_session(_spec("flood", tmp_path, max_buffer_bytes=4096)) as session:
+        turn = session.start_turn("hello")
+        result = await turn.result
+        assert result.status == "protocol-error" and result.events_truncated
+        assert "max_buffer_bytes" in (result.error or "")
+        buffered = [event async for event in turn.events]
+        assert buffered and buffered[0].type == "response"
+        assert sum(len(json.dumps(e.raw, ensure_ascii=False).encode()) for e in buffered) <= 4096
+        assert session.closed
 
 
 async def test_breaking_event_iteration_keeps_overflow_detection(tmp_path: Path):
@@ -403,50 +403,52 @@ async def test_events_iterator_is_single_consumer(tmp_path: Path):
 
 
 async def test_reference_round_trips_into_resume(tmp_path: Path):
-    session = await open_session(_spec("success", tmp_path))
-    reference = session.reference
-    assert reference.session_id == "11111111-2222-4333-8444-555555555555"
-    assert reference.session_file == tmp_path.absolute() / "synthetic-session.jsonl"
-    assert reference.workdir == tmp_path.absolute()
-    await session.close()
+    async with await open_session(_spec("success", tmp_path)) as session:
+        reference = session.reference
+        assert reference.session_id == "11111111-2222-4333-8444-555555555555"
+        assert reference.session_file == tmp_path.absolute() / "synthetic-session.jsonl"
+        assert reference.workdir == tmp_path.absolute()
 
-    resumed = await open_session(_spec("success", tmp_path, resume=reference))
-    assert resumed.reference.session_id == reference.session_id
-    assert resumed.spec.resume == reference
-    turn = resumed.start_turn("continue")
-    assert (await turn.result).status == "completed"
-    await resumed.close()
+    async with await open_session(_spec("success", tmp_path, resume=reference)) as resumed:
+        assert resumed.reference.session_id == reference.session_id
+        assert resumed.spec.resume == reference
+        turn = resumed.start_turn("continue")
+        assert (await turn.result).status == "completed"
 
 
 async def test_resume_verifies_header_before_spawn_and_identity_after(tmp_path: Path):
-    session = await open_session(_spec("success", tmp_path))
-    reference = session.reference
-    await session.close()
-    assert reference.session_file is not None
+    async with await open_session(_spec("success", tmp_path)) as session:
+        reference = session.reference
+        await session.close()
+        assert reference.session_file is not None
 
-    with pytest.raises(HarnessError) as info:
-        await open_session(_spec("success", tmp_path, resume=SessionReference("other-id", reference.session_file, reference.workdir)))
-    assert info.value.code == "invalid-options"
+        with pytest.raises(HarnessError) as info:
+            async with await open_session(_spec("success", tmp_path, resume=SessionReference("other-id", reference.session_file, reference.workdir))):
+                pass
+        assert info.value.code == "invalid-options"
 
-    with pytest.raises(HarnessError) as info:
-        await open_session(_spec("success", tmp_path, resume=SessionReference(reference.session_id, tmp_path / "missing.jsonl", reference.workdir)))
-    assert info.value.code == "invalid-options"
+        with pytest.raises(HarnessError) as info:
+            async with await open_session(_spec("success", tmp_path, resume=SessionReference(reference.session_id, tmp_path / "missing.jsonl", reference.workdir))):
+                pass
+        assert info.value.code == "invalid-options"
 
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    with pytest.raises(HarnessError) as info:
-        async with await open_session(_spec("success", elsewhere, resume=reference)):
-            pass
-    assert info.value.code == "invalid-options"
-    with pytest.raises(HarnessError) as info:
-        await open_session(_spec("success", tmp_path, resume=SessionReference(reference.session_id, reference.session_file, elsewhere)))
-    assert info.value.code == "invalid-options"
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        with pytest.raises(HarnessError) as info:
+            async with await open_session(_spec("success", elsewhere, resume=reference)):
+                pass
+        assert info.value.code == "invalid-options"
+        with pytest.raises(HarnessError) as info:
+            async with await open_session(_spec("success", tmp_path, resume=SessionReference(reference.session_id, reference.session_file, elsewhere))):
+                pass
+        assert info.value.code == "invalid-options"
 
-    with pytest.raises(HarnessError) as info:
-        await open_session(_spec("wrong_session", tmp_path, resume=reference))
-    assert info.value.code == "protocol-error"
-    assert "wrong-native-id" in str(info.value)
-    assert not (tmp_path / LOCK_DIRNAME).exists()
+        with pytest.raises(HarnessError) as info:
+            async with await open_session(_spec("wrong_session", tmp_path, resume=reference)):
+                pass
+        assert info.value.code == "protocol-error"
+        assert "wrong-native-id" in str(info.value)
+        assert not (tmp_path / LOCK_DIRNAME).exists()
 
 
 
@@ -462,21 +464,21 @@ async def test_startup_events_wait_for_verified_native_identity(tmp_path: Path):
 @pytest.mark.parametrize("scenario", ["prelude_flood", "relative_state"])
 async def test_invalid_startup_stream_releases_ownership(scenario: str, tmp_path: Path):
     with pytest.raises(HarnessError) as info:
-        await open_session(_spec(scenario, tmp_path, max_buffer_bytes=512))
+        async with await open_session(_spec(scenario, tmp_path, max_buffer_bytes=512)):
+            pass
     assert info.value.code == "protocol-error"
     assert not (tmp_path / LOCK_DIRNAME).exists()
 
 
 async def test_cancelled_interrupt_disposes_before_propagating(tmp_path: Path):
-    session = await open_session(_spec("abort_hang", tmp_path, request_timeout_seconds=10))
-    turn = session.start_turn("synthetic prompt")
-    await _first_event(turn)
-    interrupt = asyncio.create_task(session.interrupt())
-    await asyncio.sleep(0.02)
-    interrupt.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await interrupt
-    assert session.closed
-    assert (await turn.result).status == "closed"
-    assert not (tmp_path / LOCK_DIRNAME).exists()
-    await session.close()
+    async with await open_session(_spec("abort_hang", tmp_path, request_timeout_seconds=10)) as session:
+        turn = session.start_turn("synthetic prompt")
+        await _first_event(turn)
+        interrupt = asyncio.create_task(session.interrupt())
+        await asyncio.sleep(0.02)
+        interrupt.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await interrupt
+        assert session.closed
+        assert (await turn.result).status == "closed"
+        assert not (tmp_path / LOCK_DIRNAME).exists()

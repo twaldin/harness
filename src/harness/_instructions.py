@@ -20,6 +20,7 @@ import os
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
+from uuid import uuid4
 
 from harness.base import BuildCommand, HarnessError, absolute_workdir
 
@@ -194,6 +195,7 @@ class _Lease:
     workdir: Path
     lock_dir: Path
     lock_id: _Identity
+    owner_dir: Path
     dirs: list[_Dir] = field(default_factory=list)
     projection: _Owned | None = None
     released: bool = False
@@ -212,14 +214,24 @@ def _acquire_lease(workdir: Path | str) -> _Lease:
         raise _conflict(
             f"another harness run owns {canonical} ({LOCK_DIRNAME} exists); wait for it to finish or use a different workdir"
         ) from None
-    return _Lease(workdir=canonical, lock_dir=lock_dir, lock_id=_identity(os.lstat(lock_dir)))
+    # A fresh nonce distinguishes generations even when the filesystem reuses the lock inode.
+    owner_dir = lock_dir / f".owner-{uuid4()}"
+    try:
+        os.mkdir(owner_dir, 0o700)
+    except OSError:
+        os.rmdir(lock_dir)
+        raise
+    return _Lease(workdir=canonical, lock_dir=lock_dir, lock_id=_identity(os.lstat(lock_dir)), owner_dir=owner_dir)
 
 
 def _verify_lock(lease: _Lease) -> None:
     st = _lstat(lease.lock_dir)
     if st is None or stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or _identity(st) != lease.lock_id:
         raise _conflict(f"{lease.lock_dir} was replaced or removed while harness held the workdir lease")
-    expected = set()
+    owner = _lstat(lease.owner_dir)
+    if owner is None or not stat.S_ISDIR(owner.st_mode) or any(lease.owner_dir.iterdir()):
+        raise _conflict(f"{lease.lock_dir} lost its ownership marker; preserving the projection for manual recovery")
+    expected = {lease.owner_dir.name}
     if lease.projection is not None and lease.projection.renamed:
         expected.add(lease.projection.backup.name)
     if any(entry.name not in expected for entry in lease.lock_dir.iterdir()):
@@ -229,6 +241,7 @@ def _verify_lock(lease: _Lease) -> None:
 def _release_lock(lease: _Lease) -> None:
     _verify_lock(lease)
     try:
+        os.rmdir(lease.owner_dir)
         os.rmdir(lease.lock_dir)
     except OSError as exc:
         raise _conflict(f"cannot release {lease.lock_dir}: {exc.strerror or exc}; inspect and remove it manually") from None

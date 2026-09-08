@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync,
   renameSync, rmdirSync, unlinkSync, writeSync,
@@ -54,6 +54,7 @@ interface FileIdentity {
 
 interface Lease extends FileIdentity {
   lockDir: string
+  ownerDir: string
 }
 
 interface OwnedFile extends FileIdentity {
@@ -159,7 +160,15 @@ function acquireLease(workdir: string): Lease {
     throw err
   }
   const st = lstatSync(lockDir)
-  return { lockDir, ino: st.ino, dev: st.dev }
+  // A fresh nonce distinguishes generations even when the filesystem reuses the lock inode.
+  const ownerDir = join(lockDir, `.owner-${randomUUID()}`)
+  try {
+    mkdirSync(ownerDir, { mode: 0o700 })
+  } catch (error) {
+    rmdirSync(lockDir)
+    throw error
+  }
+  return { lockDir, ownerDir, ino: st.ino, dev: st.dev }
 }
 
 function checkLease(lease: Lease): void {
@@ -167,11 +176,16 @@ function checkLease(lease: Lease): void {
   if (st === null || !st.isDirectory() || !sameIdentity(st, lease)) {
     throw conflict(`run lock ${lease.lockDir} was removed or replaced while the run was active`)
   }
+  const owner = lstatOrNull(lease.ownerDir)
+  if (owner === null || !owner.isDirectory() || readdirSync(lease.ownerDir).length !== 0) {
+    throw conflict(`run lock ${lease.lockDir} lost its ownership marker; preserve it for manual recovery`)
+  }
 }
 
 function releaseLease(lease: Lease): void {
   checkLease(lease)
   try {
+    rmdirSync(lease.ownerDir)
     rmdirSync(lease.lockDir)
   } catch (err) {
     const code = errnoOf(err)
@@ -374,7 +388,7 @@ function releaseOwned(state: OwnedState): void {
   if (state.released) return
   checkLease(state.lease)
   const expectedBackup = state.projection?.original ? basename(state.projection.backupPath) : null
-  if (readdirSync(state.lease.lockDir).some((entry) => entry !== expectedBackup)) {
+  if (readdirSync(state.lease.lockDir).some((entry) => entry !== expectedBackup && entry !== basename(state.lease.ownerDir))) {
     throw conflict(`${state.lease.lockDir} contains unexpected entries; preserving the projection for manual recovery`)
   }
   if (state.projection !== null) restoreUnderLease(state.lease, state.projection)

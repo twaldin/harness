@@ -726,6 +726,8 @@ workdir. Python and TypeScript share this protocol across processes. All runs,
 even those without instructions, acquire the lease so they cannot observe another
 Harness run's temporary instructions. Overlapping runs in the same canonical
 workdir reject with `instruction-conflict`; different workdirs can run concurrently.
+An empty `.owner-<UUID>` directory identifies each lease independently of filesystem
+inode reuse. Cleanup verifies this marker before modifying files.
 The caller must give upstream processes separate workdirs and, when required,
 separate supported config/state locations. A shared external state directory
 explicitly selected by the caller is not isolated by this workdir lease.
@@ -748,7 +750,8 @@ Successful cleanup is idempotent on the same handle. Legacy
 
 After a conflict or uncatchable process crash, stop all affected processes,
 inspect the current file and backup, reconcile them manually, then remove the
-stale lease. Do not blindly delete the lease or call a new projection over it.
+empty ownership marker and stale lease. Do not blindly delete the lease or call
+a new projection over it.
 The lease coordinates cooperative Harness callers; it is not a security boundary
 against a hostile process rewriting the filesystem between checks.
 

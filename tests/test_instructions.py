@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -311,6 +312,16 @@ def test_replaced_lock_prevents_any_projection_cleanup(workdir: Path):
         cleanup_command(prepared)
     assert exc.value.code == "instruction-conflict"
     assert (workdir / "AGENTS.md").read_text() == "projected"
+
+
+def test_deleted_and_recreated_lock_is_not_released(workdir: Path):
+    prepared = prepare_command(_bc(workdir, None))
+    shutil.rmtree(workdir / LOCK)
+    (workdir / LOCK).mkdir()
+    with pytest.raises(HarnessError) as exc:
+        cleanup_command(prepared)
+    assert exc.value.code == "instruction-conflict"
+    assert (workdir / LOCK).is_dir()
 
 
 def test_new_hard_link_prevents_projection_cleanup(workdir: Path):

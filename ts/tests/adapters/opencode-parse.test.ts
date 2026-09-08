@@ -1,4 +1,4 @@
-import { afterAll, describe, test, expect } from 'bun:test'
+import { afterAll, beforeAll, describe, test, expect } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -46,7 +46,21 @@ function outcome(stdout: string) {
 }
 
 const roots: string[] = []
+const AMBIENT_ENV = ['OPENCODE_DB', 'OPENCODE_DISABLE_CHANNEL_DB', 'XDG_DATA_HOME']
+const savedEnv: Record<string, string | undefined> = {}
+
+beforeAll(() => {
+  for (const key of AMBIENT_ENV) {
+    savedEnv[key] = process.env[key]
+    delete process.env[key]
+  }
+})
+
 afterAll(() => {
+  for (const key of AMBIENT_ENV) {
+    if (savedEnv[key] === undefined) delete process.env[key]
+    else process.env[key] = savedEnv[key]
+  }
   for (const root of roots) rmSync(root, { recursive: true, force: true })
 })
 

@@ -62,8 +62,8 @@ describe('kilo parseOutput correlates by native session ID', () => {
     expect(dbPath).toBe(join(workdir, '.harness', 'kilo', 'kilo.db'))
     expect(built.directories).toEqual([join(workdir, '.harness', 'kilo')])
     seedDb(dbPath, [
-      { id: OTHER, messages: [USER, assistant('gpt-5.4', 99999, 1, 9)] },
       { id: SESSION, messages: [USER, assistant('gpt-5.4-mini-fast', 90, 30, 0.004)] },
+      { id: OTHER, messages: [USER, assistant('gpt-5.4', 99999, 1, 9)] },
     ])
     expect(parseOutput({ harness: 'kilo', prompt: 'x', workdir }, outcome(events(SESSION)))).toEqual({ tokensIn: 90, tokensOut: 30, costUsd: 0.004, raw: { sessionID: SESSION, costSource: 'reported' } })
     expect(parseOutput({ harness: 'kilo', prompt: 'x', workdir }, outcome('no events\n'))).toEqual({ tokensIn: null, tokensOut: null, costUsd: null, raw: null })

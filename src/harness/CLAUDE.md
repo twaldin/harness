@@ -54,7 +54,7 @@ Adapters use several output shapes; check the adapter and [matrix](../../ADAPTER
 - **JSON array** — `qwen`; read the last `type: "result"` item's usage, with a
   legacy stats-envelope fallback.
 - **Stats blob** — `gemini`. Look up `stats.models.<model>.tokens.{input, candidates}`.
-- **Log scrape** — `aider`. Regex `r"Tokens:\s+([\d,.]+k?)\s+sent,\s+([\d,.]+k?)\s+received"`.
+- **Log scrape** — `aider`. Sum formatted per-message sent/received counts; optional cache fields remain part of the report. Treat these rounded counts as heuristic telemetry.
 - **Trajectory file** — `swe-agent`. Parse `info.model_stats.instance_cost`
   from the wrapper's JSON trajectory.
 - **sqlite session DB** — `opencode`, `kilo`, `crush` (see below).

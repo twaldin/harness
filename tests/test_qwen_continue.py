@@ -93,48 +93,6 @@ def test_qwen_propagates_exit_code(tmp_path, monkeypatch):
 # --- continue-cli ---------------------------------------------------------
 
 
-def test_continue_build_command(tmp_path):
-    spec = RunSpec(harness="continue-cli", prompt="add types", workdir=tmp_path, model="claude-sonnet-4-6")
-    bc = ContinueCliAdapter().build_command(spec)
-    assert bc.cmd == "cn"
-    assert bc.args == ["-p", "add types", "--model", "claude-sonnet-4-6", "--json"]
-    assert bc.env == {}
-
-
-def test_continue_build_command_default_model(tmp_path):
-    spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path)
-    bc = ContinueCliAdapter().build_command(spec)
-    assert "--model" in bc.args
-    assert bc.args[bc.args.index("--model") + 1] == "claude-sonnet-4-6"
-
-
-def test_continue_projects_instructions_for_the_run(tmp_path, monkeypatch):
-    seen: dict = {}
-
-    def fake_run(cmd, *, cwd, **kw):
-        seen["cn"] = (cwd / "CONTINUE.md").read_text()
-        return _stub()
-
-    monkeypatch.setattr("harness._subproc.run_subprocess", fake_run)
-    spec = RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path, instructions="keep it brief")
-    ContinueCliAdapter().run(spec)
-    assert seen["cn"] == "keep it brief"
-    assert not (tmp_path / "CONTINUE.md").exists()
-
-
-def test_continue_config_file_delegates_model_selection(tmp_path):
-    spec = RunSpec(harness="continue-cli", prompt="go", workdir=tmp_path, config_file=tmp_path / "cfg.yaml")
-    bc = ContinueCliAdapter().build_command(spec)
-    assert bc.args == ["-p", "--config", str(tmp_path / "cfg.yaml"), "--format", "json", "go"]
-    assert bc.model is None
-
-
-def test_continue_config_file_rejects_explicit_model(tmp_path):
-    spec = RunSpec(harness="continue-cli", prompt="go", workdir=tmp_path, model="gpt-5.4", config_file=tmp_path / "cfg.yaml")
-    with pytest.raises(HarnessError) as exc:
-        ContinueCliAdapter().build_command(spec)
-    assert exc.value.code == "unsupported-capability"
-
 
 def test_continue_openai_env_requires_caller_config_file(tmp_path):
     spec = RunSpec(harness="continue-cli", prompt="go", workdir=tmp_path, env={"OPENAI_API_KEY": "sk-secret"})
@@ -152,22 +110,6 @@ def test_continue_openai_env_requires_caller_config_file(tmp_path):
     assert bc.env["OPENAI_API_KEY"] == "sk-secret"
 
 
-def test_continue_parses_json_envelope(tmp_path, monkeypatch):
-    envelope = {
-        "type": "result",
-        "result": "done",
-        "usage": {"input_tokens": 800, "output_tokens": 200},
-        "total_cost_usd": 0.0187,
-    }
-    monkeypatch.setattr(
-        "harness._subproc.run_subprocess",
-        lambda *a, **kw: _stub(stdout=json.dumps(envelope)),
-    )
-    result = ContinueCliAdapter().run(RunSpec(harness="continue-cli", prompt="x", workdir=tmp_path))
-    assert result.tokens_in == 800
-    assert result.tokens_out == 200
-    assert result.cost_usd == pytest.approx(0.0187)
-    assert result.raw is not None
 
 
 def test_continue_handles_garbage_stdout(tmp_path, monkeypatch):

@@ -27,7 +27,6 @@ KNOWN_PROVIDERS = {
 BARE_MODEL_HARNESSES = {
     "claude-code",
     "codex",
-    "continue-cli",
     "gemini",
     "openclaude",
     "qwen",
@@ -118,14 +117,6 @@ def normalize_model_for_harness(harness: str, model: str | None, *, resolve: boo
         if normalized.lower().startswith("gpt-5"):
             return ensure_provider_prefix(normalized, default_provider="openai-codex")
         return normalized
-    if harness == "factory-droid":
-        # droid only reaches a non-Factory endpoint via BYOK custom models,
-        # which require the "custom:" prefix on the model id. We expect the
-        # caller to have a matching entry in ~/.factory/settings.json.
-        bare = strip_known_provider_prefixes(normalized)
-        if bare.startswith("custom:"):
-            return bare
-        return f"custom:{bare}"
     if harness in PROVIDER_MODEL_HARNESSES:
         return ensure_provider_prefix(normalized, default_provider="openai")
     if harness in PRESERVE_EXPLICIT_PROVIDER_HARNESSES and "/" in normalized:

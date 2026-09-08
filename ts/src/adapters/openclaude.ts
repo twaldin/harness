@@ -178,8 +178,8 @@ openClaudeAdapter.detectStatus = function (pane: string): AgentStatus {
 }
 openClaudeAdapter.installMeta = {
   packageManager: 'npm',
-  installCommand: ['npm', 'install', '-g', 'openclaude'],
-  updateCommand: ['npm', 'install', '-g', 'openclaude@latest'],
+  installCommand: ['npm', 'install', '-g', '@gitlawb/openclaude'],
+  updateCommand: ['npm', 'install', '-g', '@gitlawb/openclaude@latest'],
   versionCommand: ['openclaude', '--version'],
 }
 

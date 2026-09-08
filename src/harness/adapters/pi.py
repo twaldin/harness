@@ -1,4 +1,4 @@
-"""pi adapter — invokes the `pi` CLI from @mariozechner/pi-coding-agent.
+"""pi adapter — invokes the `pi` CLI from @earendil-works/pi-coding-agent.
 
 pi's `--mode json` emits an event stream on stdout, one JSON object per line:
   - first line: `{"type":"session","version":...,"cwd":...}`
@@ -13,7 +13,7 @@ Each AssistantMessage has:
 
 We sum usage across assistant messages in the `agent_end` event and report
 aggregate tokens + cost. See
-https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/json.md
+https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md
 """
 from __future__ import annotations
 
@@ -55,8 +55,8 @@ class PiAdapter(Adapter):
     submit_keys = ("Enter",)
     install_meta = InstallMeta(
         package_manager="npm",
-        install_command=("npm", "install", "-g", "@mariozechner/pi-coding-agent"),
-        update_command=("npm", "install", "-g", "@mariozechner/pi-coding-agent@latest"),
+        install_command=("npm", "install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"),
+        update_command=("npm", "install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent@latest"),
         version_command=("pi", "--version"),
     )
 

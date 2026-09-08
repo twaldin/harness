@@ -51,25 +51,69 @@ function numberOrNull(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+/** `cn --model` takes a Continue Hub slug: exactly `owner/package`. */
+function isHubSlug(model: string): boolean {
+  const slash = model.indexOf('/')
+  return slash > 0 && slash < model.length - 1 && !model.includes('/', slash + 1)
+}
+
 /**
- * continue-cli adapter — invokes the `cn` CLI (Continue) in print mode.
- *
- * With `spec.configFile` the run delegates model selection to that
- * caller-owned Continue config (`cn -p --config <file> --format json`);
- * Continue's `--model` is a Hub slug, so an explicit model cannot be honored
- * alongside it. Without a config file the default `--model` branch is used;
- * OpenAI-compatible endpoints need a caller-selected config file because the
- * harness never serializes credentials into generated configs.
+ * A standalone `{status, message, ...}` line `cn` prints to stdout while
+ * (auto-)compacting before the final response (commands/chat.ts).
+ */
+function isCompactionStatusLine(line: string): boolean {
+  if (!line.startsWith('{')) return false
+  try {
+    const obj: unknown = JSON.parse(line)
+    return typeof obj === 'object' && obj !== null && !Array.isArray(obj) && typeof (obj as Record<string, unknown>)['status'] === 'string'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The final JSON `cn --format json` prints: the model text verbatim when it
+ * parsed as JSON upstream, else the `{response, status, note}` wrapper.
+ * Leading compaction status lines are skipped; anything else is null.
+ */
+function parseHeadlessJson(stdout: string): unknown | null {
+  const text = stdout.trim()
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    // fall through to compaction-prefix handling
+  }
+  const lines = text.split('\n')
+  let start = 0
+  while (start < lines.length - 1 && isCompactionStatusLine(lines[start]!.trim())) start++
+  if (start === 0) return null
+  try {
+    return JSON.parse(lines.slice(start).join('\n'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Continue headless adapter; see SPEC.md and ADAPTER-MATRIX.md.
+ * --model selects a Hub slug; an empty default delegates to upstream config.
+ * Projected instructions require --rule. JSON is model output, not telemetry.
  */
 const continueCliAdapter: Adapter = {
   name: 'continue-cli',
   instructionsFilename: 'CONTINUE.md',
-  defaultModel: 'claude-sonnet-4-6',
+  /** Empty means "upstream selection": no `--model`, reported model null. */
+  defaultModel: '',
+  permissionBypassArgs: ['--auto'],
   configFileFlag: '--config',
 
   buildCommand(spec: RunSpec): BuildCommand {
     const validated = validateRunSpec(this, spec)
-    const { model, configArgs, configFile } = validated
+    const { model, configArgs, configFile, permissionArgs } = validated
+    // Same path finalizeCommand plans for the projection; passed as a rule
+    // because cn never reads a root CONTINUE.md.
+    const ruleArgs = spec.instructions === undefined ? [] : ['--rule', join(validated.workdir, this.instructionsFilename)]
 
     if (configFile !== null) {
       // Any explicit model (even whitespace) is rejected; empty/omitted defers to the file like Python.
@@ -81,7 +125,7 @@ const continueCliAdapter: Adapter = {
       }
       return finalizeCommand(this, spec, validated, {
         cmd: 'cn',
-        args: ['-p', ...configArgs, '--format', 'json', spec.prompt],
+        args: ['-p', ...configArgs, ...permissionArgs, ...ruleArgs, '--format', 'json', spec.prompt],
         model: null,
       })
     }
@@ -94,32 +138,29 @@ const continueCliAdapter: Adapter = {
       )
     }
 
+    let modelArgs: string[] = []
+    if (model) {
+      if (!isHubSlug(model)) {
+        throw new HarnessError(
+          `continue-cli --model takes a Continue Hub slug (owner/package), not the native model id ${JSON.stringify(model)}; pass a Hub slug, or leave model unset and select the model in a Continue config (configFile -> --config)`,
+          'unsupported-capability',
+        )
+      }
+      modelArgs = ['--model', model]
+    }
+
     return finalizeCommand(this, spec, validated, {
       cmd: 'cn',
-      args: ['-p', spec.prompt, '--model', model, '--json'],
+      args: ['-p', spec.prompt, ...permissionArgs, ...modelArgs, ...ruleArgs, '--format', 'json'],
+      // Explicit Hub slug keeps its spelling; otherwise the upstream config picks.
+      model: model ? spec.model! : null,
     })
   },
 
   parseOutput(_spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
-    let raw: unknown = null
-    if (outcome.stdout.trim()) {
-      try {
-        raw = JSON.parse(outcome.stdout)
-      } catch {
-        raw = null
-      }
-    }
-    if (raw !== null && typeof raw === 'object') {
-      const obj = raw as Record<string, unknown>
-      const usage = (obj['usage'] as Record<string, unknown> | undefined) ?? {}
-      return {
-        costUsd: (obj['total_cost_usd'] as number | undefined) ?? null,
-        tokensIn: (usage['input_tokens'] as number | undefined) ?? null,
-        tokensOut: (usage['output_tokens'] as number | undefined) ?? null,
-        raw,
-      }
-    }
-    return { costUsd: null, tokensIn: null, tokensOut: null, raw }
+    // Headless JSON is model-generated text; any usage/cost-looking fields in
+    // it are not CLI telemetry.
+    return { costUsd: null, tokensIn: null, tokensOut: null, raw: parseHeadlessJson(outcome.stdout) }
   },
 
   sessionLogPath(workdir: string, _since?: number): string | null {

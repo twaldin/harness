@@ -233,6 +233,11 @@ for spec in [
 ```
 
 Canonical model names like `gpt-5.4` are normalized per harness at command-build time. Provider-prefixed forms are added where required (for example `opencode -> openai/gpt-5.4`, `pi -> openai-codex/gpt-5.4`) and stripped for CLIs that expect bare model IDs.
+Continue instead accepts Hub `owner/package` slugs or defers to upstream config
+when model is omitted. Factory preserves managed IDs and exact caller-supplied
+`custom:` IDs; it does not invent a BYOK model. See the
+[dated qualification ledger](ADAPTER-MATRIX.md#dated-qualification-ledger) for
+installed checks, failed provider smoke and known session-helper limitations.
 
 Resolution is intentionally best-effort, not a full provider registry. If a model/provider/harness combo resolves incorrectly for your setup, please send a small PR. These fixes should stay easy to review and easy to merge.
 
@@ -253,8 +258,9 @@ verify, then stop. Make the smallest possible change.""",
 
 `instructions` is temporarily projected into the adapter's instruction file in
 `workdir` (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, or `CONTINUE.md`).
-Aider uses `.harness-aider-instructions.md` through `--read`; swe-agent includes
-instructions in the prompt. `run` restores still-owned files when execution
+Aider uses `.harness-aider-instructions.md` through `--read`; Continue passes its
+projected file through `--rule`; swe-agent includes instructions in the prompt.
+`run` restores still-owned files when execution
 finishes. Use different workdirs for concurrent runs: overlapping preparation in
 one canonical workdir rejects instead of mixing instructions.
 
@@ -455,7 +461,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 
 ### Linux/container caveats (harness-bench)
 
-- `openclaude`, `factory-droid`, and `kilo` are Node CLIs; use Node `>=20` in task containers.
+- Upstream CLI runtime requirements are independent of the Harness package: current OpenClaude requires Node >=22; verify each selected distribution/version in the [qualification ledger](ADAPTER-MATRIX.md#dated-qualification-ledger).
 - `kilo` and `crush` adapters force deterministic per-workdir sqlite locations (`<workdir>/.harness/...`) for container-safe metrics parsing.
 - `kilo` and `crush` enforce strict same-model defaults (`model == small_model`) to avoid helper-model drift.
 - `openclaude` adapter does not set `--fallback-model`; single-model runs are default.

@@ -34,8 +34,8 @@ class FactoryDroidAdapter(Adapter):
     submit_keys = ("Enter",)
     install_meta = InstallMeta(
         package_manager="npm",
-        install_command=("npm", "install", "-g", "@factory-ai/droid"),
-        update_command=("npm", "install", "-g", "@factory-ai/droid@latest"),
+        install_command=("npm", "install", "-g", "droid"),
+        update_command=("npm", "install", "-g", "droid@latest"),
         version_command=("droid", "--version"),
     )
 

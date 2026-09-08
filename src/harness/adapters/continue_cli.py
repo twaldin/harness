@@ -1,11 +1,8 @@
-"""continue-cli adapter — invokes the `cn` CLI (Continue) in print mode.
+"""Continue headless adapter; see SPEC.md and ADAPTER-MATRIX.md.
 
-Default: `cn -p <prompt> --model <model> --json`. With `RunSpec.config_file`
-the caller-selected Continue config drives model/provider selection:
-`cn -p --config <file> --format json <prompt>` (no `--model`, since Continue's
-`--model` expects a Hub slug rather than a native model id, an explicit model
-is rejected on this path). OPENAI_API_KEY/OPENAI_BASE_URL in `spec.env`
-require such a config file; harness no longer generates one.
+`--model` selects a Hub slug, not a provider model ID; an empty default
+delegates to upstream config. Projected instructions require `--rule`.
+`--format json` contains model output, never trustworthy usage/cost.
 """
 from __future__ import annotations
 
@@ -37,6 +34,47 @@ _SPINNER_RE = re.compile(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
 _WORKING_RE = re.compile(r"thinking|working", re.IGNORECASE)
 
 
+def _is_hub_slug(model: str) -> bool:
+    """`cn --model` takes a Continue Hub slug: exactly `owner/package`."""
+    owner, sep, package = model.partition("/")
+    return bool(sep and owner and package and "/" not in package)
+
+
+def _is_compaction_status_line(line: str) -> bool:
+    """A standalone `{status, message, ...}` line `cn` prints to stdout while
+    (auto-)compacting before the final response (commands/chat.ts)."""
+    if not line.startswith("{"):
+        return False
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(obj, dict) and isinstance(obj.get("status"), str)
+
+
+def _parse_headless_json(stdout: str) -> object | None:
+    """The final JSON `cn --format json` prints: the model text verbatim when
+    it parsed as JSON upstream, else the `{response, status, note}` wrapper.
+    Leading compaction status lines are skipped; anything else is None."""
+    text = stdout.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    lines = text.split("\n")
+    start = 0
+    while start < len(lines) - 1 and _is_compaction_status_line(lines[start].strip()):
+        start += 1
+    if start == 0:
+        return None
+    try:
+        return json.loads("\n".join(lines[start:]))
+    except json.JSONDecodeError:
+        return None
+
+
 class ContinueCliAdapter(Adapter):
     name = "continue-cli"
     instructions_filename = "CONTINUE.md"
@@ -49,14 +87,21 @@ class ContinueCliAdapter(Adapter):
         version_command=("cn", "--version"),
     )
 
-    DEFAULT_MODEL = "claude-sonnet-4-6"
+    #: Empty means "upstream selection": no `--model`, reported model None.
+    DEFAULT_MODEL = ""
+    permission_bypass_args = ("--auto",)
 
     def reported_model(self, spec: RunSpec) -> str | None:
-        # With a caller-selected config the model comes from that file.
-        return None if spec.config_file is not None else super().reported_model(spec)
+        # The model comes from the caller config or Continue's own config
+        # unless an explicit Hub slug was requested.
+        if spec.config_file is not None or not (spec.model or "").strip():
+            return None
+        return spec.model
 
     def build_command(self, spec: RunSpec) -> BuildCommand:
         resolved = self.resolve_run_spec(spec)
+        instructions_file = self.planned_instructions_file(spec)
+        rule_args = () if instructions_file is None else ("--rule", str(instructions_file))
 
         if spec.config_file is not None:
             if spec.model:
@@ -65,7 +110,7 @@ class ContinueCliAdapter(Adapter):
                     "slug); select the model inside the config file and leave model unset",
                     code="unsupported-capability",
                 )
-            args = ["-p", *resolved.config_args, "--format", "json", spec.prompt]
+            args = ["-p", *resolved.config_args, *resolved.permission_args, *rule_args, "--format", "json", spec.prompt]
             return self.finalize_command(spec, cmd="cn", args=args)
 
         if "OPENAI_API_KEY" in spec.env or "OPENAI_BASE_URL" in spec.env:
@@ -75,25 +120,24 @@ class ContinueCliAdapter(Adapter):
                 code="unsupported-capability",
             )
 
-        args = ["-p", spec.prompt, "--model", resolved.model, "--json"]
+        model_args: tuple[str, ...] = ()
+        if resolved.model:
+            if not _is_hub_slug(resolved.model):
+                raise HarnessError(
+                    f"continue-cli --model takes a Continue Hub slug (owner/package), not the native model id "
+                    f"{resolved.model!r}; pass a Hub slug, or leave model unset and select the model in a Continue "
+                    "config (config_file -> --config)",
+                    code="unsupported-capability",
+                )
+            model_args = ("--model", resolved.model)
+
+        args = ["-p", spec.prompt, *resolved.permission_args, *model_args, *rule_args, "--format", "json"]
         return self.finalize_command(spec, cmd="cn", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
-        raw: dict | None = None
-        if outcome.stdout.strip():
-            try:
-                raw = json.loads(outcome.stdout)
-            except json.JSONDecodeError:
-                raw = None
-
-        cost = tokens_in = tokens_out = None
-        if isinstance(raw, dict):
-            usage = raw.get("usage") or {}
-            tokens_in = usage.get("input_tokens")
-            tokens_out = usage.get("output_tokens")
-            cost = raw.get("total_cost_usd")
-
-        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": raw}
+        # Headless JSON is model-generated text; any usage/cost-looking fields
+        # in it are not CLI telemetry.
+        return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": _parse_headless_json(outcome.stdout)}
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
         env_dir = os.environ.get("CONTINUE_SESSION_DIR")

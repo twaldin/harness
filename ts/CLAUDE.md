@@ -58,14 +58,15 @@ Both fixture loaders discover names and require them to match the registry.
 Most adapters use the sets at the top of the file:
 
 - `BARE_MODEL_HARNESSES` — pass the model through stripped of any provider
-  prefix (`claude-code`, `codex`, `gemini`, `qwen`, `continue-cli`, `openclaude`).
+  prefix (`claude-code`, `codex`, `gemini`, `qwen`, `openclaude`).
 - `PROVIDER_MODEL_HARNESSES` — require a `provider/model` form
   (`aider`, `kilo`, `opencode`, `swe-agent`).
 - `PRESERVE_EXPLICIT_PROVIDER_HARNESSES` — pass through unchanged when the
   user supplied a provider prefix (`crush`).
 
-`pi` and `factory-droid` have explicit branches: pi handles provider prefixes,
-while factory-droid produces a `custom:` model ID for a configured BYOK model.
+`pi` handles provider prefixes explicitly. Factory preserves the caller's exact
+managed or `custom:` model ID. Continue preserves Hub `owner/package` slugs and
+uses upstream configuration when no model is selected.
 
 For a new normalization rule, update this file and its Python counterpart
 `src/harness/model_normalization.py`, with coverage in both languages'

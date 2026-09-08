@@ -20,7 +20,6 @@ const KNOWN_PROVIDERS = new Set([
 const BARE_MODEL_HARNESSES = new Set([
   'claude-code',
   'codex',
-  'continue-cli',
   'gemini',
   'openclaude',
   'qwen',
@@ -103,14 +102,6 @@ export function normalizeModelForHarness(
       return ensureProviderPrefix(normalized, 'openai-codex')
     }
     return normalized
-  }
-  if (harness === 'factory-droid') {
-    // droid only reaches a non-Factory endpoint via BYOK custom models,
-    // which require the "custom:" prefix on the model id. We expect the
-    // caller to have a matching entry in ~/.factory/settings.json.
-    const bare = stripKnownProviderPrefixes(normalized)
-    if (bare.startsWith('custom:')) return bare
-    return `custom:${bare}`
   }
   if (PROVIDER_MODEL_HARNESSES.has(harness)) {
     return ensureProviderPrefix(normalized)

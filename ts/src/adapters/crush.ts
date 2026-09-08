@@ -64,18 +64,36 @@ function readCrushSessionTotalsByDbPath(
   try {
     const row = db.get(
       `
-      SELECT prompt_tokens, completion_tokens, cost, model
+      SELECT id, prompt_tokens, completion_tokens, cost
       FROM sessions
       WHERE parent_session_id IS NULL
       ORDER BY updated_at DESC
       LIMIT 1
       `,
-    ) as { prompt_tokens: unknown; completion_tokens: unknown; cost: unknown; model: unknown } | undefined
+    ) as { id: unknown; prompt_tokens: unknown; completion_tokens: unknown; cost: unknown } | undefined
+    if (!row) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
-    const tokensIn = typeof row?.prompt_tokens === 'number' ? Math.trunc(row.prompt_tokens) : null
-    const tokensOut = typeof row?.completion_tokens === 'number' ? Math.trunc(row.completion_tokens) : null
-    const costUsd = typeof row?.cost === 'number' ? row.cost : null
-    const model = typeof row?.model === 'string' ? row.model : null
+    const tokensIn = typeof row.prompt_tokens === 'number' ? Math.trunc(row.prompt_tokens) : null
+    const tokensOut = typeof row.completion_tokens === 'number' ? Math.trunc(row.completion_tokens) : null
+    const costUsd = typeof row.cost === 'number' ? row.cost : null
+
+    // sessions has no model column upstream; the model lives on messages.model.
+    // Report it only when every assistant turn of the session agrees on one.
+    let model: string | null = null
+    try {
+      const modelRow = db.get(
+        `
+        SELECT CASE WHEN COUNT(DISTINCT model) = 1 AND COUNT(NULLIF(model, '')) = COUNT(*)
+                    THEN MAX(model) END AS model
+        FROM messages
+        WHERE session_id = ? AND role = 'assistant'
+        `,
+        row.id,
+      ) as { model: unknown } | undefined
+      if (typeof modelRow?.model === 'string') model = modelRow.model
+    } catch {
+      // messages table absent: totals stand, model unknown
+    }
     return { tokensIn, tokensOut, costUsd, model }
   } catch {
     return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
@@ -124,9 +142,11 @@ const crushAdapter: Adapter = {
   parseSessionLog(path: string): SessionTelemetry {
     const dbPath = path.split('#')[0] ?? path
     const { tokensIn, tokensOut, costUsd, model } = readCrushSessionTotalsByDbPath(dbPath)
+    // sessions.cost is NOT NULL DEFAULT 0.0 upstream, so 0 may be a genuine
+    // zero-cost run; without a session model there is nothing to price it with.
     let finalCost = costUsd
     if ((finalCost == null || finalCost === 0) && (tokensIn != null || tokensOut != null)) {
-      finalCost = deriveCost(model ?? 'gpt-5.4', tokensIn, tokensOut) ?? finalCost
+      finalCost = deriveCost(model, tokensIn, tokensOut) ?? finalCost
     }
     return { sessionLogPath: path, tokensIn, tokensOut, costUsd: finalCost, model, raw: null }
   },

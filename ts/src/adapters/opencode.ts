@@ -79,19 +79,24 @@ function readOpenCodeSessionTotals(
   if (!db) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
 
   try {
+    // The model comes from assistant rows' data.modelID (session.model is NULL
+    // or a JSON object upstream) and is reported only when every row that
+    // names a model agrees on one.
     const row = db.get(
       `
       SELECT
         COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
         COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
         COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-        MAX(s.model)                                             AS model,
+        CASE WHEN COUNT(DISTINCT json_extract(data, '$.modelID')) = 1
+                  AND COUNT(NULLIF(json_extract(data, '$.modelID'), '')) = COUNT(*)
+             THEN MAX(json_extract(data, '$.modelID')) END       AS model,
         COUNT(*)                                                 AS row_count
-      FROM message m
-      JOIN session s ON s.id = m.session_id
-      WHERE m.session_id IN (
+      FROM message
+      WHERE session_id IN (
         SELECT id FROM session WHERE directory LIKE ? ORDER BY time_updated DESC LIMIT 1
       )
+      AND json_extract(data, '$.role') = 'assistant'
     `,
       `%${wdBasename}%`,
     ) as { tokens_in: number; tokens_out: number; cost: number; model: unknown; row_count: number } | undefined
@@ -184,10 +189,10 @@ openCodeAdapter.parseSessionLog = function (path: string): SessionTelemetry {
   }
   const result = readOpenCodeSessionTotals(wdHint || '/', dbPath)
   // SQLite cost can be 0 when opencode used a custom provider (no upstream
-  // pricing): fall back to deriveCost from tokens if we have any.
+  // pricing): fall back to deriveCost from tokens when the session model is known.
   let cost = result.costUsd
   if ((cost == null || cost === 0) && result.tokensIn != null && (result.tokensIn > 0 || (result.tokensOut ?? 0) > 0)) {
-    cost = deriveCost('gpt-5.4', result.tokensIn, result.tokensOut) ?? cost
+    cost = deriveCost(result.model, result.tokensIn, result.tokensOut) ?? cost
   }
   return { sessionLogPath: path, tokensIn: result.tokensIn, tokensOut: result.tokensOut, costUsd: cost, model: result.model, raw: null }
 }

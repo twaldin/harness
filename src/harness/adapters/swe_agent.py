@@ -54,7 +54,7 @@ class SweAgentAdapter(Adapter):
         package_manager="pip",
         install_command=("pip", "install", "--user", "mini-swe-agent"),
         update_command=("pip", "install", "--user", "--upgrade", "mini-swe-agent"),
-        version_command=("mini", "--version"),
+        version_command=("python3", "-c", "from importlib.metadata import version; print(version('mini-swe-agent'))"),
     )
 
     DEFAULT_MODEL = "gpt-5.4"

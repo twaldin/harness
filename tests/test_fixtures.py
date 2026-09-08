@@ -82,7 +82,7 @@ def _load_fixture(case_id: str, root: Path, workdir: Path) -> dict:
     assert set(fixture) == expected_keys, f"{name}.json keys {sorted(fixture)}; expected {sorted(expected_keys)}"
     if variant_name:
         variant = next(variant for variant in variants if variant["name"] == variant_name)
-        assert set(variant) <= {"name", "spec", "sampleOutput", "expectedParsed", "artifacts", "expectedCommand", "expectedError"}
+        assert set(variant) <= {"name", "spec", "sampleOutput", "expectedParsed", "artifacts", "expectedCommand", "expectedError", "expectedParseError"}
         fixture = {
             **fixture,
             **{key: value for key, value in variant.items() if key not in ("name", "spec")},
@@ -248,6 +248,10 @@ def test_capabilities_match_fixture(case: dict, tmp_path: Path):
 def test_parse_output_matches_fixture(case: dict):
     _write_artifacts(case.get("artifacts", []))
     spec = _make_spec(case["spec"], case["workdir"])
+    if case.get("expectedParseError", False):
+        with pytest.raises(Exception):
+            parse_output(spec, _make_outcome(case["sampleOutput"]))
+        return
     parsed = parse_output(spec, _make_outcome(case["sampleOutput"]))
     assert parsed == _expected_parsed(case["expectedParsed"])
 
@@ -308,10 +312,14 @@ async def test_run_executes_fixture_cli(case: dict, entrypoint: str):
     assert result.harness == case["name"]
     assert result.model == expected.model
     assert (result.exit_code, result.timed_out, result.termination) == (sample["exitCode"], False, "exited")
-    assert (result.signal, result.launch_error, result.callback_error, result.parse_error) == (None, None, None, None)
+    assert (result.signal, result.launch_error, result.callback_error) == (None, None, None)
+    if case.get("expectedParseError", False):
+        assert isinstance(result.parse_error, str)
+    else:
+        assert result.parse_error is None
     assert (result.stdout, result.stderr) == (sample["stdout"], sample["stderr"])
     assert (result.stdout_truncated, result.stderr_truncated) == (False, False)
-    assert result.ok
+    assert result.ok == (not case.get("expectedParseError", False))
 
     # What the substitute CLI observed at launch.
     seen = json.loads(record_path.read_text(encoding="utf-8"))

@@ -85,6 +85,9 @@ const qwenAdapter: Adapter = {
       if (!Array.isArray(parsed)) {
         const stats = statsFromParsed(parsed)
         if (stats.tokensIn === null) continue
+        if (!Number.isFinite(stats.tokensIn) || !Number.isFinite(stats.tokensOut)) {
+          throw new Error('Invalid Qwen token totals')
+        }
         return { costUsd: null, tokensIn: stats.tokensIn, tokensOut: stats.tokensOut, raw: parsed }
       }
       for (let i = parsed.length - 1; i >= 0; i--) {

@@ -544,6 +544,7 @@ the registry; adding an adapter or fixture alone fails conformance.
 | `artifacts` | optional synthetic SQLite statements or trajectory JSON, created before direct parsing and by the substitute CLI during execution |
 | `expectedParsedWithoutArtifacts` | explicit missing-artifact result, required when `artifacts` are declared |
 | `cases` | optional named edge cases overriding `spec` fields or replacing output, artifacts, expected command/parsed result; `expectedError` declares pre-launch rejection |
+| `cases[].expectedParseError` | `true` requires standalone parsing to throw; both run entrypoints capture `parseError`, preserve the subprocess outcome and match `expectedParsed` with null metrics/raw |
 
 See [the Claude fixture](tests/fixtures/claude-code.json) for stdout parsing and
 [the OpenCode fixture](tests/fixtures/opencode.json) for database-backed parsing.

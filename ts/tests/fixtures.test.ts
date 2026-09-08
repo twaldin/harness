@@ -71,6 +71,7 @@ interface FixtureVariant {
   artifacts?: Artifact[]
   expectedCommand?: FixtureExpectedCommand
   expectedError?: ErrorCode
+  expectedParseError?: boolean
 }
 
 interface Fixture {
@@ -84,6 +85,7 @@ interface Fixture {
   expectedParsedWithoutArtifacts?: ParsedOutput
   cases?: FixtureVariant[]
   expectedError?: ErrorCode
+  expectedParseError?: boolean
 }
 
 interface Case extends Fixture {
@@ -133,7 +135,7 @@ function loadFixture(caseId: string, root: string, workdir: string): Fixture {
     if (!variant) throw new Error(`Missing fixture case: ${caseId}`)
     const allowed: Record<string, true> = {
       name: true, spec: true, sampleOutput: true, expectedParsed: true,
-      artifacts: true, expectedCommand: true, expectedError: true,
+      artifacts: true, expectedCommand: true, expectedError: true, expectedParseError: true,
     }
     expect(Object.keys(variant).every((key) => Object.hasOwn(allowed, key))).toBe(true)
     const { name: _name, spec = {}, ...overrides } = variant
@@ -320,6 +322,10 @@ for (const name of FIXTURE_NAMES) {
     test.each(runnableCases(name))('%s parseOutput matches the fixture once the artifacts exist', (caseId) => {
       const c = freshCase(caseId)
       writeArtifacts(c.artifacts ?? [])
+      if (c.expectedParseError) {
+        expect(() => parseOutput(makeSpec(c.spec, c.workdir), c.sampleOutput)).toThrow()
+        return
+      }
       const parsed = parseOutput(makeSpec(c.spec, c.workdir), c.sampleOutput)
       expect(parsed).toEqual(c.expectedParsed)
     })
@@ -361,7 +367,12 @@ for (const name of FIXTURE_NAMES) {
         expect(result.harness).toBe(name)
         expect(result.model).toBe(expected.model!)
         expect([result.exitCode, result.timedOut, result.termination]).toEqual([sample.exitCode, false, 'exited'])
-        expect([result.signal, result.launchError, result.callbackError, result.parseError]).toEqual([null, null, null, null])
+        expect([result.signal, result.launchError, result.callbackError]).toEqual([null, null, null])
+        if (c.expectedParseError) {
+          expect(typeof result.parseError).toBe('string')
+        } else {
+          expect(result.parseError).toBeNull()
+        }
         expect([result.stdout, result.stderr]).toEqual([sample.stdout, sample.stderr])
         expect([result.stdoutTruncated, result.stderrTruncated]).toEqual([false, false])
 

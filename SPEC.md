@@ -766,10 +766,14 @@ working directory or latest log file. Existing `sessionLogPath` and
 `parseSessionLog` helpers locate/read artifacts; they do not open, own, resume
 or cancel a session. Python `session_started_after` is Unix seconds and
 TypeScript `sessionStartedAfter` is Unix milliseconds, preserving their native
-time conventions. Pass the same instant after converting units. Not every
-adapter honors the cutoff; newest-file and basename-based database selectors
-are discovery heuristics, not proof of session ownership. Do not use them to
-attribute concurrent runs without an upstream session ID.
+time conventions. Pass the same instant after converting units. Claude Code,
+OpenClaude, Factory, Gemini, Qwen, Continue and the SWE wrapper honor an
+inclusive file-mtime cutoff. Other adapter limitations remain documented in
+the [matrix](ADAPTER-MATRIX.md#session-telemetry-coverage). A modified/resumed
+old conversation can pass the cutoff; newest-file and database selectors are
+discovery heuristics, not proof of ownership. Do not attribute concurrent runs
+without an upstream session ID. File helpers read the caller process's selected
+config environment, not remembered child `RunSpec` overrides.
 
 Current execution behavior and limits:
 
@@ -1295,7 +1299,7 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.8` and TypeScript `0.2.12`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.9` and TypeScript `0.2.13`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

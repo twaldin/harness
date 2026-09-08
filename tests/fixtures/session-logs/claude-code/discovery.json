@@ -1,0 +1,78 @@
+{
+  "$comment": "Shared by ts/tests/adapters/claude-family-sessionlog.test.ts and tests/adapters/test_claude_family_session_logs.py. Two evidence tiers: 'installedCapture' is Main's isolated run of the installed 2.1.220 binary against a localhost synthetic provider (no real account); 'sourceQualification' is what was read from that binary's embedded bundle. Neither is a release-latest claim.",
+  "installedCapture": {
+    "version": "2.1.220",
+    "transcript": "captured-2.1.220.jsonl",
+    "workdirName": "repo.space_underé",
+    "projectDirName": "-Users-dev-repo-space-under-",
+    "telemetry": {
+      "tokensIn": 11,
+      "tokensOut": 3,
+      "costUsd": 7.8e-05,
+      "model": "claude-sonnet-4-6"
+    },
+    "privatePathPlaceholder": "/Users/dev"
+  },
+  "sourceQualification": {
+    "version": "2.1.220",
+    "configDirEnv": "CLAUDE_CONFIG_DIR",
+    "configDirDefault": ".claude",
+    "projectsSubdir": "projects",
+    "foreignConfigDirDefaults": [
+      ".openclaude"
+    ],
+    "foreignConfigDirEnvs": [
+      "OPENCLAUDE_CONFIG_DIR"
+    ],
+    "projectDirNameLimit": 200
+  },
+  "encoding": [
+    {
+      "projectPath": "/Users/dev/my_repo",
+      "encoded": "-Users-dev-my-repo",
+      "note": "underscore and slash"
+    },
+    {
+      "projectPath": "/Users/dev/repo.space_underé",
+      "encoded": "-Users-dev-repo-space-under-",
+      "note": "dot, space, underscore and accented letter; matches Main's installed 2.1.220 capture"
+    },
+    {
+      "projectPath": "/Users/dev/my.repo (v2)",
+      "encoded": "-Users-dev-my-repo--v2-",
+      "note": "punctuation and parentheses"
+    },
+    {
+      "projectPath": "/Users/dev/café",
+      "encoded": "-Users-dev-cafe-",
+      "note": "NFD input is not re-normalized by the sanitizer itself; canonicalization applies NFC before encoding"
+    },
+    {
+      "projectPath": "/Users/dev/🚀app",
+      "encoded": "-Users-dev---app",
+      "note": "astral char is two UTF-16 units, so two hyphens"
+    },
+    {
+      "projectPath": "/Users/dev/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "encoded": "-Users-dev-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-4rfd2o",
+      "note": "over 200 chars: 200-char prefix plus '-' and base36(abs(djb2(path)))"
+    },
+    {
+      "projectPath": "/tmp/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "encoded": "-tmp-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------jvwydj",
+      "note": "non-ASCII hash input uses UTF-16 code units"
+    }
+  ],
+  "legacyLayout": {
+    "$comment": "The pre-TWA-96 helper only replaced '/' and '_' with '-'. Transcripts placed under that name for a workdir containing any other non-alphanumeric character must not be found.",
+    "workdirName": "repo.space_underé"
+  },
+  "transcript": "session.jsonl",
+  "telemetry": {
+    "$comment": "session.jsonl repeats message.id msg_01 across two content-block lines (counted once), carries a <synthetic> placeholder (ignored for model) and no cost field (cost derived from claude-sonnet-4-6 pricing).",
+    "tokensIn": 75,
+    "tokensOut": 20,
+    "costUsd": 0.000525,
+    "model": "claude-sonnet-4-6"
+  }
+}

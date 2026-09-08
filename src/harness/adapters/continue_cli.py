@@ -3,6 +3,14 @@
 `--model` selects a Hub slug, not a provider model ID; an empty default
 delegates to upstream config. Projected instructions require `--rule`.
 `--format json` contains model output, never trustworthy usage/cost.
+
+Session artifacts (continuedev/continue@5522c6f, `extensions/cli/src/session.ts`
+and `core/util/{history,paths}.ts`): `<CONTINUE_GLOBAL_DIR or ~/.continue>/sessions/
+<uuid>.json` holding `{sessionId, title, workspaceDirectory, history, usage?}`
+where `workspaceDirectory` is the `cn` process cwd and `usage` is the CLI's own
+cumulative `{totalCost, promptTokens, completionTokens, ...}`. `sessions.json`
+in the same directory is the upstream index, not a session. The CLI never
+persists a model id (`chatModelTitle` is unset), so `model` stays null.
 """
 from __future__ import annotations
 
@@ -23,7 +31,6 @@ from harness.base import (
     RunSpec,
     SessionTelemetry,
 )
-from harness.pricing import derive_cost
 from harness.util import last_non_empty_join, strip_ansi
 
 _MODEL_LOADING_RE = re.compile(r"Model:\s*Loading", re.IGNORECASE)
@@ -73,6 +80,30 @@ def _parse_headless_json(stdout: str) -> object | None:
         return json.loads("\n".join(lines[start:]))
     except json.JSONDecodeError:
         return None
+
+
+def continue_sessions_dir() -> Path:
+    """`<CONTINUE_GLOBAL_DIR or ~/.continue>/sessions`; a relative override resolves against the process cwd."""
+    override = os.environ.get("CONTINUE_GLOBAL_DIR")
+    home = os.path.abspath(override) if override else os.path.join(os.path.expanduser("~"), ".continue")
+    return Path(home) / "sessions"
+
+
+def _read_json_object(path: Path) -> dict | None:
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _to_int(v: object) -> int | None:
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _to_float(v: object) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
 
 
 class ContinueCliAdapter(Adapter):
@@ -140,48 +171,49 @@ class ContinueCliAdapter(Adapter):
         return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": _parse_headless_json(outcome.stdout)}
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
-        env_dir = os.environ.get("CONTINUE_SESSION_DIR")
-        if env_dir:
-            d = Path(env_dir).expanduser()
-            if d.exists() and d.is_dir():
-                files = sorted((p for p in d.glob("*.json") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
-                if files:
-                    return str(files[0])
+        absolute = os.path.abspath(workdir)
+        try:
+            resolved = os.path.realpath(absolute, strict=True)
+        except OSError:
+            resolved = absolute
+        # Distinct case-sensitive POSIX paths must not share telemetry.
+        wanted = {absolute, resolved}
 
-        base = workdir.name
-        candidates = [
-            Path.home() / ".continue" / "sessions" / base,
-            Path.home() / ".continue" / "dev_data" / base,
-            Path.home() / ".continue" / "index" / base,
-        ]
-        for d in candidates:
-            if not d.exists() or not d.is_dir():
+        try:
+            entries = list(continue_sessions_dir().iterdir())
+        except OSError:
+            return None
+        candidates: list[tuple[float, Path]] = []
+        for p in entries:
+            try:
+                if p.suffix != ".json" or p.name == "sessions.json" or not p.is_file():
+                    continue
+                mtime = p.stat().st_mtime
+            except OSError:
                 continue
-            files = sorted((p for p in d.glob("*.json") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
-            if files:
-                return str(files[0])
-            idx = d / "session.json"
-            if idx.exists():
-                return str(idx)
+            if session_started_after is not None and mtime < session_started_after:
+                continue
+            candidates.append((mtime, p))
+        for _, p in sorted(candidates, reverse=True):
+            session = _read_json_object(p)
+            workspace = session.get("workspaceDirectory") if session else None
+            if isinstance(workspace, str) and workspace in wanted:
+                return str(p)
         return None
 
     def parse_session_log(self, path: str) -> SessionTelemetry:
-        p = Path(path)
-        if not p.exists():
+        session = _read_json_object(Path(path))
+        usage = session.get("usage") if session else None
+        if not isinstance(usage, dict):
             return SessionTelemetry(path, None, None, None, None, None)
-        try:
-            raw = json.loads(p.read_text(encoding="utf-8"))
-            obj = raw if isinstance(raw, dict) else {}
-            usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else {}
-            tokens_in = int(usage.get("input_tokens")) if isinstance(usage.get("input_tokens"), (int, float)) else None
-            tokens_out = int(usage.get("output_tokens")) if isinstance(usage.get("output_tokens"), (int, float)) else None
-            model = obj.get("model") if isinstance(obj.get("model"), str) else None
-            cost = float(obj.get("total_cost_usd")) if isinstance(obj.get("total_cost_usd"), (int, float)) else None
-            if cost is None:
-                cost = derive_cost(model, tokens_in, tokens_out)
-            return SessionTelemetry(path, tokens_in, tokens_out, cost, model, raw)
-        except (OSError, json.JSONDecodeError, ValueError, TypeError):
-            return SessionTelemetry(path, None, None, None, None, None)
+        return SessionTelemetry(
+            path,
+            _to_int(usage.get("promptTokens")),
+            _to_int(usage.get("completionTokens")),
+            _to_float(usage.get("totalCost")),
+            None,
+            usage,
+        )
 
     # ---- session-aware ---------------------------------------------------
 

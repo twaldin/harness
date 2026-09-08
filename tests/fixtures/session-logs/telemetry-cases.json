@@ -1,0 +1,31 @@
+[
+  {
+    "name": "Claude usage updates replace earlier message snapshots",
+    "adapters": ["claude-code", "openclaude"],
+    "records": [
+      {"type":"assistant","message":{"id":"msg_one","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":1}}},
+      {"type":"assistant","message":{"id":"msg_one","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":3}}},
+      {"type":"assistant","message":{"id":"msg_two","model":"claude-sonnet-4-6","usage":{"input_tokens":5,"output_tokens":2}}}
+    ],
+    "expected": {"tokensIn":15,"tokensOut":5,"model":"claude-sonnet-4-6","costUsd":0.00012}
+  },
+  {
+    "name": "Gemini mixed models do not price aggregate tokens at the last model rate",
+    "adapters": ["gemini"],
+    "records": [
+      {"sessionId":"synthetic","projectHash":"synthetic"},
+      {"id":"one","type":"gemini","model":"gemini-2.5-pro","tokens":{"input":10,"output":1}},
+      {"id":"two","type":"gemini","model":"gemini-2.5-flash","tokens":{"input":20,"output":2}}
+    ],
+    "expected": {"tokensIn":30,"tokensOut":3,"model":null,"costUsd":null}
+  },
+  {
+    "name": "Qwen mixed models do not price aggregate tokens at the last model rate",
+    "adapters": ["qwen"],
+    "records": [
+      {"uuid":"one","sessionId":"synthetic","type":"assistant","model":"qwen3-coder-plus","usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1}},
+      {"uuid":"two","sessionId":"synthetic","type":"assistant","model":"qwen-turbo","usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":2}}
+    ],
+    "expected": {"tokensIn":30,"tokensOut":3,"model":null,"costUsd":null}
+  }
+]

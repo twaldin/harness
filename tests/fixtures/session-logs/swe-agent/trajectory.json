@@ -1,0 +1,9 @@
+{
+  "trajectory_format": "mini-swe-agent-1.1",
+  "info": {
+    "mini_version": "2.2.8",
+    "model_stats": {"instance_cost": 0.5, "api_calls": 0},
+    "config": {"model": {"model_name": "openai/gpt-5.4"}}
+  },
+  "messages": []
+}

@@ -2,6 +2,14 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Repaired Claude Code, OpenClaude, Factory Droid, Gemini, Qwen, Continue and
+  SWE-wrapper artifact helpers in both languages, with shared upstream-shaped
+  fixtures and native cutoff units. Discovery honors qualified config roots and
+  project metadata instead of unrelated latest/basename logs. OpenClaude now
+  uses only its own config root and preserves provider model namespaces.
+  Native session metrics replace guessed schemas; Continue headless output
+  remains non-telemetry. See [sources and runtime limits](ADAPTER-MATRIX.md#artifact-qualification--2026-09-08).
+  Pane precedence and controlled-session ownership are unchanged.
 - Added `goose` in Python and TypeScript using the official headless JSONL CLI
   and shared subprocess lifecycle. Preserves caller-selected model/provider/extensions,
   supports inline instructions, `GOOSE_PATH_ROOT` and explicit `GOOSE_MODE=auto`,

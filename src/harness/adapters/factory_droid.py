@@ -1,4 +1,15 @@
-"""Factory Droid adapter — invokes `droid exec` in headless JSON mode."""
+"""Factory Droid adapter — invokes `droid exec` in headless JSON mode.
+
+Session artifacts (droid 0.213.0 binary, `@factory/droid-sdk` 0.9.1
+`src/session-discovery.ts`): `<FACTORY_HOME_OVERRIDE or ~>/.factory/sessions/`
+holds one project directory per working directory, named `-` + realpath with
+`/` runs replaced by `-` (`/Users/me/app` -> `-Users-me-app`). Each session is
+`<uuid>.jsonl` (first line `{"type":"session_start","cwd":...}`) plus
+`<uuid>.settings.json` (`model`, `tokenUsage.{inputTokens,outputTokens,...}`).
+Older builds wrote `<uuid>.jsonl` flat in `sessions/`; those are matched by
+their `session_start.cwd`. Usage never appears in the `--output-format json`
+envelope and Factory bills credits, not USD, so cost stays null.
+"""
 from __future__ import annotations
 
 import json
@@ -18,6 +29,9 @@ from harness.base import (
     SessionTelemetry,
 )
 from harness.util import last_non_empty_join, strip_ansi
+
+_SETTINGS_SUFFIX = ".settings.json"
+_SESSION_START_BYTES = 65536  # upstream reads the first 64 KiB for the session_start line
 
 _READY_RE = re.compile(r'Try\s+"|Auto.*\(Off\)|Auto.*\(On\)', re.IGNORECASE)
 _IDLE_RE = re.compile(r'Try\s+"|Auto.*\(', re.IGNORECASE)
@@ -107,53 +121,118 @@ class FactoryDroidAdapter(Adapter):
         return "unknown"
 
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
-        base = workdir.name
-        roots: list[Path] = []
-        factory_home = os.environ.get("FACTORY_HOME")
-        if factory_home:
-            roots.append(Path(factory_home).expanduser())
-        roots.append(Path.home() / ".factory")
+        cwd = _canonical_cwd(workdir)
+        sessions = factory_sessions_dir()
+        newest: tuple[float, Path] | None = None
 
-        for root in roots:
-            for rel in ("sessions", "trajectories", "data"):
-                d = root / rel / base
-                if not d.exists() or not d.is_dir():
-                    continue
-                files = sorted((p for p in d.glob("*.json") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
-                if session_started_after is not None:
-                    files = [p for p in files if p.stat().st_mtime >= session_started_after]
-                if files:
-                    return str(files[0])
-        return None
+        def consider(p: Path) -> None:
+            nonlocal newest
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                return
+            if session_started_after is not None and mtime < session_started_after:
+                return
+            if newest is not None and (mtime, str(p)) <= (newest[0], str(newest[1])):
+                return
+            if _session_start_cwd(p) == cwd:
+                newest = (mtime, p)
+
+        for p in _jsonl_files(sessions / encode_project_dir(cwd)):
+            consider(p)
+        # Older builds use a flat directory; both layouts require matching cwd.
+        for p in _jsonl_files(sessions):
+            consider(p)
+        return str(newest[1]) if newest else None
 
     def parse_session_log(self, path: str) -> SessionTelemetry:
         p = Path(path)
-        if not p.exists():
+        settings_path = p if path.endswith(_SETTINGS_SUFFIX) else p.with_name(p.stem + _SETTINGS_SUFFIX)
+        settings = _read_json_object(settings_path)
+        if settings is None and not p.exists():
             return SessionTelemetry(path, None, None, None, None, None)
-        try:
-            raw = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return SessionTelemetry(path, None, None, None, None, None)
-        if not isinstance(raw, dict):
-            return SessionTelemetry(path, None, None, None, None, raw)
 
-        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
-        cost = _to_float(raw.get("total_cost_usd"))
-        if cost is None:
-            usage_cost = usage.get("cost")
-            if isinstance(usage_cost, (int, float)):
-                cost = float(usage_cost)
-            elif isinstance(usage_cost, dict):
-                cost = _to_float(usage_cost.get("total"))
-
+        fields = settings or {}
+        usage = fields.get("tokenUsage") if isinstance(fields.get("tokenUsage"), dict) else {}
+        model = fields.get("model") if isinstance(fields.get("model"), str) else None
+        if model is None and settings_path != p:
+            model = _last_assistant_model_id(p)
         return SessionTelemetry(
             path,
-            _to_int(_first_present(usage, "input_tokens", "input")),
-            _to_int(_first_present(usage, "output_tokens", "output")),
-            cost,
-            raw.get("model") if isinstance(raw.get("model"), str) else None,
-            raw,
+            _to_int(usage.get("inputTokens")),
+            _to_int(usage.get("outputTokens")),
+            None,
+            model,
+            settings,
         )
+
+
+def factory_sessions_dir() -> Path:
+    """`<FACTORY_HOME_OVERRIDE or ~>/.factory/sessions`; the override replaces `~`, not `~/.factory`."""
+    home = os.environ.get("FACTORY_HOME_OVERRIDE") or os.path.expanduser("~")
+    return Path(home) / ".factory" / "sessions"
+
+
+def encode_project_dir(cwd: str) -> str:
+    """`-` + cwd without leading/trailing slashes and every `/` run replaced by `-` (POSIX rule)."""
+    return "-" + re.sub(r"/+", "-", cwd.strip("/"))
+
+
+def _canonical_cwd(workdir: Path) -> str:
+    absolute = os.path.abspath(workdir)
+    try:
+        return os.path.realpath(absolute, strict=True)
+    except OSError:
+        return absolute
+
+
+def _jsonl_files(directory: Path) -> list[Path]:
+    try:
+        return [p for p in directory.iterdir() if p.suffix == ".jsonl" and p.is_file()]
+    except OSError:
+        return []
+
+
+def _session_start_cwd(path: Path) -> str | None:
+    """`cwd` from a session file's first `session_start` line, or None."""
+    try:
+        with path.open("rb") as fh:
+            first = fh.read(_SESSION_START_BYTES).split(b"\n", 1)[0]
+        event = json.loads(first)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(event, dict) or event.get("type") != "session_start":
+        return None
+    cwd = event.get("cwd")
+    return cwd if isinstance(cwd, str) else None
+
+
+def _read_json_object(path: Path) -> dict | None:
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _last_assistant_model_id(path: Path) -> str | None:
+    """`message.modelId` of the last assistant line (recent droid builds stamp it; older ones do not)."""
+    model: str | None = None
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if '"modelId"' not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                message = event.get("message") if isinstance(event, dict) else None
+                if isinstance(message, dict) and message.get("role") == "assistant" and isinstance(message.get("modelId"), str):
+                    model = message["modelId"]
+    except OSError:
+        return None
+    return model
 
 
 def _parse_last_json_object(stdout: str) -> dict | None:

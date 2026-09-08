@@ -618,8 +618,8 @@ for setup, explicit permissions and qualification limits.
 deltas, duplicate buffered flushes, tool events and terminal results. Malformed,
 truncated and non-object lines are ignored by parsing, not removed from stdout.
 The last `type: "result"` object's optional `usage.inputTokens` and
-`usage.outputTokens` supply independent nonnegative integer counts; invalid or
-missing fields are null. Qualified Cursor 2026.09.02-c22c1a3 already subtracts
+`usage.outputTokens` supply independent nonnegative safe-integer counts (at most
+2^53 - 1); invalid or missing fields are null. Qualified Cursor 2026.09.02-c22c1a3 already subtracts
 cache reads/writes from `inputTokens`; Harness does not add them back or sum
 message events. No USD metric is reported. Older documented results without
 usage remain valid and report null counts. Process exit/termination remains

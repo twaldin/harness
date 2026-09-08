@@ -99,11 +99,11 @@ def _result_usage(events: list[dict] | None) -> tuple[int | None, int | None]:
 
 
 def _token_count(value: object) -> int | None:
-    """A reported token counter: a finite, nonnegative, integer-valued number."""
+    """A nonnegative integer exactly representable in both language APIs."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
-        return value if value >= 0 else None
-    if isinstance(value, float) and value >= 0 and math.isfinite(value) and value.is_integer():
+        return value if 0 <= value <= 2**53 - 1 else None
+    if isinstance(value, float) and 0 <= value <= 2**53 - 1 and math.isfinite(value) and value.is_integer():
         return int(value)
     return None

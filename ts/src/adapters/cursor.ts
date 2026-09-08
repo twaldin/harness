@@ -62,12 +62,12 @@ const cursorAdapter: Adapter = {
       if (event['type'] !== 'result') continue
       const usage = event['usage']
       if (isJsonObject(usage)) {
-        // Each count validates independently as a nonnegative integer-valued
-        // number; anything else (booleans, strings, fractions) is null.
+        // Counts must be exact in both language APIs; reject unsafe integers
+        // rather than silently report a rounded token total.
         const input = usage['inputTokens']
         const output = usage['outputTokens']
-        tokensIn = typeof input === 'number' && Number.isInteger(input) && input >= 0 ? input : null
-        tokensOut = typeof output === 'number' && Number.isInteger(output) && output >= 0 ? output : null
+        tokensIn = typeof input === 'number' && Number.isSafeInteger(input) && input >= 0 ? input : null
+        tokensOut = typeof output === 'number' && Number.isSafeInteger(output) && output >= 0 ? output : null
       }
       break
     }

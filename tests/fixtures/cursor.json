@@ -588,6 +588,30 @@
       }
     },
     {
+      "name": "unsafe-integer-counts-not-rounded",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"result\",\"usage\":{\"inputTokens\":9007199254740992,\"outputTokens\":9007199254740991}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": 9007199254740991,
+        "raw": [
+          {
+            "type": "result",
+            "usage": {
+              "inputTokens": 9007199254740992,
+              "outputTokens": 9007199254740991
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "empty-prompt",
       "spec": {
         "prompt": ""

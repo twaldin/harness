@@ -11,8 +11,8 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The eighteen adapters below are registered in **both** implementations and have
-shared fixture files: `aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`,
+The nineteen adapters below are registered in **both** implementations and have
+shared fixture files: `aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
 `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
@@ -61,6 +61,7 @@ versions below are dated observations, not a supported version range.
 | swe-agent | [`mini-swe-agent`; native CLI docs](https://mini-swe-agent.com/latest/usage/mini/) (registry 2.4.6) plus a **consumer-supplied wrapper** | dependency 2.2.8; wrapper help checked | Wrapper-only, not native SWE-agent/mini support. `mini --version` fails; metadata now queries the dependency via the wrapper's `python3`. Installing the dependency does not install the wrapper. Native mini is TWA-82. |
 | cline | [`cline`; standalone CLI](https://docs.cline.bot/cli/cli-reference), pinned [cli-v3.0.61](https://github.com/cline/cline/tree/cli-v3.0.61/apps/cli) | 3.0.61, isolated npm prefix | Help/version and real-CLI loopback protocol checked; JSON differs from docs. SIGINT stops ordinary shell tools; SIGTERM does not. Real Cline provider smoke failed without authentication; no successful real-provider coverage. |
 | goose | [`aaif-goose/goose` release binary](https://github.com/aaif-goose/goose/releases/tag/v1.49.0); [CLI reference](https://goose-docs.ai/docs/guides/goose-cli-commands) | isolated Darwin arm64 v1.49.0; not installed on PATH | Help/source-checked; bounded real CLI probes with synthetic localhost provider. No authenticated provider coverage. macOS stdio MCP children can escape group teardown; see below. |
+| cursor | [official binary installer](https://cursor.com/install); [headless reference](https://cursor.com/docs/cli/headless) | 2026.09.02-c22c1a3, isolated Darwin arm64 archive | Help/source-checked; bounded native auth-failure smoke in both languages. No credentialed provider/edit/tool-cleanup coverage. See [limits](#cursor). |
 
 Off-PATH probes used absolute executables; Harness does not add them to PATH.
 No tools were upgraded, credentials switched, global configuration rewritten or
@@ -70,7 +71,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `cline`, `copilot`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `cline`, `copilot`, `cursor`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. The seven file-based helpers qualified below use current
 source-shaped fixtures; they remain caller-driven artifact helpers, separate
@@ -96,6 +97,7 @@ from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | cline | unwired | unwired | foreground NDJSON only; no session resume or latest-session discovery |
 | goose | unwired | unwired | `complete` usage comes from stdout; no latest-session discovery or session ID in stream events |
 | copilot | unwired | unwired | native JSONL events only; no latest-session discovery |
+| cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
 
 ### Artifact qualification — 2026-09-08
 
@@ -168,7 +170,7 @@ Database correlation remains TWA-95; Pi qualification remains TWA-71.
 
 ## Backend and permission capabilities
 
-All eighteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All nineteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -178,7 +180,7 @@ OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
-OMP, Cline and Copilot add install metadata but no pane or session-log heuristics.
+OMP, Cline, Copilot and Cursor add install metadata but no pane or session-log heuristics.
 These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
@@ -202,6 +204,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto`; conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
+| cursor | `--force`; native explicit denies and team policy still apply |
 | crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
 Claude Code, Codex, Cline and Copilot have typed native options:
@@ -252,6 +255,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | cline        | when reported     | when reported                 | last top-level `run_result.usage`; partial streams retain raw events with null totals |
 | goose        | optional upstream cost (may be estimated) | optional cumulative totals | last JSONL `complete` event; partial stream without completion has null metrics |
 | copilot      | **null**          | **null**                      | JSONL native events retained; premium requests/AI credits are not USD or token totals |
+| cursor       | **null**          | optional uncached input / output | last JSONL `result.usage`; absent/invalid counts remain null |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
@@ -271,6 +275,7 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
   - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
   - **cline** has no library default; model IDs pass through trimmed, without provider-prefix inference. `ClineOptions.provider` selects the provider independently. Omitted choices use upstream configuration.
   - **copilot** preserves explicit model IDs after trimming; omitted model delegates to upstream selection and reports null.
+  - **cursor** preserves native model IDs after trimming, including parameterized bracket overrides; omission uses native selection and reports null.
   - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
   - **goose** preserves explicit model IDs without provider inference; omitted/empty model delegates to upstream config and reports null.
   - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
@@ -721,6 +726,23 @@ Kilo is not installed on PATH here; shared conformance is synthetic, not
 provider smoke.
 
 ---
+
+## cursor
+
+- **Distribution / executable**: the [official installer](https://cursor.com/install) installs the standalone `agent` executable and legacy `cursor-agent` alias. The editor's `cursor` launcher is different. On macOS/Linux, install with `curl https://cursor.com/install -fsS | bash`; update explicitly with `agent update`; check `agent --version`. Harness never installs/updates automatically. `executable` can select an absolute isolated installation.
+- **Command**: `agent --print --output-format stream-json --stream-partial-output [--model MODEL] [--force] -- PROMPT`. The prompt is one literal argument, including leading dashes/newlines. Empty prompts reject before preparation. The shared lifecycle projects/restores root `AGENTS.md`; Cursor also reads native `CLAUDE.md` and `.cursor/rules`.
+- **Model / config / auth**: no Harness model default or provider rewrite. `configHome` maps to documented `CURSOR_CONFIG_DIR`; `configFile` is unsupported. This relocates configuration, not all data or credentials: native source separately uses `CURSOR_DATA_DIR` for project data. Preserve caller-selected native environment and login (`agent login`) or `CURSOR_API_KEY`; Harness does not harvest/copy credentials, switch accounts or alter global configuration. Available models and entitlement depend on that account.
+- **Permissions**: upstream mode injects no grants. Do **not** treat `--print` alone as a read-only security boundary. The [headless guide](https://cursor.com/docs/cli/headless) says edits require `--force`, but the current [permissions reference](https://cursor.com/docs/cli/reference/permissions) and installed help explicitly give print mode write/shell tools governed by native permissions. Existing allow/deny and sandbox/team policies matter. Explicit bypass adds only `--force` (force-allow unless explicitly denied); Harness adds no separate `--trust`, `--approve-mcps` or `--sandbox` override. Native `--mode ask` / `plan` advertise read-only behavior but have no Harness mapping; callers needing that mode must use Cursor directly. Actual editing/permission enforcement was not provider-tested.
+- **Output / metrics**: `raw` retains all complete object events in order, including assistant deltas and duplicate buffered/final flushes. Use the terminal `result.result` for final text rather than concatenating all assistant events. Malformed/truncated/non-object lines are skipped by parsing but remain in stdout. The last `type: "result"` owns optional `usage.inputTokens` / `outputTokens`; counts must be nonnegative safe integers (at most 2^53 - 1), independently validated. Installed source subtracts cache reads/writes before emitting `inputTokens`; do not add them back. No cost derivation. The online result example omits usage; older/missing fields stay null. Native error events never replace process exit/termination.
+- **Capabilities / ownership**: one-shot CLI, raw-chunk streaming, cancellation, explicit bypass and config-home override. SIGINT is the graceful signal because native headless mode wires it to its abort controller/background-work registry; the shared engine owns escalation and instruction cleanup. No native options, alternate text/JSON format selection, ask/plan, sandbox/trust/MCP grants, attachments, persist/resume, worktrees, cloud workers, ACP/RPC/SDK, pane or session-log mapping. Unsupported backend/config/native-option requests reject rather than silently disappearing.
+
+### Cursor qualification and limits
+
+Checked September 8, 2026: current official installer selected **2026.09.02-c22c1a3**; its Darwin arm64 archive was extracted into a disposable directory, not installed globally. The bundled launcher execs its bundled Node runtime; `--version`, `--help`, native auth status and shipped JS headless/config/permission/signal code were checked. Shared success, failure, partial-stream and optional-usage fixtures are synthetic, not provider observations.
+
+Bounded Python, Bun and packaged Node runs (20-second deadlines, upstream and bypass policies, disposable work/config/data directories) each exited 1 in one to three seconds with native `Authentication required` stderr, empty stdout/raw, working output callbacks and restored instruction files. The selected native status was unauthenticated. No login/account/config change was attempted.
+
+**Not covered:** successful provider response, live token accounting, read/write/shell permission enforcement, workspace/MCP approval, or cancellation while actual tools/subagents are running. Native source can spawn shell tools in detached process groups; SIGINT requests native abort, but arbitrary detached/escaped descendants are not guaranteed stopped by Harness group teardown. No global worker/session cleanup is attempted. Qualify the caller's selected version/configuration before relying on tool cleanup; conformance proves the shared owned-process machinery, not all Cursor extensions.
 
 ## copilot
 

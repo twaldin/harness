@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (17 adapters)
+│   ├── adapters/*.py       (18 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -1281,7 +1281,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "claude-code", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

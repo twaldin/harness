@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (23 adapters)
+│   ├── adapters/*.py       (24 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -259,7 +259,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All twenty-three CLI adapters share these lifecycle capabilities.
+for sessions. All twenty-four CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is

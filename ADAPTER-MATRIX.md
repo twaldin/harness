@@ -179,7 +179,7 @@ Database correlation remains TWA-95; Pi qualification remains TWA-71.
 
 ## Backend and permission capabilities
 
-All twenty-three support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All twenty-four support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /

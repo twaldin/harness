@@ -28,7 +28,7 @@ harness/
 │   ├── pricing.py               cost derivation from token counts
 │   ├── _subproc.py              subprocess runner
 │   ├── _instructions.py         owned instruction projection lifecycle
-│   └── adapters/                23 adapter modules, one per CLI
+│   └── adapters/                24 adapter modules, one per CLI
 ├── ts/                          TypeScript implementation (see ts/CLAUDE.md)
 │   ├── package.json             @twaldin/harness-ts (Bun build + test)
 │   ├── src/base.ts              mirror of Python base.py types
@@ -38,7 +38,7 @@ harness/
 │   ├── src/subproc.ts
 │   ├── src/instructions.ts      owned instruction projection lifecycle
 │   ├── src/util.ts
-│   └── src/adapters/            23 adapter modules, one per CLI
+│   └── src/adapters/            24 adapter modules, one per CLI
 ├── tests/                       pytest suite (Python)
 └── ts/tests/                    bun test suite (TypeScript)
 ```

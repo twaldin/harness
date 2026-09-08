@@ -193,7 +193,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-three adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-four adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 

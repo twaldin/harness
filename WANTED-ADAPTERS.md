@@ -132,11 +132,11 @@ See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
 
 ## New source-qualified discoveries
 
-Workspace and repository backlog searches found no existing Qoder or Kimi Code
-adapter tickets. Both follow-ups remain in Backlog, are children of
-[TWA-87](https://linear.app/twaldin/issue/TWA-87), and depend on shared conformance
-[TWA-67](https://linear.app/twaldin/issue/TWA-67), which carries the contract and
-lifecycle prerequisites. No new runtime adapter is shipped by this catalog PR.
+At the September 7 audit, workspace and repository backlog searches found no
+existing Qoder or Kimi Code adapter tickets. Both follow-ups were created as
+children of [TWA-87](https://linear.app/twaldin/issue/TWA-87), depending on shared
+conformance [TWA-67](https://linear.app/twaldin/issue/TWA-67). The catalog itself
+shipped no runtime adapter; subsequent implementation status is noted below.
 
 ### Qoder CLI — [TWA-92](https://linear.app/twaldin/issue/TWA-92)
 
@@ -152,6 +152,11 @@ lifecycle prerequisites. No new runtime adapter is shipped by this catalog PR.
   partial streams and cleanup. Unknown token/USD fields stay null.
 
 ### Kimi Code CLI — [TWA-93](https://linear.app/twaldin/issue/TWA-93)
+
+**Shipped September 8:** one `kimi-code` adapter in both languages. See the
+[maintained adapter reference](ADAPTER-MATRIX.md#kimi-code) for current
+permissions, configuration, parsing and qualification gaps. The original
+source-qualified intake evidence follows.
 
 - **Identity / maintenance:** [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code),
   MIT; npm [`@moonshot-ai/kimi-code`](https://www.npmjs.com/package/@moonshot-ai/kimi-code)

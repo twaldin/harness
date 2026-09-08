@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (24 adapters)
+│   ├── adapters/*.py       (25 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -259,7 +259,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All twenty-four CLI adapters share these lifecycle capabilities.
+for sessions. All twenty-five CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -295,7 +295,7 @@ approval request by silently escalating.
 | cursor | `--force` (native explicit denies and team policy still apply) |
 | kiro | `--trust-all-tools` |
 
-The other five adapters (including Amp) reject `"bypass"` as unsupported; a missing mapping is
+Adapters without a mapping (including Amp and Kimi Code) reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
 silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 `--sandbox`, and cannot be combined with `"bypass"` because that would override
@@ -676,6 +676,35 @@ silently projecting an ignored file or granting trust implicitly. Empty prompts
 reject before preparation. Harness never passes `--worktree`. See the
 [adapter reference](ADAPTER-MATRIX.md#mistral-vibe) for unsupported operations.
 
+### kimi-code
+
+The maintained Kimi Code CLI runs as
+`kimi --output-format stream-json [--model=ALIAS] --prompt=PROMPT`.
+Equals-form options preserve flag-shaped prompts and model aliases as data.
+Empty or whitespace-only prompts reject before preparation. Explicit aliases
+are trimmed but otherwise unchanged; omitted model preserves upstream selection
+and reports null. Instructions use shared owned workdir `AGENTS.md` projection.
+
+**Print mode uses native `auto` permissions, even under Harness `upstream`.**
+Static deny rules still apply; this is not an interactive approval channel.
+Upstream rejects `--yolo`, `--auto` and `--plan` with a prompt, so Harness exposes
+only `upstream` and rejects explicit `bypass` as `unsupported-capability`.
+No native permission/plan options are exposed.
+
+`configHome` maps to `KIMI_CODE_HOME`; the native filename remains `config.toml`.
+Arbitrary `configFile` overrides are unsupported. Caller environment, config
+and authentication remain authoritative; Harness does not log in, copy
+credentials, alter global configuration or migrate predecessor sessions.
+
+`raw` retains complete stdout JSON objects in order: assistant content/tool calls,
+tool results and unknown messages. Malformed, truncated and nonobject lines are
+ignored; no objects means null. Stderr remains separate. All token/USD totals
+stay null, including when an unknown event resembles usage. Process exits and
+shared termination metadata are not rewritten using predecessor exit semantics.
+CLI streaming/cancellation use the shared owned-process lifecycle; ACP/web/SDK,
+resume and session-log helpers are unsupported. See
+[source qualification and runtime gaps](ADAPTER-MATRIX.md#kimi-code).
+
 ### kiro
 
 `kiro-cli chat --no-interactive --agent-engine v2 --output-format stream-json`
@@ -791,7 +820,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `kiro`, `mini-swe-agent` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `kimi-code`, `kiro`, `mini-swe-agent` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -877,6 +906,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | cursor | `CURSOR_CONFIG_DIR` (config, not all data/credentials) | unsupported |
 | mini-swe-agent | `MSWEA_GLOBAL_CONFIG_DIR` | `--config` (complete config replacement, not an overlay on `mini.yaml`) |
 | kiro | unsupported | unsupported |
+| kimi-code | `KIMI_CODE_HOME` | unsupported (native `config.toml` under the selected home) |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -1477,7 +1507,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kiro", "mini-swe-agent", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kimi-code", "kiro", "mini-swe-agent", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

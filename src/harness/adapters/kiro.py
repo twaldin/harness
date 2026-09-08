@@ -14,10 +14,9 @@ or a prior interactive login.
 """
 from __future__ import annotations
 
-import json
-
 from harness._subproc import SubprocOutcome
 from harness.base import Adapter, BuildCommand, HarnessError, InstallMeta, ParsedOutput, RunSpec
+from harness.util import json_object_events
 
 
 class KiroAdapter(Adapter):
@@ -51,25 +50,4 @@ class KiroAdapter(Adapter):
         return self.finalize_command(spec, cmd="kiro-cli", args=args)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
-        return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": _json_object_events(outcome.stdout)}
-
-
-def _reject_constant(value: str) -> None:
-    raise ValueError(f"non-JSON constant: {value}")
-
-
-def _json_object_events(stdout: str) -> list[dict] | None:
-    """Every complete JSON object line, in order; malformed, truncated and
-    non-object lines are skipped. A final line without a newline still counts."""
-    events: list[dict] = []
-    for line in stdout.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line, parse_constant=_reject_constant)
-        except ValueError:
-            continue
-        if isinstance(event, dict):
-            events.append(event)
-    return events or None
+        return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": json_object_events(outcome.stdout)}

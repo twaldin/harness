@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, auggie, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, mistral-vibe, or kiro as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, auggie, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, mistral-vibe, kimi-code, or kiro as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'amp', 'auggie', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'kiro', 'mini-swe-agent', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'amp', 'auggie', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'kimi-code', 'kiro', 'mini-swe-agent', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -243,6 +243,13 @@ It preserves native model/config selection and adds `--yolo` only for explicit
 bypass. Current-run-confirmed trajectory JSON supplies metrics and raw output;
 partial unconfirmed artifacts are not reused. Native local shell actions can
 survive CLI-group cancellation. See [setup and limits](../ADAPTER-MATRIX.md#mini-swe-agent).
+
+Kimi Code uses maintained `kimi --output-format stream-json --prompt=PROMPT`.
+**Native print mode implies auto permissions**; explicit `bypass` rejects.
+Model aliases pass through after trimming; omitted model uses upstream config.
+`configHome` maps to `KIMI_CODE_HOME`; arbitrary `configFile` is unsupported.
+Assistant/tool JSONL objects remain in `raw`; token/USD totals stay null.
+No installed/provider smoke is claimed. See [setup and limits](../ADAPTER-MATRIX.md#kimi-code).
 
 Kiro uses `kiro-cli chat --no-interactive --agent-engine v2 --output-format stream-json`.
 `nativeOptions: {kind: 'kiro', trustTools: 'read,grep', requireMcpStartup: true}`

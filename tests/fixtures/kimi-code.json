@@ -1,0 +1,321 @@
+{
+  "spec": {
+    "harness": "kimi-code",
+    "prompt": "Update the synthetic file and run its check.",
+    "instructions": "Use only synthetic files.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "kimi",
+    "args": [
+      "--output-format",
+      "stream-json",
+      "--prompt=Update the synthetic file and run its check."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": "KIMI_CODE_HOME",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.1,
+    "timedOut": false,
+    "stdout": "{\"role\": \"assistant\", \"content\": \"Updated the synthetic file; checks passed.\"}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": [
+      {
+        "role": "assistant",
+        "content": "Updated the synthetic file; checks passed."
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "tool-messages-and-stderr-separation",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"role\": \"assistant\", \"tool_calls\": [{\"type\": \"function\", \"id\": \"synthetic-call-1\", \"function\": {\"name\": \"Bash\", \"arguments\": \"{\\\"command\\\":\\\"python check.py\\\"}\"}}]}\n{\"role\": \"tool\", \"tool_call_id\": \"synthetic-call-1\", \"content\": \"synthetic checks passed\"}\n{\"role\": \"assistant\", \"content\": \"Updated the synthetic file; checks passed.\"}\n",
+        "stderr": "Thinking and tool progress\n{\"role\":\"assistant\",\"content\":\"stderr is not output\"}\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "type": "function",
+                "id": "synthetic-call-1",
+                "function": {
+                  "name": "Bash",
+                  "arguments": "{\"command\":\"python check.py\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "synthetic-call-1",
+            "content": "synthetic checks passed"
+          },
+          {
+            "role": "assistant",
+            "content": "Updated the synthetic file; checks passed."
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-auth-failure",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": "Synthetic authentication failure.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "nonzero-retains-complete-messages",
+      "sampleOutput": {
+        "exitCode": 7,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"role\": \"assistant\", \"content\": \"Updated the synthetic file; checks passed.\"}\n{\"role\":",
+        "stderr": "Synthetic provider failed.\n"
+      }
+    },
+    {
+      "name": "noise-and-truncated-json",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "noise\n[]\nnull\n42\n{\"bad\":NaN}\n{\"bad\":Infinity}\n{\"role\": \"assistant\", \"content\": \"Updated the synthetic file; checks passed.\"}\n{\"role\":",
+        "stderr": ""
+      }
+    },
+    {
+      "name": "complete-final-line-without-newline",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"role\": \"assistant\", \"content\": \"Updated the synthetic file; checks passed.\"}",
+        "stderr": ""
+      }
+    },
+    {
+      "name": "empty-stream-is-unknown",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "usage-like-fields-remain-opaque",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"role\":\"meta\",\"usage\":{\"input_tokens\":99},\"cost_usd\":1.5}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "role": "meta",
+            "usage": {
+              "input_tokens": 99
+            },
+            "cost_usd": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact-alias-and-flag-shaped-prompt",
+      "spec": {
+        "model": "  openai/team/custom  ",
+        "prompt": "--auto"
+      },
+      "expectedCommand": {
+        "cmd": "kimi",
+        "args": [
+          "--output-format",
+          "stream-json",
+          "--model=openai/team/custom",
+          "--prompt=--auto"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "  openai/team/custom  "
+      }
+    },
+    {
+      "name": "leading-hyphen-model-is-data",
+      "spec": {
+        "model": "--plan"
+      },
+      "expectedCommand": {
+        "cmd": "kimi",
+        "args": [
+          "--output-format",
+          "stream-json",
+          "--model=--plan",
+          "--prompt=Update the synthetic file and run its check."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "--plan"
+      }
+    },
+    {
+      "name": "caller-selected-home-and-auth-env",
+      "spec": {
+        "configHome": "<root>/kimi-home",
+        "env": {
+          "HOME": "<root>/caller-home",
+          "CALLER_AUTH_SELECTOR": "synthetic"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "kimi",
+        "args": [
+          "--output-format",
+          "stream-json",
+          "--prompt=Update the synthetic file and run its check."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "KIMI_CODE_HOME": "<root>/kimi-home",
+          "HOME": "<root>/caller-home",
+          "CALLER_AUTH_SELECTOR": "synthetic"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-home-environment",
+      "spec": {
+        "env": {
+          "KIMI_CODE_HOME": "<root>/native-home"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "kimi",
+        "args": [
+          "--output-format",
+          "stream-json",
+          "--prompt=Update the synthetic file and run its check."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "KIMI_CODE_HOME": "<root>/native-home"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "home-conflict-rejected",
+      "spec": {
+        "configHome": "<root>/home-one",
+        "env": {
+          "KIMI_CODE_HOME": "<root>/home-two"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "config-file-unsupported",
+      "spec": {
+        "configFile": "<root>/config.toml"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "bypass-unsupported-in-auto-print-mode",
+      "spec": {
+        "permissionPolicy": "bypass"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "rpc-unsupported",
+      "spec": {
+        "backend": "rpc"
+      },
+      "expectedError": "unsupported-backend"
+    },
+    {
+      "name": "sdk-unsupported",
+      "spec": {
+        "backend": "sdk"
+      },
+      "expectedError": "unsupported-backend"
+    },
+    {
+      "name": "empty-prompt-rejected",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "blank-prompt-rejected",
+      "spec": {
+        "prompt": " \n\t "
+      },
+      "expectedError": "invalid-options"
+    }
+  ]
+}

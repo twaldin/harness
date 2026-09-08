@@ -11,9 +11,9 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The twenty-four adapters below are registered in **both** implementations and have
+The twenty-five adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
-`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
+`factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `kimi-code`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
@@ -67,6 +67,7 @@ versions below are dated observations, not a supported version range.
 | cursor | [official binary installer](https://cursor.com/install); [headless reference](https://cursor.com/docs/cli/headless) | 2026.09.02-c22c1a3, isolated Darwin arm64 archive | Help/source-checked; bounded native auth-failure smoke in both languages. No credentialed provider/edit/tool-cleanup coverage. See [limits](#cursor). |
 | mini-swe-agent | [`mini-swe-agent` 2.4.6](https://pypi.org/project/mini-swe-agent/2.4.6/); [official CLI](https://mini-swe-agent.com/latest/usage/mini/) | isolated Python 3.11.15 install, `mini --help` and metadata version checked | Native deterministic-model completion checked on macOS arm64; no external-provider qualification. Local shell actions detach from the CLI group. See [limits](#mini-swe-agent). |
 | kiro | [official installer](https://cli.kiro.dev/install); [headless reference](https://kiro.dev/docs/cli/headless.md) | checksum-verified stable 2.21.1 macOS universal DMG, run on arm64 | Version/help and bounded native missing-auth path checked; no provider success. Stable help names `--agent-engine`, while docs use `--engine`. See [limits](#kiro). |
+| kimi-code | [`@moonshot-ai/kimi-code` 0.41.0](https://www.npmjs.com/package/@moonshot-ai/kimi-code); [official command reference](https://moonshotai.github.io/kimi-code/en/reference/kimi-command.html) | `kimi` not on PATH (2026-09-08); no install attempted | Release source/package identity checked; synthetic conformance only. Print mode implies native auto permissions. No installed version/help, native auth-failure or provider edit/test smoke. See [limits](#kimi-code). |
 
 Off-PATH probes used absolute executables; Harness does not add them to PATH.
 No tools were upgraded, credentials switched, global configuration rewritten or
@@ -76,7 +77,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `amp`, `auggie`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `kiro`, `mini-swe-agent`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `amp`, `auggie`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `kimi-code`, `kiro`, `mini-swe-agent`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. The seven file-based helpers qualified below use current
 source-shaped fixtures; they remain caller-driven artifact helpers, separate
@@ -107,6 +108,7 @@ from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
 | mini-swe-agent | unwired | unwired | confirmed one-shot trajectory only; no latest-run discovery |
 | kiro | unwired | unwired | native ACP JSONL objects only; no discovery or continuation |
+| kimi-code | unwired | unwired | print-mode assistant/tool JSONL only; no discovery or continuation |
 
 ### Artifact qualification — 2026-09-08
 
@@ -179,7 +181,7 @@ Database correlation remains TWA-95; Pi qualification remains TWA-71.
 
 ## Backend and permission capabilities
 
-All twenty-four support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All twenty-five support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -189,7 +191,7 @@ OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
-Amp, Auggie, OMP, Cline, Copilot, Cursor and mini-SWE-agent add install metadata but no pane or session-log heuristics.
+Amp, Auggie, OMP, Cline, Copilot, Cursor, Kimi Code and mini-SWE-agent add install metadata but no pane or session-log heuristics.
 These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
@@ -216,7 +218,11 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | mistral-vibe | `--auto-approve` |
 | cursor | `--force`; native explicit denies and team policy still apply |
 | kiro | `--trust-all-tools`; conflicts with explicit native `trustTools` |
-| amp, auggie, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
+| amp, auggie, crush, kimi-code, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
+
+**Kimi Code print mode inherently uses `auto`**, including under `upstream`.
+It cannot request interactive approval or Plan mode. Its conflicting native
+`--yolo`/`--auto`/`--plan` flags are not added or silently discarded.
 
 Amp, Claude Code, Codex, Cline and Copilot have typed native options:
 `ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
@@ -336,6 +342,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | mistral-vibe | **null** | **null** | JSONL completed history entries retained; no terminal usage totals |
 | cursor       | **null**          | optional uncached input / output | last JSONL `result.usage`; absent/invalid counts remain null |
 | kiro         | **null**          | **null** | native ACP JSONL objects retained; accounting schema unqualified |
+| kimi-code    | **null**          | **null** | complete print JSONL objects retained; no evidenced aggregate accounting |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
@@ -1095,6 +1102,62 @@ no credential stores were searched. Shared fixtures separately cover
 command/capability parity, stale/missing artifacts, native limits, partial/failure
 output and telemetry boundaries. External providers, Linux native execution,
 custom/container environments and arbitrary detached descendants remain unqualified.
+
+## kimi-code
+
+- **Identity / installation:** maintained [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code),
+  npm `@moonshot-ai/kimi-code` supplies `kimi`; the official binary installer
+  is an alternative. npm 0.41.0 declares Node >=22.19.0. Install metadata is
+  caller-driven; Harness never installs automatically. The winding-down
+  [Python predecessor](https://github.com/MoonshotAI/kimi-cli) is not supported,
+  and Harness neither invokes `kimi migrate` nor creates an ACP/web identity.
+- **Command:** `kimi --output-format stream-json [--model=ALIAS] --prompt=PROMPT`.
+  Blank prompts reject; equals form keeps leading hyphens as data. Exact model
+  aliases pass through after trimming; omitted model leaves `default_model`
+  selection to upstream. No model fallback or legacy alias rewriting.
+- **Permissions:** print mode **always uses native auto permissions**, including
+  when Harness policy is `upstream`. Static deny rules remain effective.
+  Upstream rejects `--yolo`, `--auto` and `--plan` with `--prompt`; explicit
+  Harness `bypass` therefore fails `unsupported-capability` before preparation,
+  rather than claiming a stronger policy or silently dropping a flag.
+- **Configuration / auth:** `configHome` maps to `KIMI_CODE_HOME`. Upstream reads
+  `config.toml` under that home; arbitrary `configFile` is unsupported.
+  The [native configuration](https://moonshotai.github.io/kimi-code/en/configuration/config-files.html)
+  and selected OAuth/provider credentials remain caller-owned. Harness does
+  not inspect/copy credentials, edit global config, log in or migrate sessions.
+  Passing an unrelated API-key environment variable is not proof upstream will
+  use it. Existing `HOME` and environment selection are preserved.
+- **Instructions:** shared preparation owns a temporary workdir `AGENTS.md`.
+  Native instruction discovery is source-qualified, not provider-tested.
+- **Output:** complete stdout JSON objects remain in ordered `raw`, or null
+  when absent. Assistant `content`/`tool_calls`, Tool `tool_call_id`/`content`
+  and unknown objects survive. Thinking/progress stderr is never parsed as
+  JSONL. Malformed/truncated/nonobject lines are skipped; stdout/stderr remain
+  independently available. Token and USD totals stay null even for unknown
+  usage-like fields. Nonzero exit and cancellation retain complete messages;
+  predecessor exit-code semantics are not imported.
+- **Lifecycle / unsupported:** shared capture, deadlines, cancellation and owned
+  process-group cleanup only. ACP/web/SDK, resume, session-log discovery and
+  native permission/plan/custom-agent controls are not exposed.
+
+### Qualification — 2026-09-08
+
+The npm registry still advertises **0.41.0**, bin `kimi: dist/main.mjs`.
+Release tag resolves to
+[`95478e8c7ba248fd2470d5bb151555ec7fedd19d`](https://github.com/MoonshotAI/kimi-code/tree/95478e8c7ba248fd2470d5bb151555ec7fedd19d).
+The release's
+[`options.ts`](https://github.com/MoonshotAI/kimi-code/blob/95478e8c7ba248fd2470d5bb151555ec7fedd19d/apps/kimi-code/src/cli/options.ts)
+and
+[`prompt-render.ts`](https://github.com/MoonshotAI/kimi-code/blob/95478e8c7ba248fd2470d5bb151555ec7fedd19d/apps/kimi-code/src/cli/prompt-render.ts)
+qualify flag conflicts and assistant/tool JSONL shape.
+
+`kimi` was not on PATH. No install/account was required for qualification:
+**installed version/help, native auth-failure, credentialed provider completion,
+bounded native edit/test and native tool-child cleanup remain unverified**.
+Shared fixtures exercise synthetic success/auth-failure/nonzero, stderr
+separation, tool messages and partial output; common subprocess conformance
+exercises cancellation, bounded capture and owned descendants. These are not
+native Kimi execution or provider evidence.
 
 ## kiro
 

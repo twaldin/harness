@@ -423,7 +423,8 @@ zero defaults. This compatibility behavior is not proof of zero billed usage.
 
 ### opencode
 
-Cost and tokens come from the sqlite session DB read after the process exits.
+Cost and tokens come from the sqlite session DB read after exit, selected by
+the native `sessionID` observed in `run --format json`, not by workdir or recency.
 
 ```json
 {
@@ -435,7 +436,7 @@ Cost and tokens come from the sqlite session DB read after the process exits.
   "costUsd": 0.0821,
   "tokensIn": 4201,
   "tokensOut": 887,
-  "raw": null
+  "raw": {"sessionID": "ses_example", "costSource": "reported"}
 }
 ```
 
@@ -1048,6 +1049,22 @@ upstream-specific semantics; never apply historical multipliers universally.
 Raw payloads retain upstream details but are untrusted and may contain prompts,
 paths or secrets. No telemetry is transmitted by Harness. Upstream tools may
 have their own telemetry settings, which remain caller-controlled.
+
+OpenCode, Kilo and Crush correlate database metrics only with an observed native
+run ID. Their `raw` contains `sessionID` and `costSource` (`reported` or
+`unavailable`); missing/conflicting identity gives null metrics/raw. A missing
+artifact retains an observed ID with unavailable metrics. Reported zero stays
+zero; these adapters do not estimate cost. “Reported” names the upstream field,
+which may itself be estimated/defaulted and is not proof of billed USD.
+OpenCode/Kilo sum complete assistant metrics; Crush exposes native last-step
+token counters, not cumulative run totals. Cache semantics remain
+[adapter-specific](ADAPTER-MATRIX.md#opencode).
+
+These database adapters cannot discover ownership from `sessionLogPath(workdir,
+since)` and return null there. `parseSessionLog` accepts only
+`<database-path>#session=<percent-encoded-native-ID>`; legacy basename selectors
+and bare paths return unavailable metrics. Exact-ID telemetry lookup neither
+opens nor resumes a controlled session and does not change its owner lifecycle.
 
 ## Controlled RPC sessions
 

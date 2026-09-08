@@ -81,15 +81,15 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | claude-code | wired | wired | JSONL under `~/.claude/projects/<encoded>/` |
 | codex | wired | wired | JSONL path + parser |
 | gemini | wired | wired | `logs.json` path; interactive logs without usage return null metrics; stats blobs can supply usage |
-| opencode | wired | wired | SQLite selector path |
+| opencode | wired | wired | explicit native-ID SQLite selector only; workdir discovery returns null |
 | swe-agent | wired | wired | trajectory JSON |
 | pi | wired | wired | JSONL event stream |
 | continue-cli | wired | wired | probes `~/.continue/...` + `CONTINUE_SESSION_DIR` override |
-| crush | wired | wired | SQLite selector path |
+| crush | wired | wired | explicit native-ID SQLite selector only; workdir discovery returns null |
 | factory-droid | wired | wired | probes `FACTORY_HOME` / `~/.factory/...` |
 | openclaude | wired | wired | claude-code-compatible JSONL path |
 | qwen | wired | wired | `~/.qwen/tmp/<basename>/logs.json` (fallback `.gemini`); stats blobs can supply usage, other logs return null metrics |
-| kilo | wired | wired | SQLite selector path |
+| kilo | wired | wired | explicit native-ID SQLite selector only; workdir discovery returns null |
 | aider | unwired | unwired | no session-log hooks |
 | hermes | unwired | unwired | no session-log hooks; the headless `raw.session_id` comes from stderr, not a log file |
 | omp | unwired | unwired | ephemeral headless JSONL; no latest-session discovery |
@@ -168,7 +168,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | claude-code  | populated         | populated                     | `--output-format json` envelope   |
 | openclaude   | populated         | populated                     | `--output-format json` envelope   |
 | factory-droid| optional fields only | optional fields only     | documented JSON omits usage/cost; extended-field parsing is fixture-only |
-| opencode     | populated         | populated                     | sqlite session DB post-exit       |
+| opencode     | reported when available | assistant sums when available | exact native session ID from JSONL; read-only SQLite |
 | codex        | **null**          | populated (summed from JSONL) | JSONL turn events on stdout       |
 | gemini       | estimated         | populated (summed)            | `stats.models` tokens + built-in pricing |
 | aider        | **null**          | populated (regex parse)       | "Tokens: N sent, M received" log  |
@@ -177,8 +177,8 @@ helpers. "Populated" requires the expected output or database to be available.
 | continue-cli | **null**          | **null**                    | `--format json` contains model-generated output, not trusted usage |
 | pi           | populated         | populated                     | `--mode json` event stream, summed from `agent_end.messages[].usage` |
 | omp          | populated when reported | populated when reported | JSONL completed-cycle usage, with partial-message fallback |
-| crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
-| kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
+| crush        | reported when available | last-step/context counters, **not run totals** | exact native session UUID from verbose stderr; read-only SQLite |
+| kilo         | reported when available | assistant sums when available | exact native session ID from JSONL; read-only SQLite |
 | hermes       | **null**          | **null**                      | not parsed; stdout is preserved verbatim, only `session_id:` stderr lines are read |
 | cline        | when reported     | when reported                 | last top-level `run_result.usage`; partial streams retain raw events with null totals |
 | goose        | optional upstream cost (may be estimated) | optional cumulative totals | last JSONL `complete` event; partial stream without completion has null metrics |
@@ -357,35 +357,88 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `{`
 
 - **CLI**: `opencode`
 - **Instructions file**: `AGENTS.md`
-- **Default model**: `gpt-5.4` (normalized to `openai/gpt-5.4` for CLI invocation)
-- **Command**: `opencode run --dir <workdir> --model <model> <prompt>`
-- **Token source**: sqlite read from `~/.local/share/opencode/opencode.db` (override via `OPENCODE_DB` env var) — find session where `directory LIKE %<workdir-basename>%`, sum assistant `message.data.tokens.{input,output}`.
-- **Cost source**: same sqlite — sum `message.data.cost`
-- **Env**: none required
+- **Default model**: `gpt-5.4` (normalized to `openai/gpt-5.4`)
+- **Command**: `opencode run --format json --dir <workdir> --model <model> <prompt>`
+- **Identity**: the top-level `sessionID` in native JSONL `step_start`, `step_finish`, `text`, `reasoning`, `tool_use` or `error` events. Missing or conflicting IDs return null metrics; message text is not an identity source.
+- **Database**: `OPENCODE_DB` from effective child env is authoritative. Absolute paths are literal; relative values (including `~/…`) are joined to the upstream data directory, not the workdir. `:memory:` is unavailable after exit. Explicit choices never fall back.
 
-### Post-exit DB query
+The upstream data directory is `<XDG_DATA_HOME>/opencode`, or
+`<HOME>/.local/share/opencode` when XDG is unset/empty. Upstream
+[`xdg-basedir` 5.1.0](https://github.com/sindresorhus/xdg-basedir/blob/v5.1.0/index.js)
+also accepts relative XDG values; these resolve against the child workdir.
+The build-time release channel selects `opencode.db` for latest/beta/prod,
+otherwise `opencode-<sanitized-channel>.db`. The channel is not in run JSON or
+`--version`. Without a DB override, Harness checks direct `.db` files in that
+data directory for the **exact observed ID** and requires one unique match.
+`OPENCODE_DISABLE_CHANNEL_DB=1|true` limits lookup to `opencode.db`.
+No basename, substring, timestamp or latest-session ranking is used.
+Harness does not invoke `opencode db path`: its upstream imports create global
+directories and initialize database machinery.
+
+### Post-exit assistant selection
+
+After verifying the exact session row, the readers select assistant fields
+(simplified SQL below; JSON type checks also reject booleans and nonnumeric usage):
 
 ```sql
-SELECT
-  COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
-  COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
-  COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-  -- Model comes from assistant message.data.modelID, not session.model.
-  COUNT(*)                                             AS row_count
-FROM message m
-JOIN session s ON s.id = m.session_id
-WHERE m.session_id IN (
-  SELECT id FROM session WHERE directory LIKE ? ORDER BY time_updated DESC LIMIT 1
-)
+SELECT json_extract(data, '$.tokens.input') AS tokens_in,
+       json_extract(data, '$.tokens.output') AS tokens_out,
+       json_extract(data, '$.cost') AS cost,
+       json_extract(data, '$.modelID') AS model,
+       json_extract(data, '$.providerID') AS provider
+FROM message
+WHERE session_id = ?
+  AND json_extract(data, '$.role') = 'assistant';
 ```
 
-The parameter is `%<resolved-workdir-basename>%`. This is a discovery heuristic,
-not native run correlation. No matching assistant rows returns null metrics;
-a matching session can legitimately total zero. Model extraction uses assistant
-`modelID` only when all contributing rows identify one model; session estimates
-use that model, never an invented `gpt-5.4`. TypeScript selects `bun:sqlite` under
-Bun and `better-sqlite3` under Node; driver-load failure returns null metrics.
-Relative DB overrides, release-channel storage and cost provenance remain TWA-95.
+The parameter is the observed native ID, never a directory hint. Each metric
+is summed only when every assistant row reports a valid nonnegative value;
+absent/null/invalid fields make that metric unavailable, not zero or a partial
+sum. No assistant rows means null metrics. Model telemetry requires unanimous
+nonempty model and provider IDs. Mixed models may still have reported cost;
+Harness never prices their combined tokens with a single model.
+
+`raw` contains `{"sessionID":"ses_…","costSource":"reported"}` when cost is
+available, otherwise `"costSource":"unavailable"`. An observed ID survives a
+missing database. Missing/conflicting identity returns `raw: null`.
+These adapters produce **no Harness cost estimates**: reported zero remains
+zero, including the current upstream runner's literal `cost: 0`. “Reported”
+identifies the upstream field, not measured billing or a free run.
+
+Current upstream maps `tokens.input` to non-cached input and `tokens.output`
+to visible output. Cache reads/writes and reasoning are separate fields.
+Harness preserves input/output as reported and does not add cache tokens,
+reasoning or historical pricing multipliers. Older provider paths may differ.
+
+### Explicit session telemetry
+
+For OpenCode, Kilo and Crush, `sessionLogPath(workdir, since)` returns null:
+neither a workdir nor a timestamp establishes native ownership.
+`parseSessionLog("<database-path>#session=<percent-encoded-native-ID>")`
+reads only that explicit session, with the same zero/unavailable behavior and
+raw provenance. Bare database paths and the former `#session(basename)` hint
+return unavailable metrics. No legacy latest-session fallback remains.
+Python uses the equivalent snake_case methods. Bun uses `bun:sqlite`, Node
+uses `better-sqlite3`; unavailable drivers/artifacts return null metrics.
+Database connections are read-only and bounded.
+
+### Qualification
+
+Primary sources refreshed September 8, 2026:
+[run JSON emitter](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/run.ts),
+[database resolver](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/database/database.ts),
+[global paths](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/global.ts),
+[token mapping](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/session/runner/publish-llm-event.ts),
+[runner cost](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/session/runner/llm.ts).
+Shared synthetic fixtures exercise identity conflicts, concurrent same-basename
+workdirs, channel ambiguity, relative overrides, missing artifacts, mixed
+models, cache accounting and zero versus missing cost in both languages.
+These are deterministic conformance, not provider qualification.
+On this execution host OpenCode and Kilo are not on PATH; Crush v0.62.0 version
+and `run --help` were checked separately. An isolated Crush invocation accepted
+the flags and exited 1 with no provider configured. This is not provider success
+or a billing qualification; no credentials or global configuration were read
+or changed.
 
 ---
 
@@ -504,25 +557,46 @@ Full event reference: [Pi JSON event contract](https://github.com/earendil-works
 - **CLI**: `crush`
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4`
-- **Command**: `crush run --data-dir <data-dir> --model <model> --small-model <model> <prompt>`
-- **Token source**: sqlite `<data-dir>/crush.db` (`sessions.prompt_tokens`, `sessions.completion_tokens`)
-- **Cost source**: sqlite `<data-dir>/crush.db` (`sessions.cost`)
-- **Fairness**: harness always passes both `--model` and `--small-model` with the same normalized model
-- **Container note**: `<data-dir>` defaults to `<workdir>/.harness/crush-data`; `CRUSH_DATA_DIR` in `RunSpec.env`, then process environment, overrides it. The same path is used for command construction and headless DB lookup.
+- **Command**: `crush run --verbose --data-dir <data-dir> --model <model> --small-model <model> <prompt>`
+- **Identity**: anchored stderr `INFO  Created session for non-interactive run session_id=<UUID>`, emitted by `--verbose`. Stdout remains assistant text and is never scraped for identity. Missing/conflicting records return unavailable metrics. This is a qualified native log, not a stable JSON protocol; format changes fail closed.
+- **Data directory**: default `<workdir>/.harness/crush-data`. The existing Harness `CRUSH_DATA_DIR` convention maps caller/inherited env to `--data-dir`; **it is not a native Crush environment variable**. Relative values resolve against the child workdir. Caller-selected directories remain caller-owned.
+- **Fairness**: both model flags use the same normalized model; caller configuration remains otherwise intact.
 
 ### Post-exit DB query
 
 ```sql
 SELECT id, prompt_tokens, completion_tokens, cost
 FROM sessions
-WHERE parent_session_id IS NULL
-ORDER BY updated_at DESC
-LIMIT 1
+WHERE id = ?;
 ```
 
-The session table has no `model` column. The reader obtains a consistent model
-from assistant rows in `messages` for the selected session. Fixtures use this
-upstream shape rather than inventing `sessions.model`.
+The UUID parameter comes from the creation log, not the newest root session.
+The model is in assistant `messages.model` / `messages.provider`, not
+`sessions.model`; it is reported only when all assistant rows agree.
+
+**Counters are not run totals.** Current Crush overwrites prompt/completion
+counters with last-step usage; prompt normally includes cache reads, while
+summarization uses a different update path. Per-message/cache counters are not
+persisted. Harness exposes those native counters without inventing totals.
+Cost accumulates across the newly created session and already includes
+child-session costs; Harness does not sum children again. Upstream may compute
+cost from configured pricing or use provider metadata. Flat-rate models and
+estimated-usage paths can write literal zero. Reported zero is preserved, not
+proof of free usage; no Harness repricing occurs. See the shared
+[identity/provenance and explicit-selector contract](#opencode).
+
+Sources checked against current main and identity emission against v0.62.0:
+[run command](https://github.com/charmbracelet/crush/blob/main/internal/cmd/run.go),
+[v0.62.0 local runner](https://github.com/charmbracelet/crush/blob/v0.62.0/internal/app/app.go),
+[initial schema](https://github.com/charmbracelet/crush/blob/main/internal/db/migrations/20250424200609_initial.sql),
+[usage accounting](https://github.com/charmbracelet/crush/blob/main/internal/agent/agent.go),
+[child cost rollup](https://github.com/charmbracelet/crush/blob/main/internal/agent/coordinator.go),
+[data directory resolution](https://github.com/charmbracelet/crush/blob/main/internal/config/load.go).
+Installed v0.62.0 help confirms `--verbose` and `--data-dir`. A separate
+credential-free invocation with an empty environment and temporary HOME/XDG
+directories exited 1 in 0.54 seconds with “No providers configured”; no native
+creation log was emitted. This verifies flag acceptance and the missing-provider
+path, not successful provider execution or actual-run database metrics.
 
 ---
 
@@ -532,29 +606,33 @@ upstream shape rather than inventing `sessions.model`.
 - **Instructions file**: `AGENTS.md`
 - **Default model**: `gpt-5.4`
 - **Command**: `kilo run --format json --dir <workdir> --model <provider/model> <prompt>`
-- **Env defaults set by adapter**:
-  - `KILO_DB=<workdir>/.harness/kilo/kilo.db`
-  - `KILO_CONFIG_CONTENT={"model":"<provider/model>","small_model":"<provider/model>","default_agent":"build"}`
-- **Token source**: sqlite `message.data.tokens.{input,output}` summed over assistant rows for latest matching session
-- **Cost source**: sqlite `message.data.cost` summed over assistant rows for latest matching session. Session model comes from `message.data.modelID`, not the user-message `model` object; unknown/mixed models do not select an arbitrary fallback price.
-- **Model default**: generated `KILO_CONFIG_CONTENT` pins `model == small_model` and `default_agent=build` only when that variable is absent from both inherited and explicit env; selected configuration is not rewritten
+- **Identity/accounting**: the same native JSONL `sessionID`, exact assistant-row selection, null/zero/provenance and explicit log-selector rules as [OpenCode](#opencode). No basename/latest-session lookup or cost estimation.
+- **Env defaults**: `KILO_DB=<workdir>/.harness/kilo/kilo.db` and `KILO_CONFIG_CONTENT={"model":"<provider/model>","small_model":"<provider/model>","default_agent":"build"}`. Generated model configuration is used only when neither caller nor inherited env selected it.
 
-### Post-exit DB query
+Caller `KILO_DB` values remain verbatim in the command environment. Absolute
+paths are literal; relative paths resolve under `<XDG_DATA_HOME>/kilo` (or
+`<HOME>/.local/share/kilo`), rather than directly under the workdir. Relative
+XDG values resolve against the child cwd, as in OpenCode. Upstream strips
+CR/LF from its XDG-derived paths. `:memory:` yields unavailable metrics.
+Explicit choices never fall back; caller-owned DB parents are not prepared.
+The default injected absolute DB path deliberately overrides upstream channel
+storage. When upstream selects storage itself, stable channels use `kilo.db`;
+other channels use `kilo-<channel>.db`, with legacy `opencode-<channel>.db`
+fallback. An explicit empty `KILO_DB` clears the Harness default and inherited
+choice: exact-ID discovery then requires one matching native channel database,
+or uses only `kilo.db` when `KILO_DISABLE_CHANNEL_DB=1|true`.
 
-```sql
-SELECT
-  COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
-  COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
-  COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost
-FROM message
-WHERE session_id IN (
-  SELECT id FROM session
-  WHERE directory LIKE ?
-  ORDER BY time_updated DESC
-  LIMIT 1
-)
-AND json_extract(data, '$.role') = 'assistant'
-```
+Current Kilo has the same separate non-cached input, visible output, cache
+and reasoning fields as OpenCode, and its runner also writes literal zero
+cost. “Reported” is upstream provenance, not a billing guarantee.
+Sources refreshed September 8, 2026:
+[native emitter](https://github.com/Kilo-Org/kilocode/blob/main/packages/opencode/src/cli/cmd/run.ts),
+[database path and channel fallback](https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/database/database.ts),
+[global paths](https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/global.ts),
+[usage mapping](https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/session/runner/publish-llm-event.ts),
+[runner cost](https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/session/runner/llm.ts).
+Kilo is not installed on PATH here; shared conformance is synthetic, not
+provider smoke.
 
 ---
 

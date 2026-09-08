@@ -35,6 +35,7 @@ def write_artifacts(artifacts):
                 conn.execute(statement)
             conn.commit()
             conn.close()
+            os.chmod(path, 0o444)
         elif kind == "json":
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(artifact["content"], fh)

@@ -1,4 +1,10 @@
-"""Crush adapter — invokes `crush run` and reads token/cost totals from sqlite."""
+"""Crush adapter — invokes `crush run` and reads token/cost totals from sqlite.
+
+`--verbose` routes crush's logger to stderr, where the non-interactive run
+announces the session it created (`Created session for non-interactive run
+session_id=<uuid>`). That exact ID keys the `sessions` aggregate row read
+from `<data dir>/crush.db`. No latest/root-session guessing, no estimates.
+"""
 from __future__ import annotations
 
 import os
@@ -7,6 +13,17 @@ import sqlite3
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome
+from harness.adapters._native_db import (
+    NO_TOTALS,
+    SessionTotals,
+    cost_value,
+    identity_raw,
+    parse_session_selector,
+    read_only,
+    session_telemetry,
+    token_count,
+    unanimous_model,
+)
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -18,8 +35,18 @@ from harness.base import (
     SessionTelemetry,
     absolute_workdir,
 )
-from harness.pricing import derive_cost
 from harness.util import last_non_empty_join, strip_ansi
+
+# internal/cmd/run.go: slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+# rendered by charm log's default text formatter (no timestamp/prefix) as the
+# whole line `INFO Created session for non-interactive run session_id=<uuid>`.
+# Continuation records are deliberately not matched: only a session created by
+# this run is this run's.
+_CREATED_SESSION_RE = re.compile(
+    r"^INFO\s+Created session for non-interactive run session_id="
+    r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\r?$",
+    re.MULTILINE,
+)
 
 _MODEL_PICKER_RE = re.compile(r"choose.*confirm", re.IGNORECASE)
 _ARROWS_RE = re.compile(r"↑/↓")
@@ -50,14 +77,17 @@ class CrushAdapter(Adapter):
         model = resolved.model
 
         workdir = absolute_workdir(spec.workdir)
-        data_dir = _crush_data_dir(workdir, spec.env)
+        override = _crush_data_dir_override(spec.env)
+        data_dir = _crush_data_dir(workdir, override)
         # The default per-workdir data dir is a harness artifact prepare creates;
         # a CRUSH_DATA_DIR override is caller-owned upstream state.
-        directories = () if _crush_data_dir_override(spec.env) else (data_dir,)
+        directories = () if override else (data_dir,)
 
-        # Strict same-model fairness: pin both large and small model flags.
+        # `--verbose` surfaces the session-creation log record on stderr (and
+        # hides the spinner). Strict same-model fairness: pin both model flags.
         args = [
             "run",
+            "--verbose",
             "--data-dir",
             str(data_dir),
             "--model",
@@ -69,8 +99,11 @@ class CrushAdapter(Adapter):
         return self.finalize_command(spec, cmd="crush", args=args, directories=directories)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
-        tokens_in, tokens_out, cost, _model = _read_crush_session_totals(Path(spec.workdir), spec.env)
-        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
+        session_id = _created_session_id(outcome.stderr)
+        if session_id is None:
+            return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
+        tokens_in, tokens_out, cost, _model = _read_crush_session_totals(session_id, Path(spec.workdir), spec.env)
+        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": identity_raw(session_id, cost)}
 
     # ---- session-aware ---------------------------------------------------
 
@@ -99,94 +132,72 @@ class CrushAdapter(Adapter):
             return "idle"
         return "unknown"
 
+    # The DB alone identifies nothing: correlation needs the session ID crush
+    # logged for the run, which this hook has no access to.
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
-        db_path = _crush_db_path(workdir, None)
-        if not db_path.exists():
-            return None
-        return f"{db_path}#session({workdir.resolve().name if workdir.exists() else workdir.name})"
+        return None
 
     def parse_session_log(self, path: str) -> SessionTelemetry:
-        db_raw = path.split("#", 1)[0]
-        tokens_in, tokens_out, cost, model = _read_crush_session_totals_by_db_path(Path(db_raw))
-        # sessions.cost is NOT NULL DEFAULT 0.0 upstream, so 0 may be a genuine
-        # zero-cost run; without a session model there is nothing to price it with.
-        if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
-            cost = derive_cost(model, tokens_in, tokens_out) or cost
-        return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
+        selector = parse_session_selector(path)
+        if selector is None:
+            return session_telemetry(path, None, NO_TOTALS)
+        db_path, session_id = selector
+        return session_telemetry(path, session_id, _read_crush_session_totals_by_db_path(db_path, session_id))
 
 
-def _crush_data_dir_override(extra_env: dict[str, str] | None = None) -> str | None:
-    return (extra_env or {}).get("CRUSH_DATA_DIR") or os.environ.get("CRUSH_DATA_DIR") or None
+def _created_session_id(stderr: str) -> str | None:
+    """The session crush logged as created for this run; None unless exactly
+    one distinct ID was announced."""
+    ids = {match.group(1) for match in _CREATED_SESSION_RE.finditer(strip_ansi(stderr))}
+    return next(iter(ids)) if len(ids) == 1 else None
 
 
-def _crush_data_dir(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
-    env_path = _crush_data_dir_override(extra_env)
-    if env_path:
-        return Path(env_path).expanduser()
+def _crush_data_dir_override(extra_env: dict[str, str] | None) -> str | None:
+    """The caller's `CRUSH_DATA_DIR` (a harness convention translated to
+    `--data-dir`): the caller's value when set, even empty, else inherited."""
+    env = {**os.environ, **(extra_env or {})}
+    return env.get("CRUSH_DATA_DIR") or None
+
+
+def _crush_data_dir(workdir: Path, override: str | None) -> Path:
+    """`--data-dir` as crush resolves it: relative to the child's cwd (the
+    workdir), never `~`-expanded; default `<workdir>/.harness/crush-data`."""
+    if override:
+        return workdir / override
     return workdir / ".harness" / "crush-data"
 
 
 def _crush_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
-    return _crush_data_dir(workdir, extra_env) / "crush.db"
+    return _crush_data_dir(absolute_workdir(workdir), _crush_data_dir_override(extra_env)) / "crush.db"
 
 
-def _read_crush_session_totals_by_db_path(
-    db_path: Path,
-) -> tuple[int | None, int | None, float | None, str | None]:
-    if not db_path.exists():
-        return None, None, None, None
+def _read_crush_session_totals_by_db_path(db_path: Path, session_id: str) -> SessionTotals:
+    """crush's `sessions` row carries upstream's own aggregates for the exact
+    session (`prompt_tokens`, `completion_tokens`, `cost`). The model comes
+    from the session's assistant messages when they agree on one; a missing
+    `messages` table only costs the model, never the aggregates."""
 
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
-        return None, None, None, None
-
-    try:
+    def read(conn: sqlite3.Connection) -> SessionTotals:
         row = conn.execute(
-            """
-            SELECT id, prompt_tokens, completion_tokens, cost
-            FROM sessions
-            WHERE parent_session_id IS NULL
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """
+            "SELECT prompt_tokens, completion_tokens, cost FROM sessions WHERE id = ?",
+            (session_id,),
         ).fetchone()
-    except sqlite3.Error:
-        conn.close()
-        return None, None, None, None
+        if row is None:
+            return NO_TOTALS
+        model = None
+        try:
+            rows = conn.execute(
+                "SELECT model, provider FROM messages WHERE session_id = ? AND role = 'assistant'",
+                (session_id,),
+            ).fetchall()
+        except sqlite3.Error:
+            rows = []
+        if rows:
+            model = unanimous_model(rows)
+        return token_count(row[0]), token_count(row[1]), cost_value(row[2]), model
 
-    if not row:
-        conn.close()
-        return None, None, None, None
-
-    tokens_in = int(row[1]) if isinstance(row[1], (int, float)) else None
-    tokens_out = int(row[2]) if isinstance(row[2], (int, float)) else None
-    cost = float(row[3]) if isinstance(row[3], (int, float)) else None
-
-    # sessions has no model column upstream; the model lives on messages.model.
-    # Report it only when every assistant turn of the session agrees on one.
-    model = None
-    try:
-        model_row = conn.execute(
-            """
-            SELECT CASE WHEN COUNT(DISTINCT model) = 1 AND COUNT(NULLIF(model, '')) = COUNT(*)
-                        THEN MAX(model) END
-            FROM messages
-            WHERE session_id = ? AND role = 'assistant'
-            """,
-            (row[0],),
-        ).fetchone()
-        if model_row and isinstance(model_row[0], str):
-            model = model_row[0]
-    except sqlite3.Error:
-        pass
-
-    conn.close()
-    return tokens_in, tokens_out, cost, model
+    return read_only(db_path, read) or NO_TOTALS
 
 
-def _read_crush_session_totals(
-    workdir: Path,
-    extra_env: dict[str, str] | None = None,
-) -> tuple[int | None, int | None, float | None, str | None]:
-    return _read_crush_session_totals_by_db_path(_crush_db_path(workdir, extra_env))
+def _read_crush_session_totals(session_id: str, workdir: Path, extra_env: dict[str, str] | None = None) -> SessionTotals:
+    return _read_crush_session_totals_by_db_path(_crush_db_path(workdir, extra_env), session_id)

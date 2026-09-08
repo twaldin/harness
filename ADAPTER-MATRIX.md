@@ -11,10 +11,10 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The twenty-four adapters below are registered in **both** implementations and have
+The twenty-five adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
 `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
-`qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
+`qoder`, `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
 adapters no longer depends on a prior Python build/parse/run call.
@@ -67,6 +67,7 @@ versions below are dated observations, not a supported version range.
 | cursor | [official binary installer](https://cursor.com/install); [headless reference](https://cursor.com/docs/cli/headless) | 2026.09.02-c22c1a3, isolated Darwin arm64 archive | Help/source-checked; bounded native auth-failure smoke in both languages. No credentialed provider/edit/tool-cleanup coverage. See [limits](#cursor). |
 | mini-swe-agent | [`mini-swe-agent` 2.4.6](https://pypi.org/project/mini-swe-agent/2.4.6/); [official CLI](https://mini-swe-agent.com/latest/usage/mini/) | isolated Python 3.11.15 install, `mini --help` and metadata version checked | Native deterministic-model completion checked on macOS arm64; no external-provider qualification. Local shell actions detach from the CLI group. See [limits](#mini-swe-agent). |
 | kiro | [official installer](https://cli.kiro.dev/install); [headless reference](https://kiro.dev/docs/cli/headless.md) | checksum-verified stable 2.21.1 macOS universal DMG, run on arm64 | Version/help and bounded native missing-auth path checked; no provider success. Stable help names `--agent-engine`, while docs use `--engine`. See [limits](#kiro). |
+| qoder | [`@qoder-ai/qodercli` 1.1.47](https://www.npmjs.com/package/@qoder-ai/qodercli/v/1.1.47); [headless reference](https://docs.qoder.com/cli/run-in-scripts) | isolated npm install on macOS arm64; `qoder --version`, help, bundled parser and JSON/stream-json auth failure checked | No credentialed provider success or edit/test smoke. USD is a native placeholder; metrics remain null. See [limits](#qoder). |
 
 Off-PATH probes used absolute executables; Harness does not add them to PATH.
 No tools were upgraded, credentials switched, global configuration rewritten or
@@ -76,7 +77,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `amp`, `auggie`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `kiro`, `mini-swe-agent`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `amp`, `auggie`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp` and `qoder`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. The seven file-based helpers qualified below use current
 source-shaped fixtures; they remain caller-driven artifact helpers, separate
@@ -107,6 +108,7 @@ from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
 | mini-swe-agent | unwired | unwired | confirmed one-shot trajectory only; no latest-run discovery |
 | kiro | unwired | unwired | native ACP JSONL objects only; no discovery or continuation |
+| qoder | unwired | unwired | one-shot JSON envelope / diagnostic JSONL objects only |
 
 ### Artifact qualification — 2026-09-08
 
@@ -179,7 +181,7 @@ Database correlation remains TWA-95; Pi qualification remains TWA-71.
 
 ## Backend and permission capabilities
 
-All twenty-four support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All twenty-five support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -216,7 +218,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | mistral-vibe | `--auto-approve` |
 | cursor | `--force`; native explicit denies and team policy still apply |
 | kiro | `--trust-all-tools`; conflicts with explicit native `trustTools` |
-| amp, auggie, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
+| amp, auggie, crush, opencode, pi, qoder, swe-agent | unsupported; request fails before writes/spawn |
 
 Amp, Claude Code, Codex, Cline and Copilot have typed native options:
 `ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
@@ -237,6 +239,8 @@ Codex, `HERMES_HOME` for Hermes, `GOOSE_PATH_ROOT` for Goose, `CLINE_DIR` for Cl
 `PI_CODING_AGENT_DIR` plus `--profile default` for OMP. `configFile` maps to
 Claude Code `--settings`, Amp `--settings-file`, or `--config` for Aider, Continue, OMP and mini-SWE-agent.
 mini-SWE-agent maps `configHome` to `MSWEA_GLOBAL_CONFIG_DIR`; its config file replaces the built-in config.
+Qoder maps `configHome` to `QODER_CONFIG_DIR`; `QoderOptions.permission_mode`
+(`permissionMode` in TS) explicitly selects `default`, `accept_edits` or `dont_ask`.
 Other adapters reject unsupported typed overrides. Existing
 caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
@@ -336,6 +340,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | mistral-vibe | **null** | **null** | JSONL completed history entries retained; no terminal usage totals |
 | cursor       | **null**          | optional uncached input / output | last JSONL `result.usage`; absent/invalid counts remain null |
 | kiro         | **null**          | **null** | native ACP JSONL objects retained; accounting schema unqualified |
+| qoder        | **null**          | **null** | JSON result or diagnostic JSONL objects; unqualified accounting |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
@@ -1251,3 +1256,53 @@ qualify that entitlement. Authenticated generation, billed usage, tool execution
 native tool-tree cancellation and Linux upstream behavior remain untested.
 Shared fixtures use synthetic results and executables, not a successful provider
 session. No global install, account switch or package publication was performed.
+
+## qoder
+
+- **Identity:** official npm [`@qoder-ai/qodercli`](https://www.npmjs.com/package/@qoder-ai/qodercli)
+  supplies `qoder` (dispatcher) and `qodercli`. Harness invokes `qoder`, not an
+  IDE, hosted worker or SDK. Version 1.1.47 requires Node >=20. Upstream also
+  distributes Windows binaries; Harness lifecycle support remains macOS/Linux.
+  Install/update metadata is caller-driven, never executed by an adapter run.
+- **Command:** `qoder --print --output-format json --input-format text
+  --max-turns 20 [--model MODEL] [--permission-mode MODE] --prompt=PROMPT`,
+  cwd = the validated workdir, instructions = owned `AGENTS.md` projection.
+  The turn cap is a supported hidden 1.1.47 option. Empty prompts reject.
+  Native argument processing rejects positional prompts beginning `--` even
+  after `--`; the supported but deprecated `--prompt=` form preserves literal
+  prompts. Its native deprecation warning is not suppressed.
+- **Model/config/auth:** no Harness default model; explicit model IDs retain
+  their provider prefix. `configHome` selects `QODER_CONFIG_DIR`; caller env
+  and existing auth remain authoritative. Follow [Qoder authentication](https://docs.qoder.com/cli/authentication)
+  for account login or `QODER_PERSONAL_ACCESS_TOKEN` (PAT takes precedence).
+  No BYOK path is qualified here. Config relocation is not a sandbox or proof
+  that all native startup writes stay under that directory. Harness does not
+  create accounts, copy credentials, edit settings or replace global config.
+- **Permissions:** omission preserves upstream behavior. Opt in with Python
+  `QoderOptions(permission_mode="accept_edits")` or TS
+  `{kind: 'qoder', permissionMode: 'accept_edits'}`. Also accepts `default` and
+  `dont_ask`. [Upstream permission rules](https://docs.qoder.com/cli/permissions)
+  say `accept_edits` approves safe workspace edits but not shell commands;
+  existing explicit rules, sensitive-path checks and trust still apply.
+  Text-input headless confirmation requests are denied. Bypass and `auto`
+  are unsupported, and Harness never enables `--yolo`. Host-driven
+  stream-json approval callbacks are a separate, unsupported protocol.
+- **Output:** [JSON mode](https://docs.qoder.com/cli/run-in-scripts) emits one
+  terminal object, retained verbatim as `raw` (including multiline JSON).
+  Otherwise complete JSON object lines are retained in order for diagnostics;
+  malformed/truncated lines are skipped. A valid array/scalar document yields
+  null. Unknown fields and native failures/permission denials remain raw.
+  Native `subtype: "success"` can coexist with `is_error: true`; process
+  failure and Harness cancellation are separate fields. All token/USD totals
+  remain null: aggregate usage is unqualified, credits are not USD, and the
+  installed result builder hardcodes `total_cost_usd: 0`.
+- **Unsupported:** config-file overrides, protocol selection, host approvals,
+  resume/session discovery, remote execution, RPC and SDK sessions.
+- **Qualification (2026-09-08):** an isolated local npm install reported 1.1.47;
+  version/help, bundled flag/result schema and bounded native JSON/stream-json
+  missing-auth runs were checked on macOS arm64. Both formats exited 1 with
+  `Not logged in` and retained native error fields. No caller PAT or usable
+  Qoder login was available; credentialed edit/test success, real shell-denial
+  execution, native tool-child teardown and Linux provider behavior remain
+  unqualified. Shared fixtures use synthetic output and substitute executables;
+  shared cancellation/process-group conformance is not provider validation.

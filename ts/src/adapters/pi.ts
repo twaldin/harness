@@ -8,8 +8,8 @@ import { join } from 'node:path'
 
 // pi's --mode json writes one JSON object per stdout line. AssistantMessage.usage
 // has { input, output, cacheRead, cacheWrite, totalTokens, cost: { total, ... } }.
-// Prefer agent_end.messages (authoritative); fall back to summing turn_end events
-// if the stream was cut off.
+// Each agent_end snapshot replaces that cycle's incremental messages, not
+// earlier cycles. Retain completed messages when the last cycle is cut off.
 // Docs: https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md
 
 interface PiUsage {
@@ -65,33 +65,43 @@ function parsePiEvents(stdout: string): {
     return { tokensIn: null, tokensOut: null, costUsd: null, raw: null }
   }
 
-  for (let i = events.length - 1; i >= 0; i--) {
-    const ev = events[i]!
-    if (ev.type === 'agent_end' && Array.isArray(ev.messages)) {
-      const { tokensIn, tokensOut, cost } = sumAssistantUsage(ev.messages)
-      return { tokensIn, tokensOut, costUsd: cost, raw: events }
-    }
-  }
-
+  let messages: PiAssistantMessage[] = []
+  let currentMessage: PiAssistantMessage | undefined
   let tokensIn = 0
   let tokensOut = 0
   let cost = 0
-  let anyAssistant = false
+  let hasUsage = false
   for (const ev of events) {
-    if (ev.type !== 'turn_end') continue
-    const msg = ev.message
-    if (!msg || msg.role !== 'assistant') continue
-    const usage = msg.usage ?? {}
-    tokensIn += Number(usage.input ?? 0)
-    tokensOut += Number(usage.output ?? 0)
-    cost += Number(usage.cost?.total ?? 0)
-    anyAssistant = true
+    if (ev.type === 'message_end') {
+      if (ev.message?.role === 'assistant') currentMessage = ev.message
+    } else if (ev.type === 'turn_end') {
+      if (ev.message?.role === 'assistant') messages.push(ev.message)
+      else if (currentMessage) messages.push(currentMessage)
+      currentMessage = undefined
+    } else if (ev.type === 'agent_end') {
+      if (Array.isArray(ev.messages)) {
+        messages = ev.messages
+        hasUsage = true
+      } else if (currentMessage) messages.push(currentMessage)
+      const usage = sumAssistantUsage(messages)
+      hasUsage ||= messages.some(msg => msg?.role === 'assistant')
+      tokensIn += usage.tokensIn
+      tokensOut += usage.tokensOut
+      cost += usage.cost
+      messages = []
+      currentMessage = undefined
+    }
   }
 
-  if (!anyAssistant) {
+  if (currentMessage) messages.push(currentMessage)
+  const usage = sumAssistantUsage(messages)
+  if (!hasUsage && messages.length === 0) {
     return { tokensIn: null, tokensOut: null, costUsd: null, raw: events }
   }
-  return { tokensIn, tokensOut, costUsd: cost, raw: events }
+  return {
+    tokensIn: tokensIn + usage.tokensIn, tokensOut: tokensOut + usage.tokensOut,
+    costUsd: cost + usage.cost, raw: events,
+  }
 }
 
 const piAdapter: Adapter = {

@@ -11,8 +11,8 @@ Each AssistantMessage has:
         cost: { input, output, cacheRead, cacheWrite, total }
     }
 
-We sum usage across assistant messages in the `agent_end` event and report
-aggregate tokens + cost. See
+We sum assistant usage once per agent cycle, preferring each `agent_end`
+snapshot and retaining completed messages from an interrupted cycle. See
 https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md
 """
 from __future__ import annotations
@@ -173,9 +173,9 @@ class PiAdapter(Adapter):
 def _parse_pi_events(stdout: str) -> tuple[int | None, int | None, float | None, list | None]:
     """Walk the JSON event stream and sum assistant-message usage.
 
-    Prefers the `agent_end` event's full `messages` array (authoritative final
-    state). Falls back to summing per-`turn_end` assistant messages when no
-    `agent_end` carries a `messages` list (e.g., truncated / timed-out output).
+    Each `agent_end.messages` snapshot replaces that cycle's incremental
+    messages, not earlier cycles. A cut-off cycle retains completed messages
+    from `message_end` / `turn_end`, never cumulative streaming deltas.
     """
     events: list = []
     for line in stdout.splitlines():
@@ -192,32 +192,43 @@ def _parse_pi_events(stdout: str) -> tuple[int | None, int | None, float | None,
     if not events:
         return None, None, None, None
 
-    # Preferred: agent_end.messages
-    for ev in reversed(events):
-        if ev.get("type") == "agent_end" and isinstance(ev.get("messages"), list):
-            tokens_in, tokens_out, cost = _sum_assistant_usage(ev["messages"])
-            return tokens_in, tokens_out, cost, events
-
-    # Fallback: sum usage from each turn_end's assistant message
+    messages: list = []
+    current_message: dict | None = None
     tokens_in = tokens_out = 0
     cost = 0.0
-    any_assistant = False
+    has_usage = False
     for ev in events:
-        if ev.get("type") != "turn_end":
-            continue
-        msg = ev.get("message") or {}
-        if msg.get("role") != "assistant":
-            continue
-        usage = msg.get("usage") or {}
-        tokens_in += int(usage.get("input") or 0)
-        tokens_out += int(usage.get("output") or 0)
-        cost_obj = usage.get("cost") or {}
-        cost += float(cost_obj.get("total") or 0.0)
-        any_assistant = True
+        if ev.get("type") == "message_end":
+            msg = ev.get("message")
+            if isinstance(msg, dict) and msg.get("role") == "assistant":
+                current_message = msg
+        elif ev.get("type") == "turn_end":
+            msg = ev.get("message")
+            if isinstance(msg, dict) and msg.get("role") == "assistant":
+                messages.append(msg)
+            elif current_message is not None:
+                messages.append(current_message)
+            current_message = None
+        elif ev.get("type") == "agent_end":
+            if isinstance(ev.get("messages"), list):
+                messages = ev["messages"]
+                has_usage = True
+            elif current_message is not None:
+                messages.append(current_message)
+            ti, to, tc = _sum_assistant_usage(messages)
+            has_usage = has_usage or any(msg.get("role") == "assistant" for msg in messages if isinstance(msg, dict))
+            tokens_in += ti
+            tokens_out += to
+            cost += tc
+            messages = []
+            current_message = None
 
-    if not any_assistant:
+    if current_message is not None:
+        messages.append(current_message)
+    ti, to, tc = _sum_assistant_usage(messages)
+    if not has_usage and not messages:
         return None, None, None, events
-    return tokens_in, tokens_out, cost, events
+    return tokens_in + ti, tokens_out + to, cost + tc, events
 
 
 def _sum_assistant_usage(messages: list) -> tuple[int, int, float]:

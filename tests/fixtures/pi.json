@@ -284,6 +284,306 @@
           }
         ]
       }
+    },
+    {
+      "name": "multiple-agent-cycles-count-once",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"agent_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":10,\"output\":2,\"cost\":{\"total\":0.125}}}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":10,\"output\":2,\"cost\":{\"total\":0.125}}}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"usage\":{\"input\":10,\"output\":2,\"cost\":{\"total\":0.125}}}]}\n{\"type\":\"agent_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":20,\"output\":4,\"cost\":{\"total\":0.25}}}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":20,\"output\":4,\"cost\":{\"total\":0.25}}}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"usage\":{\"input\":20,\"output\":4,\"cost\":{\"total\":0.25}}}]}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.375,
+        "tokensIn": 30,
+        "tokensOut": 6,
+        "raw": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 10,
+                "output": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              }
+            }
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 10,
+                "output": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              }
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "usage": {
+                  "input": 10,
+                  "output": 2,
+                  "cost": {
+                    "total": 0.125
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 20,
+                "output": 4,
+                "cost": {
+                  "total": 0.25
+                }
+              }
+            }
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 20,
+                "output": 4,
+                "cost": {
+                  "total": 0.25
+                }
+              }
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "usage": {
+                  "input": 20,
+                  "output": 4,
+                  "cost": {
+                    "total": 0.25
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "completed-cycle-plus-partial-cycle",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"agent_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":10,\"output\":2,\"cost\":{\"total\":0.125}}}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":10,\"output\":2,\"cost\":{\"total\":0.125}}}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"usage\":{\"input\":10,\"output\":2,\"cost\":{\"total\":0.125}}}]}\n{\"type\":\"agent_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":20,\"output\":4,\"cost\":{\"total\":0.25}}}}\n{\"type\":\"turn_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":20,\"output\":4,\"cost\":{\"total\":0.25}}}}\n{\"type\":\"agent_end\",\"messa",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.375,
+        "tokensIn": 30,
+        "tokensOut": 6,
+        "raw": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 10,
+                "output": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              }
+            }
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 10,
+                "output": 2,
+                "cost": {
+                  "total": 0.125
+                }
+              }
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "usage": {
+                  "input": 10,
+                  "output": 2,
+                  "cost": {
+                    "total": 0.125
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 20,
+                "output": 4,
+                "cost": {
+                  "total": 0.25
+                }
+              }
+            }
+          },
+          {
+            "type": "turn_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 20,
+                "output": 4,
+                "cost": {
+                  "total": 0.25
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "message-completed-before-tool-interruption",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"agent_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input\":20,\"output\":4,\"cost\":{\"total\":0.25}}}}\n{\"type\":\"tool_execution_start\",\"toolName\":\"read\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.25,
+        "tokensIn": 20,
+        "tokensOut": 4,
+        "raw": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "usage": {
+                "input": 20,
+                "output": 4,
+                "cost": {
+                  "total": 0.25
+                }
+              }
+            }
+          },
+          {
+            "type": "tool_execution_start",
+            "toolName": "read"
+          }
+        ]
+      }
+    },
+    {
+      "name": "native-provider-error-retains-terminal",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"agent_start\"}\n{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"stopReason\":\"error\",\"errorMessage\":\"synthetic unauthorized\",\"usage\":{\"input\":0,\"output\":0,\"cost\":{\"total\":0}}}}\n{\"type\":\"agent_end\",\"messages\":[{\"role\":\"assistant\",\"stopReason\":\"error\",\"errorMessage\":\"synthetic unauthorized\",\"usage\":{\"input\":0,\"output\":0,\"cost\":{\"total\":0}}}]}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "raw": [
+          {
+            "type": "agent_start"
+          },
+          {
+            "type": "message_end",
+            "message": {
+              "role": "assistant",
+              "stopReason": "error",
+              "errorMessage": "synthetic unauthorized",
+              "usage": {
+                "input": 0,
+                "output": 0,
+                "cost": {
+                  "total": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "agent_end",
+            "messages": [
+              {
+                "role": "assistant",
+                "stopReason": "error",
+                "errorMessage": "synthetic unauthorized",
+                "usage": {
+                  "input": 0,
+                  "output": 0,
+                  "cost": {
+                    "total": 0
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "startup-failure-no-events",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 1,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
     }
   ]
 }

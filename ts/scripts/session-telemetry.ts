@@ -9,7 +9,7 @@ if (!adapterName || !method || !arg) {
 
 const adapter = getAdapter(adapterName)
 if (method === 'sessionLogPath') {
-  const cutoffMs = cutoff === undefined ? undefined : Number(cutoff)
+  const cutoffMs = cutoff === undefined ? undefined : (cutoff.trim() === '' ? NaN : Number(cutoff))
   if (cutoffMs !== undefined && !Number.isFinite(cutoffMs)) {
     console.error('cutoff-ms must be a finite number')
     process.exit(2)

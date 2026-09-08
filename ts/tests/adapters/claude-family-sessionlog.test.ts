@@ -13,7 +13,7 @@ import type { SessionTelemetry } from '../../src/base.js'
 const FIXTURES = join(import.meta.dir, '..', '..', '..', 'tests', 'fixtures', 'session-logs')
 
 interface EncodingCase { projectPath: string; encoded: string; note: string }
-interface Telemetry { tokensIn: number; tokensOut: number; costUsd: number | null; model: string }
+interface Telemetry { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null }
 interface SourceQualification {
   configDirEnv: string
   configDirDefault: string
@@ -77,6 +77,20 @@ afterEach(() => {
     else process.env[k] = savedEnv[k]
   }
 })
+
+const boundaries = JSON.parse(readFileSync(join(FIXTURES, 'telemetry-cases.json'), 'utf8')) as {
+  name: string; adapters: string[]; text?: string; records?: unknown[]; expected: Telemetry
+}[]
+for (const fx of boundaries.filter(fx => fx.adapters.includes('claude-code'))) {
+  test(fx.name, () => {
+    const path = join(tmp, 'session.jsonl')
+    writeFileSync(path, (fx.text ?? fx.records!.map(record => JSON.stringify(record)).join('\n')) + '\n')
+    for (const adapter of fx.adapters) {
+      // Assert the raw API value: JSON serialization would hide Infinity as null.
+      expectTelemetry(getAdapter(adapter).parseSessionLog?.(path), fx.expected)
+    }
+  })
+}
 
 describe('claude-family project path encoding', () => {
   test('matches the upstream sanitizer table', async () => {

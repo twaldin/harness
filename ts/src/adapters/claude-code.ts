@@ -131,7 +131,7 @@ export function parseClaudeTranscript(path: string): SessionTelemetry {
   if (!existsSync(path)) {
     return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
   }
-  let tokensIn = 0, tokensOut = 0, costUsd = 0, modelName: string | null = null
+  let tokensIn = 0, tokensOut = 0, costUsd: number | null = 0, modelName: string | null = null
   let sawUsage = false, sawCost = false
   const seenMessageIds = new Set<string>()
   const previousUsage = new Map<string, { input: number; output: number }>()
@@ -164,7 +164,11 @@ export function parseClaudeTranscript(path: string): SessionTelemetry {
         sawUsage = true
       }
       const cost = typeof obj['costUSD'] === 'number' ? obj['costUSD'] : obj['total_cost_usd']
-      if (typeof cost === 'number' && !duplicate) { sawCost = true; costUsd += cost }
+      if (typeof cost === 'number' && !duplicate && costUsd !== null) {
+        sawCost = true
+        const total = costUsd + cost
+        costUsd = Number.isFinite(total) ? total : null
+      }
       const model = msg?.['model']
       // Skip claude-code's "<synthetic>" placeholder — that's an
       // autoresponder/interrupt turn, not a real model invocation. Pick the

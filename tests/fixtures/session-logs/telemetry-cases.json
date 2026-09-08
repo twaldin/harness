@@ -1,5 +1,20 @@
 [
   {
+    "name": "Claude nonfinite reported cost stays unknown without losing valid usage",
+    "adapters": ["claude-code", "openclaude"],
+    "text": "{\"costUSD\":1e309,\"message\":{\"id\":\"one\",\"model\":\"claude-sonnet-4-6\",\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n{\"costUSD\":0.25,\"message\":{\"id\":\"two\"}}",
+    "expected": {"tokensIn":10,"tokensOut":2,"model":"claude-sonnet-4-6","costUsd":null}
+  },
+  {
+    "name": "Claude reported cost aggregate overflow stays unknown",
+    "adapters": ["claude-code", "openclaude"],
+    "records": [
+      {"total_cost_usd":1e308,"message":{"id":"one","model":"claude-sonnet-4-6","usage":{"input_tokens":5,"output_tokens":1}}},
+      {"total_cost_usd":1e308,"message":{"id":"two","model":"claude-sonnet-4-6","usage":{"input_tokens":5,"output_tokens":1}}}
+    ],
+    "expected": {"tokensIn":10,"tokensOut":2,"model":"claude-sonnet-4-6","costUsd":null}
+  },
+  {
     "name": "Claude malformed usage invalidates session totals",
     "adapters": ["claude-code", "openclaude"],
     "records": [

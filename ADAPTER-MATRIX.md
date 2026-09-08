@@ -97,7 +97,7 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | cline | unwired | unwired | foreground NDJSON only; no session resume or latest-session discovery |
 | goose | unwired | unwired | `complete` usage comes from stdout; no latest-session discovery or session ID in stream events |
 | copilot | unwired | unwired | native JSONL events only; no latest-session discovery |
-| cursor | unwired | native JSONL events only; no persist/resume or latest-session discovery |
+| cursor | unwired | unwired | native JSONL events only; no persist/resume or latest-session discovery |
 
 ## Backend and permission capabilities
 

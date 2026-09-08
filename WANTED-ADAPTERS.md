@@ -73,6 +73,14 @@ upstream compatibility.
   See [setup, permissions and dated qualification](ADAPTER-MATRIX.md#cursor).
   Cloud workers, persist/resume, ACP and SDK execution remain unsupported.
 
+### Kiro CLI — [TWA-80](https://linear.app/twaldin/issue/TWA-80)
+
+`kiro` now ships in both registries using the official `kiro-cli` V2 headless
+path, with explicit tool trust and opaque JSONL events. It is the successor to
+Amazon Q CLI, not another alias for an existing Harness adapter. Preview V3,
+ACP sessions and aggregate usage/USD remain unqualified.
+See [setup, permissions and coverage](ADAPTER-MATRIX.md#kiro).
+
 ## Source-qualified: existing implementation backlog
 
 These are unshipped. Reuse the linked ticket; each owns one adapter. Commands
@@ -105,14 +113,6 @@ with a bounded local synthetic provider. Programmatic mode uses the configured
 agent and denies approval callbacks; bypass and workspace trust are separate
 explicit choices. Credentialed provider success remains unqualified.
 See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
-
-### Kiro CLI — [TWA-80](https://linear.app/twaldin/issue/TWA-80)
-
-`kiro` now ships in both registries using the official `kiro-cli` V2 headless
-path, with explicit tool trust and opaque JSONL events. It is the successor to
-Amazon Q CLI, not another alias for an existing Harness adapter. Preview V3,
-ACP sessions and aggregate usage/USD remain unqualified.
-See [setup, permissions and coverage](ADAPTER-MATRIX.md#kiro).
 
 ### Native mini-SWE-agent — [TWA-82](https://linear.app/twaldin/issue/TWA-82)
 

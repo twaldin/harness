@@ -45,7 +45,7 @@ BYPASS_ARGS = {
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
 ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
-NO_BYPASS = ["crush", "opencode", "pi", "swe-agent"]
+NO_BYPASS = ["amp", "crush", "opencode", "pi", "swe-agent"]
 
 
 def _spec(harness: str, workdir: Path, **kw) -> RunSpec:

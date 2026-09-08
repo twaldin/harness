@@ -195,6 +195,13 @@ OMP SDK sessions use `getSessionCapabilities("omp", "sdk")` /
 `get_session_capabilities("omp", "sdk")`, qualified for the optional 18.1.14
 package on Bun >=1.3.14. Python and Node use the same owned bridge worker;
 ordinary CLI imports have no SDK dependency.
+OpenCode HTTP sessions use `getSessionCapabilities("opencode", "rpc")` /
+`get_session_capabilities("opencode", "rpc")` against an explicitly selected
+caller-owned 1.18.29 endpoint. Both languages implement native HTTP/SSE,
+exact resume, interruption and one-shot permission replies; close never
+disposes the server. Source pin and shared mock conformance are separate from
+native-runtime/provider evidence, which has not run. See the
+[OpenCode HTTP session contract](SPEC.md#caller-owned-opencode-http-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
 Amp, Auggie, OMP, Cline, Copilot, Cursor, Kimi Code and mini-SWE-agent add install metadata but no pane or session-log heuristics.

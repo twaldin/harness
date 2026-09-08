@@ -82,6 +82,26 @@ a sandbox. Always close in `finally`; resume passes the exact native reference.
 See the [paired SDK examples](../README.md#optional-oh-my-pi-sdk-sessions) and
 [SDK contract](../SPEC.md#optional-omp-sdk-sessions).
 
+## Caller-owned OpenCode HTTP backend
+
+`openSession({ harness: 'opencode', backend: 'rpc', workdir, opencode })`
+connects to an already-running OpenCode **1.18.29** server. `opencode` requires
+an explicit HTTP(S) origin and `auth: 'none' | 'basic'`; Basic also requires
+`username` and `password`. `workdir` is the server's canonical absolute path,
+not a local directory to discover or create.
+
+Node and Bun use standard `fetch`; no optional SDK is loaded. Resume uses the
+exact reference, endpoint and directory. Permission replies support only
+`'once'` and `'reject'`. Close/timeout release local HTTP/SSE connections without
+aborting server work, deleting history or disposing the caller's server.
+Call `interrupt()` first when a confirmed native stop is needed.
+
+The shared mock suite does not qualify a native OpenCode runtime or authenticated
+provider; those checks have not run. See the
+[paired examples](../README.md#caller-owned-opencode-http-sessions) and
+[full contract](../SPEC.md#caller-owned-opencode-http-sessions), including
+single-writer and auto-compaction limits.
+
 ## API reference
 
 ### `run(spec: RunSpec): Promise<RunResult>`

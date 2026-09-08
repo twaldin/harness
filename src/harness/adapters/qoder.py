@@ -91,7 +91,7 @@ def _result_or_events(stdout: str) -> dict | list[dict] | None:
         return None
     try:
         whole = json.loads(text, parse_constant=_reject_constant)
-    except ValueError:
+    except (ValueError, RecursionError):
         pass
     else:
         return whole if isinstance(whole, dict) else None
@@ -102,7 +102,7 @@ def _result_or_events(stdout: str) -> dict | list[dict] | None:
             continue
         try:
             event = json.loads(line, parse_constant=_reject_constant)
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(event, dict):
             events.append(event)

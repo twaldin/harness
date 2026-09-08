@@ -126,8 +126,13 @@ are migrated or modified by these readers.
 - **Factory:** [droid 0.213.0](https://www.npmjs.com/package/droid/v/0.213.0)
   and [official SDK 0.9.1](https://www.npmjs.com/package/@factory/droid-sdk/v/0.9.1)
   `session-discovery` source define the encoded-cwd directory and flat legacy
-  JSONL fallback, both checked against `session_start.cwd`. Underscores remain
-  intact. Cumulative `tokenUsage.inputTokens/outputTokens` and selected model
+  JSONL fallback. The SDK cwd-filters only flat legacy files; Harness deliberately
+  requires matching canonical absolute `session_start.cwd` in both layouts to
+  reject encoded-name collisions. Symlinks and trailing slashes are normalized;
+  missing or relative cwd is rejected. Unlike the SDK's live listing, this
+  artifact helper does not filter archived files: cwd and mtime do not establish
+  live-session identity. Underscores remain intact.
+  Cumulative `tokenUsage.inputTokens/outputTokens` and selected model
   come from the sibling `<uuid>.settings.json`; absent settings yield unknown
   usage, with assistant `message.modelId` available as a model-only fallback.
   Credits are not USD: session cost stays null. `FACTORY_HOME_OVERRIDE` replaces

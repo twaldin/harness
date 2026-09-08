@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -95,6 +95,14 @@ describe('factory-droid session log', () => {
     const later = (Date.now() + 5_000) / 1000
     utimesSync(theirs, later, later)
     expect(adapter.sessionLogPath!(workdir)).toBe(mine)
+  })
+
+  test('project sessions accept symlink cwd with a trailing slash', () => {
+    const { home, workdir, projectDir } = setup()
+    const alias = join(home, 'repo-alias')
+    symlinkSync(workdir, alias, 'dir')
+    const log = copySession(projectDir, `${alias}/`)
+    expect(adapter.sessionLogPath!(workdir)).toBe(log)
   })
 
   test('missing settings falls back to the assistant modelId; missing files stay null', () => {

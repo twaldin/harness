@@ -109,3 +109,11 @@ def test_missing_settings_falls_back_to_assistant_model_id(home: Path, workdir: 
     assert (t.tokens_in, t.tokens_out, t.cost_usd, t.model, t.raw) == (None, None, None, "claude-sonnet-4-5-20250929", None)
     missing = a.parse_session_log(str(project_dir / "nope.jsonl"))
     assert (missing.tokens_in, missing.model, missing.raw) == (None, None, None)
+
+
+def test_project_session_accepts_symlink_cwd_with_trailing_slash(home: Path, workdir: Path):
+    alias = home / "repo-alias"
+    alias.symlink_to(workdir, target_is_directory=True)
+    log = _copy_session(_project_dir(home, workdir), workdir)
+    log.write_text(log.read_text().replace(str(workdir.resolve()), str(alias) + "/"))
+    assert get_adapter("factory-droid").session_log_path(workdir) == str(log)

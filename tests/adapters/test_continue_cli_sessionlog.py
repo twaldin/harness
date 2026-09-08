@@ -17,6 +17,9 @@ SESSION_ID = "3b9e7d2c-5a1f-4e8b-9c6d-0f1a2b3c4d5e"
 FIXTURE = json.loads(
     (Path(__file__).resolve().parents[1] / "fixtures" / "session-logs" / "continue" / f"{SESSION_ID}.json").read_text()
 )
+LEGACY_LAYOUTS = json.loads(
+    (Path(__file__).resolve().parents[1] / "fixtures/session-logs/continue/legacy-layouts.json").read_text()
+)["cases"]
 
 
 @pytest.fixture
@@ -25,6 +28,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CONTINUE_GLOBAL_DIR", raising=False)
+    monkeypatch.delenv("CONTINUE_SESSION_DIR", raising=False)
     return home
 
 
@@ -97,3 +101,13 @@ def test_sessions_without_usage_and_missing_files_report_null(workdir: Path, ses
     t = a.parse_session_log(str(log))
     assert (t.tokens_in, t.tokens_out, t.cost_usd, t.model, t.raw) == (None, None, None, None, None)
     assert a.parse_session_log(str(sessions / "missing.json")).raw is None
+
+
+@pytest.mark.parametrize("case", LEGACY_LAYOUTS, ids=lambda case: case["name"])
+def test_obsolete_layout_is_not_a_workspace_session(case: dict, home: Path, workdir: Path, monkeypatch: pytest.MonkeyPatch):
+    directory = home / case["directory"].replace("__BASENAME__", workdir.name)
+    directory.mkdir(parents=True)
+    _write_session(directory, "/unrelated/workspace")
+    if case["override"]:
+        monkeypatch.setenv("CONTINUE_SESSION_DIR", str(directory))
+    assert get_adapter("continue-cli").session_log_path(workdir) is None

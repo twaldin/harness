@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import '../../src/adapters/index.js'
 import { getAdapter } from '../../src/registry.js'
 
 const SESSION_ID = '3b9e7d2c-5a1f-4e8b-9c6d-0f1a2b3c4d5e'
 const fixture = JSON.parse(readFileSync(new URL(`../../../tests/fixtures/session-logs/continue/${SESSION_ID}.json`, import.meta.url), 'utf8')) as Record<string, unknown>
+const legacyLayouts = JSON.parse(readFileSync(new URL('../../../tests/fixtures/session-logs/continue/legacy-layouts.json', import.meta.url), 'utf8')) as { cases: { name: string; directory: string; override: boolean }[] }
 const adapter = getAdapter('continue-cli')
 
-const originalEnv = { HOME: process.env.HOME, CONTINUE_GLOBAL_DIR: process.env['CONTINUE_GLOBAL_DIR'] }
+const originalEnv = { HOME: process.env.HOME, CONTINUE_GLOBAL_DIR: process.env['CONTINUE_GLOBAL_DIR'], CONTINUE_SESSION_DIR: process.env['CONTINUE_SESSION_DIR'] }
 const roots: string[] = []
 afterEach(() => {
   for (const [key, value] of Object.entries(originalEnv)) {
@@ -27,6 +28,7 @@ function setup(): { home: string; workdir: string; sessions: string } {
   mkdirSync(workdir, { recursive: true })
   process.env.HOME = home
   delete process.env['CONTINUE_GLOBAL_DIR']
+  delete process.env['CONTINUE_SESSION_DIR']
   const sessions = join(home, '.continue', 'sessions')
   mkdirSync(sessions, { recursive: true })
   return { home, workdir, sessions }
@@ -89,5 +91,13 @@ describe('continue-cli session log', () => {
     const telemetry = adapter.parseSessionLog!(log)
     expect([telemetry.tokensIn, telemetry.tokensOut, telemetry.costUsd, telemetry.model, telemetry.raw]).toEqual([null, null, null, null, null])
     expect(adapter.parseSessionLog!(join(sessions, 'missing.json')).raw).toBeNull()
+  })
+  test.each(legacyLayouts.cases)('obsolete layout is not a workspace session: $name', (layout) => {
+    const { home, workdir } = setup()
+    const directory = join(home, layout.directory.replace('__BASENAME__', basename(workdir)))
+    mkdirSync(directory, { recursive: true })
+    writeSession(directory, '/unrelated/workspace')
+    if (layout.override) process.env['CONTINUE_SESSION_DIR'] = directory
+    expect(adapter.sessionLogPath!(workdir)).toBeNull()
   })
 })

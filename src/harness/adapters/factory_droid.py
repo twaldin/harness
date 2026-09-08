@@ -182,7 +182,7 @@ def _canonical_cwd(workdir: Path) -> str:
     absolute = os.path.abspath(workdir)
     try:
         return os.path.realpath(absolute, strict=True)
-    except OSError:
+    except (OSError, ValueError):
         return absolute
 
 
@@ -194,7 +194,7 @@ def _jsonl_files(directory: Path) -> list[Path]:
 
 
 def _session_start_cwd(path: Path) -> str | None:
-    """`cwd` from a session file's first `session_start` line, or None."""
+    """Canonical absolute cwd from the first `session_start` line, or None."""
     try:
         with path.open("rb") as fh:
             first = fh.read(_SESSION_START_BYTES).split(b"\n", 1)[0]
@@ -204,7 +204,7 @@ def _session_start_cwd(path: Path) -> str | None:
     if not isinstance(event, dict) or event.get("type") != "session_start":
         return None
     cwd = event.get("cwd")
-    return cwd if isinstance(cwd, str) else None
+    return _canonical_cwd(Path(cwd)) if isinstance(cwd, str) and os.path.isabs(cwd) else None
 
 
 def _read_json_object(path: Path) -> dict | None:

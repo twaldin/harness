@@ -16,7 +16,7 @@ import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunS
 import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs'
-import { basename, dirname, extname, join, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 
 const SETTINGS_SUFFIX = '.settings.json'
@@ -89,7 +89,7 @@ function jsonlFiles(dir: string): string[] {
   }
 }
 
-/** `cwd` from a session file's first `session_start` line, or null. */
+/** Canonical absolute cwd from the first `session_start` line, or null. */
 function sessionStartCwd(path: string): string | null {
   let head: string
   try {
@@ -108,7 +108,8 @@ function sessionStartCwd(path: string): string | null {
   try { event = JSON.parse(newline === -1 ? head : head.slice(0, newline)) } catch { return null }
   const record = asRecord(event)
   if (!record || record['type'] !== 'session_start') return null
-  return typeof record['cwd'] === 'string' ? record['cwd'] : null
+  const cwd = record['cwd']
+  return typeof cwd === 'string' && isAbsolute(cwd) ? canonicalCwd(cwd) : null
 }
 
 function readJsonObject(path: string): Record<string, unknown> | null {

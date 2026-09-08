@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, auggie, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, mistral-vibe, kimi-code, or kiro as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, auggie, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, mistral-vibe, kimi-code, kiro, or qoder as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'amp', 'auggie', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'kimi-code', 'kiro', 'mini-swe-agent', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'amp', 'auggie', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'kimi-code', 'kiro', 'mini-swe-agent', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qoder', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -179,7 +179,7 @@ interface RunSpec {
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
   permissionPolicy?: 'upstream' | 'bypass' // default upstream
-  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
+  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions | QoderOptions
   executable?: string       // bare name or absolute path
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file
@@ -257,6 +257,14 @@ selects a trusted tool subset and requires configured MCP servers to start.
 Empty `trustTools: ''` trusts no tools. Bypass grants all tools and conflicts with `trustTools`. Model IDs pass through;
 omitting one uses upstream selection. Complete object events remain in `raw`,
 with null token/USD totals. See [setup and limits](../ADAPTER-MATRIX.md#kiro).
+
+Qoder uses `qoder --print --output-format json --input-format text --max-turns 20`.
+`nativeOptions: {kind: 'qoder', permissionMode: 'accept_edits'}` explicitly
+approves safe workspace edits, not shell commands. `default` and `dont_ask`
+are also supported; omission preserves upstream policy and bypass rejects.
+Model IDs and caller-selected `QODER_CONFIG_DIR`/authentication are preserved.
+Native result objects remain in `raw`, with null tokens/USD. Host-driven
+stream-json approvals are unsupported. See [setup and limits](../ADAPTER-MATRIX.md#qoder).
 
 Cursor uses the standalone `agent` executable with print/stream-JSON output.
 Only explicit bypass adds `--force`; model/auth/config remain caller-selected.

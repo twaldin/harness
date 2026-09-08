@@ -81,8 +81,17 @@ export interface KiroOptions {
   requireMcpStartup?: boolean
 }
 
+/** Explicit non-bypass Qoder modes; native `auto` and `bypass_permissions` are unsupported. */
+export type QoderPermissionMode = 'default' | 'accept_edits' | 'dont_ask'
+
+export interface QoderOptions {
+  kind: 'qoder'
+  /** Emitted as `--permission-mode <value>`; omitted leaves the upstream config's permission mode in charge. */
+  permissionMode?: QoderPermissionMode
+}
+
 /** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
-export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
+export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions | QoderOptions
 
 export type OutputStream = 'stdout' | 'stderr'
 
@@ -464,6 +473,9 @@ const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Reco
   kiro: {
     trustTools: { shape: 'tool-set', flag: '--trust-tools' },
     requireMcpStartup: { shape: 'switch', flag: '--require-mcp-startup' },
+  },
+  qoder: {
+    permissionMode: { shape: 'enum', flag: '--permission-mode', values: ['default', 'accept_edits', 'dont_ask'] satisfies readonly QoderPermissionMode[] },
   },
 }
 const NATIVE_OPTION_KINDS = Object.keys(NATIVE_OPTION_FIELDS).map((kind) => JSON.stringify(kind)).join(', ')

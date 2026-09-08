@@ -3,8 +3,8 @@ import './adapters/index.js'
 export type {
   RunSpec, BuildCommand, SubprocOutcome, RunResult, ParsedOutput, Adapter,
   ReadyState, AgentStatus, SessionTelemetry, InstallMeta, ScrollKeys,
-  Backend, PermissionPolicy, NativeOptions, ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions,
-  ClaudeCodeEffort, CodexSandbox, GracefulSignal, ErrorCode, Capabilities, ValidatedRunSpec,
+  Backend, PermissionPolicy, NativeOptions, ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions, QoderOptions,
+  ClaudeCodeEffort, CodexSandbox, QoderPermissionMode, GracefulSignal, ErrorCode, Capabilities, ValidatedRunSpec,
   Termination, TimeoutKind, OutputStream, OutputCallback,
 } from './base.js'
 export type { InstructionProjection, ProjectInstructionsOptions, PreparedCommand } from './instructions.js'

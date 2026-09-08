@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain twenty-four adapters, with shared fixture files:
+After adapter initialization, both registries contain twenty-five adapters, with shared fixture files:
 `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`, `factory-droid`,
-`gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
+`gemini`, `goose`, `hermes`, `kilo`, `kiro`, `mini-swe-agent`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qoder`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
@@ -83,6 +83,13 @@ Amazon Q CLI, not another alias for an existing Harness adapter. Preview V3,
 ACP sessions and aggregate usage/USD remain unqualified.
 See [setup, permissions and coverage](ADAPTER-MATRIX.md#kiro).
 
+### Qoder CLI — [TWA-92](https://linear.app/twaldin/issue/TWA-92)
+
+`qoder` now ships in both registries with explicit edit permissions, caller-selected
+model/config/auth, JSON results and null usage. Version 1.1.47 was installed and
+native missing-auth output checked; credentialed provider edit/test smoke remains
+unqualified. See [setup, prompt compatibility and limits](ADAPTER-MATRIX.md#qoder).
+
 ## Source-qualified: existing implementation backlog
 
 These are unshipped. Reuse the linked ticket; each owns one adapter. Commands
@@ -132,24 +139,10 @@ See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
 
 ## New source-qualified discoveries
 
-At the September 7 audit, workspace and repository backlog searches found no
-existing Qoder or Kimi Code adapter tickets. Both follow-ups were created as
-children of [TWA-87](https://linear.app/twaldin/issue/TWA-87), depending on shared
-conformance [TWA-67](https://linear.app/twaldin/issue/TWA-67). The catalog itself
-shipped no runtime adapter; subsequent implementation status is noted below.
-
-### Qoder CLI — [TWA-92](https://linear.app/twaldin/issue/TWA-92)
-
-- **Identity / maintenance:** npm [`@qoder-ai/qodercli`](https://www.npmjs.com/package/@qoder-ai/qodercli)
-  1.1.46, registry modified September 7; bins `qoder` and `qodercli`.
-  Install with `npm install -g @qoder-ai/qodercli`.
-- **Path:** [`qoder -p "PROMPT" --output-format json --permission-mode accept_edits --max-turns 20`](https://docs.qoder.com/cli/run-in-scripts).
-- **Gate / validation:** caller-selected Qoder
-  [account/PAT](https://docs.qoder.com/cli/authentication), model and `QODER_CONFIG_DIR`;
-  BYOK is not established here. `accept_edits` still denies shell commands;
-  text-mode confirmation defaults to deny, while host-driven stream-json approvals
-  are a separate protocol path. Verify edit versus shell denial, JSON metadata,
-  partial streams and cleanup. Unknown token/USD fields stay null.
+The September 7 catalog discovered Qoder and Kimi Code under
+[TWA-87](https://linear.app/twaldin/issue/TWA-87), dependent on shared conformance
+[TWA-67](https://linear.app/twaldin/issue/TWA-67). Both have since shipped:
+Qoder is listed above; Kimi Code's intake evidence and current reference follow.
 
 ### Kimi Code CLI — [TWA-93](https://linear.app/twaldin/issue/TWA-93)
 

@@ -66,7 +66,7 @@ const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MOD
 /** Native knobs `specFor`'s projected instructions need before the adapter accepts them. */
 const PROJECTION_NATIVE: Record<string, NativeOptions> = { 'mistral-vibe': { kind: 'mistral-vibe', trust: true } }
 
-const NO_BYPASS = ['amp', 'opencode', 'pi', 'crush', 'swe-agent', 'kimi-code']
+const NO_BYPASS = ['amp', 'opencode', 'pi', 'crush', 'swe-agent', 'kimi-code', 'qoder']
 
 const ALL_BYPASS_FLAGS = Object.values(BYPASS_FLAGS).flat()
 const SHIPPED = [...Object.keys(BYPASS_FLAGS), ...Object.keys(BYPASS_ENVS), ...NO_BYPASS]
@@ -223,6 +223,7 @@ describe('native options', () => {
     const allowTools = new Array<string>(1)
     expectCode(() => buildCommand(specFor('copilot', { nativeOptions: { kind: 'copilot', allowTools } })), 'invalid-options')
   })
+
 })
 
 describe('getCapabilities', () => {
@@ -256,6 +257,7 @@ describe('getCapabilities', () => {
       cursor: ['CURSOR_CONFIG_DIR', null],
       amp: [null, '--settings-file'],
       'kimi-code': ['KIMI_CODE_HOME', null],
+      qoder: ['QODER_CONFIG_DIR', null],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)
@@ -270,7 +272,7 @@ describe('getCapabilities', () => {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS || name in BYPASS_ENVS)
-      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot' && name !== 'amp' && name !== 'mistral-vibe' && name !== 'kiro') expect(caps.nativeOptions).toBeNull()
+      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot' && name !== 'amp' && name !== 'mistral-vibe' && name !== 'kiro' && name !== 'qoder') expect(caps.nativeOptions).toBeNull()
       else expect(caps.nativeOptions).toBe(name)
       expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)

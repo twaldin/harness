@@ -8,6 +8,10 @@
   reject. Assistant/tool JSONL stays in `raw`; accounting remains unknown.
   Source and synthetic conformance only; no native/provider smoke is claimed.
   See [setup and qualification limits](ADAPTER-MATRIX.md#kimi-code).
+- Added `qoder` in Python and TypeScript with explicit non-bypass permission
+  modes, caller-selected model/config/auth and shared subprocess cleanup.
+  Native JSON/errors remain raw; token/USD metrics stay null. Provider edit/test
+  success is unqualified. See [setup and compatibility limits](ADAPTER-MATRIX.md#qoder).
 - Added `auggie` in both languages using official print/JSON mode and the shared
   lifecycle. JSON-native results retain unit-tagged billing; non-JSON failures
   remain in process status and stderr. Decoder recursion errors no longer discard

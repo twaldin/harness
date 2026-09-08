@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (25 adapters)
+│   ├── adapters/*.py       (26 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -137,11 +137,16 @@ interface KiroOptions {
   trustTools?: string              // verbatim comma-separated native tool names
   requireMcpStartup?: boolean      // fail if configured MCP startup fails
 }
-type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
+interface QoderOptions {
+  kind: 'qoder'
+  permissionMode?: 'default' | 'accept_edits' | 'dont_ask'
+}
+type QoderPermissionMode = 'default' | 'accept_edits' | 'dont_ask'
+type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions | QoderOptions
 interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
-  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | 'mistral-vibe' | 'kiro' | null
+  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | 'mistral-vibe' | 'kiro' | 'qoder' | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -151,7 +156,8 @@ interface Capabilities {
 ```
 
 Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
-`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions`, `AmpOptions`, `VibeOptions` and `KiroOptions` with equivalent values.
+`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions`, `AmpOptions`, `VibeOptions`, `KiroOptions` and `QoderOptions` with equivalent values.
+`QoderPermissionMode` is also exported in both languages.
 Construct native options as `ClaudeCodeOptions(effort="high")`,
 `CodexOptions(sandbox="read-only")`,
 `ClineOptions(provider="openai-compatible", auto_approve=False)` or
@@ -259,7 +265,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All twenty-five CLI adapters share these lifecycle capabilities.
+for sessions. All twenty-six CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -295,7 +301,7 @@ approval request by silently escalating.
 | cursor | `--force` (native explicit denies and team policy still apply) |
 | kiro | `--trust-all-tools` |
 
-Adapters without a mapping (including Amp and Kimi Code) reject `"bypass"` as unsupported; a missing mapping is
+Adapters without a mapping (including Amp, Kimi Code and Qoder) reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
 silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 `--sandbox`, and cannot be combined with `"bypass"` because that would override
@@ -733,6 +739,39 @@ Config home/file overrides, native agent/engine switching, session resume,
 ACP/RPC and SDK execution are unsupported. Unknown native fields reject rather
 than disappear. See [setup and qualification limits](ADAPTER-MATRIX.md#kiro).
 
+### qoder
+
+`qoder --print --output-format json --input-format text --max-turns 20
+[--model MODEL] [--permission-mode MODE] --prompt=PROMPT` selects local
+one-shot execution. Empty prompts reject. Qoder 1.1.47 rejects a positional
+prompt beginning `--` even after the argument separator, so Harness uses the
+still-supported, deprecated equals-form prompt flag; its warning remains on
+stderr. Omitted model uses upstream selection and reports null; explicit IDs
+are trimmed and otherwise preserved. Shared preparation projects `AGENTS.md`.
+
+`QoderOptions(permission_mode="accept_edits")` /
+`{kind: 'qoder', permissionMode: 'accept_edits'}` explicitly approves safe
+workspace edits, not shell commands or sensitive paths. Supported modes are
+`default`, `accept_edits` and `dont_ask`; omission emits no permission flag.
+Text-input headless confirmation requests are denied. Existing upstream
+permission rules remain authoritative; these modes are not a sandbox.
+Bypass, automatic agent-decided permissions and host-driven approvals are
+unsupported; Harness never injects `--yolo`.
+
+A whole JSON object is retained as `raw`; otherwise complete JSON object
+lines are retained as an ordered list. A valid nonobject JSON document yields
+null, not nested result extraction. Malformed/truncated lines are ignored;
+complete events survive incomplete streams. No objects means null.
+Native result/error/permission fields remain raw and do not rewrite process
+exit or cancellation. Token and USD metrics stay null: metadata is not a
+qualified usage contract, and 1.1.47's result builder hardcodes USD to zero.
+
+`configHome` maps to `QODER_CONFIG_DIR`; inherited and explicit authentication
+remain caller-selected. Config-file overrides, output/input protocol switches,
+resume, RPC and SDK sessions are unsupported. Stream-json parsing is diagnostic
+only, not the separate host-driven approval protocol. See
+[qualification and provider-smoke gaps](ADAPTER-MATRIX.md#qoder).
+
 ### cursor
 
 `raw` preserves all complete JSON object lines in order, including assistant
@@ -820,7 +859,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `kimi-code`, `kiro`, `mini-swe-agent` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `kimi-code`, `kiro`, `mini-swe-agent`, `mistral-vibe` and `qoder` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -907,6 +946,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | mini-swe-agent | `MSWEA_GLOBAL_CONFIG_DIR` | `--config` (complete config replacement, not an overlay on `mini.yaml`) |
 | kiro | unsupported | unsupported |
 | kimi-code | `KIMI_CODE_HOME` | unsupported (native `config.toml` under the selected home) |
+| qoder | `QODER_CONFIG_DIR` | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -1507,7 +1547,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kimi-code", "kiro", "mini-swe-agent", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kimi-code", "kiro", "mini-swe-agent", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qoder", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)

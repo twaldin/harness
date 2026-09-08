@@ -22,6 +22,7 @@ from harness.adapters.omp import OmpAdapter
 from harness.adapters.openclaude import OpenClaudeAdapter
 from harness.adapters.opencode import OpenCodeAdapter
 from harness.adapters.pi import PiAdapter
+from harness.adapters.qoder import QoderAdapter
 from harness.adapters.qwen import QwenAdapter
 from harness.adapters.swe_agent import SweAgentAdapter
 from harness.registry import register
@@ -51,6 +52,7 @@ register("kiro", KiroAdapter)
 register("mini-swe-agent", MiniSweAgentAdapter)
 register("auggie", AuggieAdapter)
 register("kimi-code", KimiCodeAdapter)
+register("qoder", QoderAdapter)
 
 __all__ = [
     "AmpAdapter",
@@ -76,6 +78,7 @@ __all__ = [
     "OpenClaudeAdapter",
     "OpenCodeAdapter",
     "PiAdapter",
+    "QoderAdapter",
     "QwenAdapter",
     "SweAgentAdapter",
 ]

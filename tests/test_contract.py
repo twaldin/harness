@@ -14,6 +14,7 @@ from harness import (
     ClineOptions,
     CodexOptions,
     HarnessError,
+    QoderOptions,
     RunSpec,
     SubprocOutcome,
     VibeOptions,
@@ -49,7 +50,7 @@ BYPASS_ARGS = {
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
 ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
-NO_BYPASS = ["amp", "crush", "kimi-code", "opencode", "pi", "swe-agent"]
+NO_BYPASS = ["amp", "crush", "kimi-code", "opencode", "pi", "qoder", "swe-agent"]
 
 
 def _spec(harness: str, workdir: Path, **kw) -> RunSpec:
@@ -247,6 +248,7 @@ def test_native_kind_must_match_harness(name: str, options, workdir: Path):
     [
         ("claude-code", ClaudeCodeOptions(effort="ultra")),
         ("codex", CodexOptions(sandbox="none")),
+        ("qoder", QoderOptions(permission_mode="bypass_permissions")),
         ("claude-code", {"kind": "claude-code", "effort": "high"}),
     ],
 )
@@ -283,6 +285,7 @@ CONFIG_MAPPINGS = {
     "mistral-vibe": ("VIBE_HOME", None),
     "mini-swe-agent": ("MSWEA_GLOBAL_CONFIG_DIR", "--config"),
     "kimi-code": ("KIMI_CODE_HOME", None),
+    "qoder": ("QODER_CONFIG_DIR", None),
 }
 
 
@@ -290,7 +293,7 @@ CONFIG_MAPPINGS = {
 def test_capabilities_reflect_shipped_support(name: str):
     caps = get_capabilities(name)
     expected_policies = ("upstream", "bypass") if name in BYPASS_ARGS or name in BYPASS_ENVS else ("upstream",)
-    expected_native = name if name in ("claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe", "kiro") else None
+    expected_native = name if name in ("claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe", "kiro", "qoder") else None
     home_env, file_flag = CONFIG_MAPPINGS.get(name, (None, None))
     assert caps == Capabilities(
         backend="cli",

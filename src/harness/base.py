@@ -41,9 +41,10 @@ ErrorCode = Literal[
     "protocol-error",
     "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe", "kiro"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe", "kiro", "qoder"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
+QoderPermissionMode = Literal["default", "accept_edits", "dont_ask"]
 #: Signal the runner sends the owned process group once before escalating to
 #: SIGKILL. SIGTERM is the default; adapters whose CLI only shuts down
 #: cleanly on SIGINT declare it through `Adapter.graceful_signal`.
@@ -54,6 +55,7 @@ PERMISSION_POLICIES: tuple[PermissionPolicy, ...] = get_args(PermissionPolicy)
 GRACEFUL_SIGNALS: tuple[GracefulSignal, ...] = get_args(GracefulSignal)
 _CLAUDE_CODE_EFFORTS: tuple[str, ...] = get_args(ClaudeCodeEffort)
 _CODEX_SANDBOXES: tuple[str, ...] = get_args(CodexSandbox)
+_QODER_PERMISSION_MODES: tuple[str, ...] = get_args(QoderPermissionMode)
 
 
 class HarnessError(RuntimeError):
@@ -172,7 +174,22 @@ class KiroOptions:
     require_mcp_startup: bool | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
+@dataclass(frozen=True)
+class QoderOptions:
+    """Typed `qoder` print-mode knobs. `permission_mode` is emitted as
+    `--permission-mode <value>`.
+
+    Only the host-approval-free modes are accepted: `default`, `accept_edits`
+    and `dont_ask`. Upstream's `bypass_permissions` and `auto` are rejected
+    with `invalid-options`; the harness declares no bypass mapping for qoder.
+    Omitted: upstream configuration decides (no permission flag is injected).
+    """
+
+    kind: Literal["qoder"] = field(default="qoder", init=False)
+    permission_mode: QoderPermissionMode | None = None
+
+
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions | QoderOptions
 
 
 @dataclass
@@ -207,8 +224,8 @@ class RunSpec:
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
                       `CodexOptions`, `ClineOptions`, `CopilotOptions`,
-                      `AmpOptions`, `VibeOptions`, `KiroOptions`). The kind
-                      must match `harness`.
+                      `AmpOptions`, `VibeOptions`, `KiroOptions`,
+                      `QoderOptions`). The kind must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -621,9 +638,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions, QoderOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions or KiroOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions or QoderOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -695,6 +712,13 @@ class Adapter(ABC):
                     f"kiro require_mcp_startup must be None or a bool, got {type(require_mcp_startup).__name__}",
                     code="invalid-options",
                 )
+        elif isinstance(native, QoderOptions):
+            mode = native.permission_mode
+            if mode is not None and (not isinstance(mode, str) or mode not in _QODER_PERMISSION_MODES):
+                raise HarnessError(
+                    f"invalid qoder permission_mode {mode!r}; expected one of {', '.join(_QODER_PERMISSION_MODES)}",
+                    code="invalid-options",
+                )
 
     def resolve_run_spec(self, spec: RunSpec) -> ResolvedSpec:
         """Validate `spec` and resolve the adapter-facing model and extra argv.
@@ -734,6 +758,8 @@ class Adapter(ABC):
                 native_args += (f"--trust-tools={native.trust_tools}",)
             if native.require_mcp_startup is True:
                 native_args += ("--require-mcp-startup",)
+        elif isinstance(native, QoderOptions) and native.permission_mode is not None:
+            native_args = ("--permission-mode", native.permission_mode)
         config_args: tuple[str, ...] = ()
         if spec.config_file is not None:
             config_args = (self.config_file_flag, str(Path(spec.config_file)))  # type: ignore[assignment]

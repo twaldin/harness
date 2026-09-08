@@ -24,6 +24,17 @@ try {
     assert.equal(normal.exitCode, 7)
     assert.equal(normal.stdout, 'synthetic λ')
 
+    const descriptors = await run(['python3', '-c', [
+      'import json, os, stat',
+      'pipes = []',
+      'for fd in range(256):',
+      '    try:',
+      '        if stat.S_ISFIFO(os.fstat(fd).st_mode): pipes.append(fd)',
+      '    except OSError: pass',
+      'print(json.dumps(pipes))',
+    ].join('\n')], { cwd })
+    assert.deepEqual(JSON.parse(descriptors.stdout), [1, 2], 'private FIFO descriptors leaked into the child')
+
     const signaled = await run([process.execPath, '-e', 'process.kill(process.pid, "SIGTERM")'], { cwd })
     assert.equal(signaled.termination, 'signaled')
     assert.equal(signaled.signal, 'SIGTERM')

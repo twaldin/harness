@@ -415,7 +415,8 @@ def _run_subprocess(
 
     def close_stdin() -> None:
         if proc.stdin is not None and not proc.stdin.closed:
-            selector.unregister(proc.stdin)
+            if proc.stdin.fileno() in selector.get_map():
+                selector.unregister(proc.stdin)
             proc.stdin.close()
 
     def pump(wait: float) -> None:
@@ -480,7 +481,12 @@ def _run_subprocess(
         # own pipes or keep working without any inherited pipe. Callbacks keep
         # flowing for whatever drains within the budget; capture continues
         # regardless.
-        close_stdin()
+        stdin_error: Exception | None = None
+        try:
+            close_stdin()
+        except Exception as exc:
+            # A local descriptor error must not bypass group escalation/reaping.
+            stdin_error = exc
         group_exists = signal_group(signal.SIGTERM)
         grace_end = time.monotonic() + 0.5
         drain_end = grace_end + 1.0
@@ -510,6 +516,8 @@ def _run_subprocess(
             proc.wait(timeout=max(0, drain_end - time.monotonic()))
         if group_error is not None:
             raise group_error
+        if stdin_error is not None:
+            raise stdin_error
 
     try:
         try:
@@ -522,11 +530,11 @@ def _run_subprocess(
                 selector.register(proc.stdin, selectors.EVENT_WRITE, _Writer(payload))
             wall_deadline = None if timeout_seconds is None else started + timeout_seconds
             while True:
-                if sink.error is not None:
-                    termination = "callback-error"
-                    break
                 if proc.poll() is not None:
                     termination = "signaled" if proc.returncode < 0 else "exited"
+                    break
+                if sink.error is not None:
+                    termination = "callback-error"
                     break
                 if cancelled():
                     termination = "cancelled"

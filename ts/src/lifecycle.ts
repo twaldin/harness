@@ -316,6 +316,7 @@ export function runLifecycle(
     let probeTimer: NodeJS.Timeout | undefined
     let drainTimer: NodeJS.Timeout | undefined
     let readTimer: NodeJS.Timeout | undefined
+    let readImmediate: NodeJS.Immediate | undefined
     // One callback outstanding, no delivery queue. Descriptor reads pause
     // while awaiting the consumer on both Node and Bun.
     let callbacksOn = onOutput !== undefined
@@ -333,6 +334,7 @@ export function runLifecycle(
       clearInterval(probeTimer)
       clearTimeout(drainTimer)
       clearInterval(readTimer)
+      clearImmediate(readImmediate)
       cancel?.removeEventListener('abort', onAbort)
       child.stdin?.destroy()
       for (const pipe of pipes) pipe.close()
@@ -525,6 +527,7 @@ export function runLifecycle(
     const pump = (): void => {
       if (finished || pending !== null) return
       try {
+        let progressed = false
         // Bound each tick so noisy output cannot starve timers/cancellation.
         for (let pass = 0; pass < 8; pass++) {
           for (const output of outputs) {
@@ -532,6 +535,7 @@ export function runLifecycle(
             const chunk = output.pipe.read()
             let text = ''
             if (chunk !== null) {
+              progressed = true
               output.capture.push(chunk)
               touchActivity()
               if (callbacksOn) text = output.decoder.write(chunk)
@@ -545,6 +549,14 @@ export function runLifecycle(
         }
         pipesClosed = outputs.every((output) => output.ended)
         finishIfClosed()
+        if (progressed && !pipesClosed && !finished && readImmediate === undefined) {
+          // Yield between bounded batches, without throttling a ready pipe
+          // to the idle polling interval.
+          readImmediate = setImmediate(() => {
+            readImmediate = undefined
+            pump()
+          })
+        }
       } catch (error) {
         processError = error instanceof Error ? error : new Error(String(error))
         stopGroup(null)

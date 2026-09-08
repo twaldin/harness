@@ -270,6 +270,29 @@ async def test_async_rejection_after_leader_exit_keeps_exit_but_flags_callback(t
     assert outcome.callback_error == "ValueError: late"
 
 
+@pytest.mark.parametrize("runner", ["sync", "async"])
+async def test_callback_failure_preserves_an_already_reaped_exit(monkeypatch, tmp_path: Path, runner: str):
+    import harness._subproc as engine
+
+    original_popen = engine.subprocess.Popen
+    children = []
+
+    def launch(*args, **kwargs):
+        child = original_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    def fail_after_exit(chunk: str, stream: str) -> None:
+        children[0].wait(timeout=3)
+        raise ValueError("late")
+
+    monkeypatch.setattr(engine.subprocess, "Popen", launch)
+    kwargs = dict(cwd=tmp_path, timeout_seconds=5, on_output=fail_after_exit)
+    cmd = ["sh", "-c", "echo a; exit 4"]
+    outcome = run_subprocess(cmd, **kwargs) if runner == "sync" else await run_subprocess_async(cmd, **kwargs)
+    assert (outcome.termination, outcome.exit_code, outcome.callback_error) == ("exited", 4, "ValueError: late")
+
+
 def test_sync_callback_must_return_none(tmp_path: Path):
     outcome = run_subprocess(["sh", "-c", "echo a; sleep 30"], cwd=tmp_path, timeout_seconds=30, on_output=lambda t, s: 1)
     assert outcome.termination == "callback-error"
@@ -481,3 +504,30 @@ def test_invalid_stdin_type_is_invalid_options(tmp_path: Path):
     with pytest.raises(HarnessError) as exc:
         run(RunSpec(harness="codex", prompt="p", workdir=tmp_path, stdin=b"bytes"))  # type: ignore[arg-type]
     assert exc.value.code == "invalid-options"
+
+
+def test_setup_failure_with_stdin_still_reaps_owned_child(monkeypatch, tmp_path: Path):
+    import harness._subproc as engine
+
+    original_popen = engine.subprocess.Popen
+    children = []
+
+    def launch(*args, **kwargs):
+        child = original_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    def fail_setup(fd, blocking):
+        raise OSError("synthetic descriptor setup failure")
+
+    monkeypatch.setattr(engine.subprocess, "Popen", launch)
+    monkeypatch.setattr(engine.os, "set_blocking", fail_setup)
+    try:
+        with pytest.raises(OSError, match="synthetic descriptor setup failure"):
+            run_subprocess(_py("import time; time.sleep(30)"), cwd=tmp_path, timeout_seconds=5, stdin="payload")
+        assert children[0].poll() is not None
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+                child.wait()

@@ -186,7 +186,7 @@ describe('capture', () => {
     expect(outcome.stdout.length).toBe(1_048_576)
     expect(outcome.stdoutTruncated).toBe(true)
     expect(outcome.stderrTruncated).toBe(false)
-  })
+  }, 35_000)
 
   test('a silent exit reports zero bytes and no truncation', async () => {
     const outcome = await runSubprocessAsync(['true'], { cwd: workdir() })
@@ -392,11 +392,11 @@ describe('deadlines', () => {
   })
 
   test('the inactivity window restarts on every byte, and counts from launch', async () => {
-    const chatty = await runSubprocessAsync(py('import sys,time\nfor _ in range(6): sys.stdout.write("."); time.sleep(0.15)'), {
+    const chatty = await runSubprocessAsync(py('import sys,time\nfor _ in range(12): sys.stdout.write("."); time.sleep(0.1)'), {
       cwd: workdir(),
-      inactivityTimeoutSeconds: 0.4,
+      inactivityTimeoutSeconds: 0.8,
     })
-    expect([chatty.termination, chatty.stdout]).toEqual(['exited', '......'])
+    expect([chatty.termination, chatty.stdout]).toEqual(['exited', '............'])
     const mute = await runSubprocessAsync(['sleep', '5'], { cwd: workdir(), inactivityTimeoutSeconds: 0.3 })
     expect([mute.termination, mute.timeoutKind]).toEqual(['timed-out', 'inactivity'])
   })

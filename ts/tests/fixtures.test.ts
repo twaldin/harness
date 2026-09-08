@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'os'
 import { buildCommand, parseOutput } from '../src/registry.js'
 import '../src/adapters/index.js'
 import type { Backend, NativeOptions, PermissionPolicy, RunSpec, SubprocOutcome } from '../src/base.js'
@@ -112,6 +113,21 @@ for (const adapterName of ADAPTER_NAMES) {
   describe(adapterName, () => {
     const fixture = loadFixture(adapterName)
     const spec = fixtureSpecToRunSpec(fixture.spec)
+
+    if (adapterName === 'opencode') {
+      let previousDb: string | undefined
+      beforeAll(() => {
+        previousDb = process.env['OPENCODE_DB']
+        const emptyDir = mkdtempSync(join(tmpdir(), 'harness-fixture-opencode-db-'))
+        WORKDIRS.push(emptyDir)
+        // This fixture covers missing telemetry, never the developer's live DB.
+        process.env['OPENCODE_DB'] = join(emptyDir, 'missing.db')
+      })
+      afterAll(() => {
+        if (previousDb === undefined) delete process.env['OPENCODE_DB']
+        else process.env['OPENCODE_DB'] = previousDb
+      })
+    }
 
     beforeAll(() => {
       setupWorkdir(spec.workdir)

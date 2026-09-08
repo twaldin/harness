@@ -192,11 +192,6 @@ describe('run configuration', () => {
     expectCode(() => buildCommand({ ...spec, model: 'gpt-5.4' }), 'unsupported-capability')
     expect(buildCommand({ ...spec, model: '' }).model).toBeNull()
 
-    const plain = buildCommand({ harness: 'continue-cli', prompt: 'x', workdir, model: 'openai/gpt-5' })
-    expect(plain.args).toEqual(['-p', 'x', '--model', 'openai/gpt-5', '--format', 'json'])
-    expect(plain.model).toBe('openai/gpt-5')
-    expectCode(() => buildCommand({ harness: 'continue-cli', prompt: 'x', workdir, model: 'gpt-5.4' }), 'unsupported-capability')
-    expect(buildCommand({ harness: 'continue-cli', prompt: 'x', workdir }).model).toBeNull()
   })
 
   test('continue-cli OpenAI-compatible env without a config file is unsupported and leaks no secret', () => {

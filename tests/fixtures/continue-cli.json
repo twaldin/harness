@@ -56,6 +56,13 @@
   },
   "cases": [
     {
+      "name": "caller-config-rejects-explicit-Hub-model",
+      "spec": {
+        "configFile": "<root>/continue.yaml"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
       "name": "default-model-delegates-to-upstream-config",
       "spec": {
         "model": ""

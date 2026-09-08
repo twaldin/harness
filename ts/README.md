@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'amp', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'amp', 'auggie', 'claude-code', 'cline', 'codex', 'continue-cli', 'copilot', 'crush', 'cursor', 'factory-droid', 'gemini', 'goose', 'hermes', 'kilo', 'mistral-vibe', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 

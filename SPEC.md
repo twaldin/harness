@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (21 adapters)
+│   ├── adapters/*.py       (22 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -254,7 +254,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All twenty-one CLI adapters share these lifecycle capabilities.
+for sessions. All twenty-two CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -688,6 +688,24 @@ selection when omitted, explicit `--force` only for bypass, and SIGINT graceful
 teardown. No native mode/sandbox/trust/MCP approval or persist/resume/worker
 mapping is exposed. See [setup and qualification limits](ADAPTER-MATRIX.md#cursor).
 
+### auggie
+
+`auggie --print --output-format json --show-cost` emits a compact terminal
+`type: "result"` object, not streaming assistant/tool events. `raw` retains all
+complete JSON object lines in order (null when none); noise, nonobjects and
+truncated records remain in stdout. The last result's `billing.total_cost`
+populates `costUsd` only when `billing.usage_unit` is exactly `"usd"` and the
+cost is a finite nonnegative number. Credit billing and missing/invalid billing
+yield null; no conversion, summation or earlier-result fallback. Token metrics
+are always null.
+
+Process success alone does not establish agent completion. Inspect the final
+native `is_error` and `subtype`: `success` differs from `empty_completion`,
+`error_during_execution` and `error_max_turns`. Native error fields remain in raw;
+Harness preserves the actual process exit and its own timeout/cancellation cause.
+Authentication and enterprise noninteractive-entitlement failures can exit 1
+without JSON. See [setup and qualification limits](ADAPTER-MATRIX.md#auggie).
+
 ---
 
 ## Adapter contract
@@ -698,7 +716,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `amp`, `hermes`, `goose`, `copilot`, `cursor` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor` and `mistral-vibe` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -1378,7 +1396,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "amp", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)
@@ -1422,7 +1440,7 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.12` and TypeScript `0.2.16`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.13` and TypeScript `0.2.17`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

@@ -11,8 +11,8 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The twenty-one adapters below are registered in **both** implementations and have
-shared fixture files: `aider`, `amp`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
+The twenty-two adapters below are registered in **both** implementations and have
+shared fixture files: `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `cursor`,
 `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
@@ -46,6 +46,7 @@ versions below are dated observations, not a supported version range.
 | Adapter | Primary installation / source | Installed observation | Qualification and material limit |
 |---|---|---|---|
 | amp | [official native installer](https://ampcode.com/docs/cli); [execute mode](https://ampcode.com/docs/cli/execute-mode) | isolated Darwin arm64 `0.0.1788868861-g921679` (2026-09-08), checksum verified | Help/version and bounded local native run checked. Configured account returned Out of Credits in JSONL with process exit zero; no successful provider coverage. See [limits](#amp). |
+| auggie | [`@augmentcode/auggie`; CLI reference](https://docs.augmentcode.com/cli/reference) | isolated npm 0.36.0 (commit 7c61e5bb), macOS arm64, 2026-09-08 | Version/help and packaged JSON/entitlement paths checked. Native account probe returned not logged in; no authenticated provider coverage. See [limits](#auggie). |
 | aider | [`aider-chat`; CLI options](https://aider.chat/docs/config/options.html) (0.86.2; Python >=3.10,<3.13) | not on PATH | Source-checked; cached and multiple-message usage reports repaired against upstream emission. Rounded token scraper only; no session helper/provider qualification. |
 | claude-code | [`@anthropic-ai/claude-code`; CLI reference](https://code.claude.com/docs/en/cli-reference) (registry 2.1.263) | 2.1.220 | Help-checked; JSON usage/cost source documented. Current pane/cutoff/config-root qualification remains TWA-96. |
 | codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | Help-checked; provider smoke **failed**: configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. |
@@ -73,7 +74,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `amp`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `amp`, `auggie`, `cline`, `copilot`, `cursor`, `goose`, `hermes`, `mistral-vibe` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
 upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
@@ -105,7 +106,7 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 
 ## Backend and permission capabilities
 
-All twenty-one support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All twenty-two support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -115,7 +116,7 @@ OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
-Amp, OMP, Cline, Copilot and Cursor add install metadata but no pane or session-log heuristics.
+Amp, Auggie, OMP, Cline, Copilot and Cursor add install metadata but no pane or session-log heuristics.
 These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
@@ -141,7 +142,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | copilot | `--allow-all` |
 | mistral-vibe | `--auto-approve` |
 | cursor | `--force`; native explicit denies and team policy still apply |
-| amp, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
+| amp, auggie, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
 Amp, Claude Code, Codex, Cline and Copilot have typed native options:
 `ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
@@ -997,3 +998,40 @@ Shared across adapters:
 - Captures stdout + stderr separately
 - Enforces wall/inactivity deadlines, finite stdin, bounded capture and owned process-tree teardown on supported POSIX runtimes. Python sync/async and TypeScript Bun/Node behavior is covered by the shared lifecycle scenarios.
 - Returns structured exit/termination/timeout/launch/parse information; nonzero child exits remain results, not exceptions. See [SPEC](SPEC.md#ownership-and-execution) for the current contract and limits.
+
+## auggie
+
+- **Distribution / setup:** official npm [`@augmentcode/auggie`](https://www.npmjs.com/package/@augmentcode/auggie), executable `auggie`, Node 20+. Install/update with `npm install -g @augmentcode/auggie`; probe with `auggie --version`. Harness only exposes install metadata; it does not install or upgrade the CLI.
+- **Command:** `auggie --print --output-format json --show-cost --workspace-root <absolute workdir> [--model <trimmed model>] --instruction=<exact prompt>`. An empty prompt rejects; leading dashes and newlines remain literal. Finite stdin is additional prompt context, not a replacement for the instruction.
+- **Workspace / instructions:** the explicit workspace root prevents upstream Git-root autodetection from broadening the selected workdir. Print mode **skips indexing confirmation**: run only in a workspace you authorize Augment to index. Shared preparation projects `AGENTS.md` and restores it after owned teardown; existing Augment/Claude rules still apply. This is not a sandbox.
+- **Model / configuration:** no Harness default or provider-prefix rewriting. Omitted model leaves account/config selection unchanged and reports null; explicit model IDs pass to `--model`. Existing local Augment configuration/authentication remains caller-selected. `configHome`, `configFile`, bypass and typed native options are unsupported and reject before writes/spawn; the cache-directory flag is not misrepresented as a complete config-home mapping.
+- **Permissions:** default `upstream` adds no permission grants, ask-mode toggle or bypass. Native tool policies still apply. Configure them upstream; no interactive approval channel is provided. Fine-grained `--permission`, `--ask`, tool filters, reasoning effort, persona, max-turns, queued prompts and extra workspace flags have no typed Harness mapping.
+- **Output / accounting:** 0.36.0 emits a compact JSON result at agent-loop completion, not incremental assistant/tool events. Shared streaming callbacks deliver raw process chunks only. `raw` retains every complete JSON object line in order, including unknown objects, native status, IDs and retry metadata; null when none decode. Noise, scalars/arrays and truncated records remain in stdout. Only the last `type="result"` object's finite nonnegative `billing.total_cost` with `billing.usage_unit="usd"` supplies `costUsd`. Credits, missing/invalid billing and missing results yield null; tokens are always null. No summation, conversion or estimated pricing.
+- **Completion / failures:** require the native final `subtype="success"` and `is_error=false` as well as an ordinary zero process exit when deciding task success. `empty_completion`, `error_during_execution` and `error_max_turns` are distinct outcomes even if the process exits zero. Authentication or entitlement errors can exit 1 without JSON. Harness preserves process status and native fields rather than fabricating completion or rewriting errors.
+- **Ownership / exclusions:** one-shot foreground CLI only; no daemon, cloud/Cosmos, ACP/MCP server, RPC/SDK, resume or controlled session support. Native session persistence remains upstream behavior. Shared SIGTERM then bounded SIGKILL teardown owns the original process group, not detached tools or remote services. Child `AUGMENT_DISABLE_AUTO_UPDATE=1` disables CLI self-updates by default; an explicit caller env value wins. No global daemon shutdown, credential copying or configuration edits.
+
+### Qualification — 2026-09-08
+
+Official [overview](https://docs.augmentcode.com/cli/overview),
+[reference](https://docs.augmentcode.com/cli/reference),
+[automation](https://docs.augmentcode.com/cli/automation/overview),
+[rules](https://docs.augmentcode.com/cli/rules) and
+[permissions](https://docs.augmentcode.com/cli/permissions) were refreshed against
+an isolated npm 0.36.0 executable (commit `7c61e5bb`) on macOS arm64.
+The packaged renderer corroborates the JSON completion fields and unit-tagged
+billing; `--show-cost` is current and `--show-credits` a deprecated alias in
+this release. `account status` returned not logged in (exit 1).
+
+Bounded 15-second native probes through Python `run`/`run_async` and TypeScript
+`run`/`runAsync` (Node 26.6.0, Bun 1.3.14) each returned authentication failure
+with exit 1 in under two seconds. Stdout was empty, stderr was captured and
+delivered to callbacks, metrics/raw were null, and owned instruction projections
+and leases were removed. No authenticated generation was attempted after that
+failure.
+
+An active caller-configured Augment account/session is required. Enterprise
+agreements may separately disable noninteractive mode; login alone does not
+qualify that entitlement. Authenticated generation, billed usage, tool execution,
+native tool-tree cancellation and Linux upstream behavior remain untested.
+Shared fixtures use synthetic results and executables, not a successful provider
+session. No global install, account switch or package publication was performed.

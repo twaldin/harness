@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (14 adapters)
+│   ├── adapters/*.py       (15 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "crush" | "kilo" | "hermes"
+  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes"
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -219,7 +219,7 @@ importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All fourteen CLI adapters share these lifecycle capabilities.
+for sessions. All fifteen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -246,6 +246,7 @@ approval request by silently escalating.
 | aider | `--yes-always` |
 | kilo | `--auto` |
 | hermes | `--yolo` |
+| omp | `--auto-approve` |
 
 The other five adapters reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
@@ -254,8 +255,8 @@ silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 the selected sandbox. Claude Code `effort` emits `--effort`; it is not a common
 model/effort policy for every tool.
 
-**Compatibility change:** older command builders inserted the mappings above
-(Hermes postdates them) unconditionally. Existing unattended callers that intentionally require
+**Compatibility change:** older command builders inserted the original eight
+mappings above (Hermes and OMP postdate them) unconditionally. Existing unattended callers that intentionally require
 that authority must set `permission_policy="bypass"` (Python) or
 `permissionPolicy: "bypass"` (TypeScript). Otherwise upstream defaults apply.
 The existing RunSpec/RunResult fields and entry points are retained; this is an
@@ -625,6 +626,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | hermes | `HERMES_HOME` | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
+| omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
 | all others | unsupported | unsupported |
 
 An unsupported explicit override raises `unsupported-capability`. Home/file
@@ -643,6 +645,15 @@ an env variable does not claim the upstream supports it or separates credentials
 Harness does not rewrite a user's settings to make a model selection stick.
 An omitted/empty model retains the existing adapter default contract; for Hermes
 that contract is no `--model` flag and a null reported model.
+
+OMP preserves the requested model string, including unknown provider prefixes;
+it does not apply Pi's `openai-codex/` inference. An explicit OMP `configHome`
+also selects the default profile because named upstream profiles ignore the
+agent-directory override. Without `configHome`, inherited profile selection
+remains upstream-controlled. This selects agent state, not all global/project
+discovery or a sandbox. OMP config files are additional overlays, not replacements.
+See the [OMP adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for setup,
+event semantics, native errors and qualification limits.
 
 Continue no longer generates YAML containing API keys. Its former explicit
 OpenAI-compatible env branch requires a caller-selected `configFile`.

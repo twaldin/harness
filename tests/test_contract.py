@@ -36,6 +36,7 @@ BYPASS_FLAGS = {
     "hermes": "--yolo",
     "qwen": "-y",
     "kilo": "--auto",
+    "omp": "--auto-approve",
 }
 ALL_KNOWN_BYPASS_FLAGS = set(BYPASS_FLAGS.values())
 NO_BYPASS = ["continue-cli", "crush", "opencode", "pi", "swe-agent"]
@@ -250,6 +251,7 @@ CONFIG_MAPPINGS = {
     "hermes": ("HERMES_HOME", None),
     "aider": (None, "--config"),
     "continue-cli": (None, "--config"),
+    "omp": ("PI_CODING_AGENT_DIR", "--config"),
 }
 
 

@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, factory-droid, crush, kilo, or hermes as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, or hermes as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -120,7 +120,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -146,7 +146,7 @@ a mismatched native option kind is an error, not a dropped option.
 
 ```typescript
 interface RunSpec {
-  harness: string            // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "crush" | "kilo" | "hermes"
+  harness: string            // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes"
   prompt: string
   workdir: string            // normalized absolute cwd; must exist when prepared
   model?: string             // canonical or adapter-specific (normalized per harness; see ADAPTER-MATRIX.md)

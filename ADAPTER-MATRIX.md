@@ -6,9 +6,9 @@ The command/policy contract below is source-derived; the explicit native option 
 
 ## Shipped versus planned
 
-The fourteen adapters below are registered in **both** implementations and have
+The fifteen adapters below are registered in **both** implementations and have
 shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `crush`,
-`factory-droid`, `gemini`, `hermes`, `kilo`, `openclaude`, `opencode`, `pi`,
+`factory-droid`, `gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
@@ -33,7 +33,7 @@ implementation, not promised upstream behavior.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider` and `hermes`). "Wired" means the hooks exist, not
+(every adapter except `aider`, `hermes` and `omp`). "Wired" means the hooks exist, not
 that every log contains usage or that discovery identifies a unique live
 session. No controlled-session backend is shipped; these are caller-driven
 artifact helpers.
@@ -54,10 +54,11 @@ artifact helpers.
 | kilo | wired | wired | SQLite selector path |
 | aider | unwired | unwired | no session-log hooks |
 | hermes | unwired | unwired | no session-log hooks; the headless `raw.session_id` comes from stderr, not a log file |
+| omp | unwired | unwired | ephemeral headless JSONL; no latest-session discovery |
 
 ## Backend and permission capabilities
 
-All fourteen currently implement `backend="cli"` only. `rpc` and `sdk` are
+All fifteen currently implement `backend="cli"` only. `rpc` and `sdk` are
 explicitly unsupported, with no fallback. `get_capabilities` / `getCapabilities`
 reports implemented support without probing binaries or credentials. Streaming
 (raw subprocess chunks) and cancellation are true for every shipped CLI adapter
@@ -65,6 +66,7 @@ under the shared execution engine; controlled sessions are false. Streaming is
 chunk delivery of whatever the CLI writes, not structured events.
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider` and `hermes` ship none.
+OMP adds install metadata but no Pi-derived pane or session-log heuristics.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
 flags. This preserves the selected upstream's policy, not a guarantee of
@@ -81,6 +83,7 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | aider | `--yes-always` |
 | kilo | `--auto` |
 | hermes | `--yolo` |
+| omp | `--auto-approve` |
 | continue-cli, crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
 Only Claude Code and Codex currently have typed native options:
@@ -91,10 +94,10 @@ Sandbox plus bypass is a conflict, not a precedence rule. See
 
 Configuration selection is also explicit: `executable` selects the binary;
 `configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
-Codex and `HERMES_HOME` for Hermes. `configFile` maps to Claude Code
-`--settings`, Aider `--config`, or Continue `--config`. Other adapters reject
-these typed overrides. Existing caller-selected env remains inherited; no
-configuration or credential is copied.
+Codex, `HERMES_HOME` for Hermes, and `PI_CODING_AGENT_DIR` plus `--profile default`
+for OMP. `configFile` maps to Claude Code `--settings`, or `--config` for Aider,
+Continue and OMP. Other adapters reject these typed overrides. Existing
+caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
 official sources, and limits.
 
@@ -118,6 +121,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | qwen         | **null**          | populated                     | JSON array, last `type:'result'` item `usage` |
 | continue-cli | populated         | populated                     | `--json` envelope `usage`         |
 | pi           | populated         | populated                     | `--mode json` event stream, summed from `agent_end.messages[].usage` |
+| omp          | populated when reported | populated when reported | JSONL completed-cycle usage, with partial-message fallback |
 | crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
 | kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
 | hermes       | **null**          | **null**                      | not parsed; stdout is preserved verbatim, only `session_id:` stderr lines are read |
@@ -136,12 +140,62 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
   - **factory-droid** strips known provider prefixes and adds `custom:` for a configured BYOK model.
   - **crush** preserves explicit provider prefixes and passes bare names through.
   - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
+  - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
   - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
   - `crush`: `--model == --small-model`
   - `kilo`: default `model == small_model` via `KILO_CONFIG_CONTENT`; an existing caller-selected config is preserved
   - `openclaude`: no `--fallback-model`
   - `factory-droid`: `--model == --spec-model`
+
+---
+
+## omp (Oh My Pi)
+
+- **Distribution / executable:** [`@oh-my-pi/pi-coding-agent`](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent) supplies `omp`. This is [Oh My Pi](https://github.com/can1357/oh-my-pi), not Pi or Prime Agent.
+- **Setup:** upstream recommends `bun install -g @oh-my-pi/pi-coding-agent` (Bun ≥ 1.3.14); `brew install can1357/tap/omp` is also supported and used by install metadata. Authenticate with upstream in the caller-selected home; Harness never copies credentials.
+- **Checked September 8, 2026:** npm metadata reports 18.1.14, `omp: dist/cli.js`, Bun ≥ 1.3.14. Installed help/version qualification used a locally patched managed `omp/18.1.10`, not a claim that every 18.x release works.
+- **Instructions / model:** owned `AGENTS.md` projection; default `sonnet`. Explicit bare names and `provider/model` strings pass through unchanged apart from shared whitespace trimming. Use a provider-qualified model when provider choice matters; no Pi-style provider inference or helper-model pinning is applied.
+- **Command:** `omp --print --mode json --no-session --model MODEL [--profile default] [--auto-approve] [--config FILE] -- PROMPT`. The separator keeps flag-shaped and `@file`-shaped prompts literal.
+- **Configuration:** `configHome` selects `PI_CODING_AGENT_DIR` and emits `--profile default`, since named profiles otherwise ignore that variable. It does not isolate global/project discovery or all caches. `configFile` is an additional upstream config overlay. Existing env/profile choices remain upstream-controlled when no typed home override is supplied.
+- **Permission:** omitted policy leaves upstream behavior intact. Explicit bypass emits `--auto-approve`; no sandbox or interactive approval transport is provided. No typed native options are claimed.
+- **Lifecycle:** the shared runner owns only its child process group, deadline/cancellation, bounded stdout/stderr capture and instruction lease. `--no-session` makes the primary conversation ephemeral; it is not a promise of zero upstream cache/state writes. Cleanup never invokes global `omp ps`, GC or daemon shutdown.
+- **Backend boundary:** chunk streaming and cancellation work through the common CLI API. Controlled sessions, resume, RPC, ACP and SDK are not exposed by this headless adapter; unsupported backend requests reject. [TWA-69](https://linear.app/twaldin/issue/TWA-69) owns the shared session contract and [TWA-85](https://linear.app/twaldin/issue/TWA-85) owns optional SDK work.
+
+### Structured output and failures
+
+JSONL `message_end`, `turn_end` and `agent_end.messages` repeat assistant usage.
+The parser uses each completed cycle's `agent_end.messages` as authoritative,
+sums multiple cycles, and falls back to complete `message_end` records for an
+unfinished cycle (`turn_end` when that turn has no message-end record).
+Stream deltas never count as usage. An incomplete final line is ignored;
+complete object records, including unknown events and native errors, remain in
+`raw`. Missing or malformed metrics remain independently null; explicit zero
+remains zero. `input`/`output` exclude separate cache counts; `cost.total` is
+upstream-reported USD, not proof of subscription billing.
+
+**Process exit is not semantic success:** OMP JSON mode can emit assistant
+`stopReason: "error"` or `"aborted"` with exit code zero. Harness preserves the
+actual process status and raw native error; callers must inspect terminal
+assistant records as well as lifecycle fields. It does not rewrite exit codes
+or pretend an upstream error is a parser failure.
+
+Sources: [pinned print-mode implementation](https://github.com/can1357/oh-my-pi/blob/v18.1.10/packages/coding-agent/src/modes/print-mode.ts),
+[argument parsing](https://github.com/can1357/oh-my-pi/blob/v18.1.10/packages/coding-agent/src/cli/args.ts),
+[environment precedence](https://github.com/can1357/oh-my-pi/blob/main/docs/environment-variables.md),
+[native RPC reference](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md).
+Shared synthetic fixtures cover success, nonzero startup failure, native
+error with zero exit, multiple cycles, malformed usage, partial output, explicit
+configuration and owned cleanup. The bounded installed-CLI smoke used isolated
+HOME/agent directories, an explicit config overlay and `openai-codex/gpt-5.4`,
+with tools/extensions/skills/rules disabled by an explicit smoke wrapper.
+Python `run`/`run_async` and TypeScript `run`/`runAsync` each returned the native
+missing-credential failure in under two seconds, retained the session header,
+honored the selected agent home over an inherited named profile, streamed stdout,
+restored existing instructions and released the lease. Each had a 30-second
+deadline and 64-KiB capture bound. No credentials were copied. Real-provider
+success, other providers, and an unmodified 18.1.14 runtime remain unqualified;
+synthetic success fixtures do not fill that gap.
 
 ---
 

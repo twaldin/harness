@@ -148,6 +148,10 @@ artifact paths; preparation owns filesystem effects and cleanup.
 Add a bypass or config mapping only when supported upstream; an omitted
 permission policy preserves upstream behavior. Reject unsupported options
 rather than discarding them.
+If upstream requires a different graceful teardown signal, declare adapter
+`graceful_signal` / `gracefulSignal` (`SIGINT` or `SIGTERM`) and use the shared
+lifecycle engine. The resulting `BuildCommand` carries it for external drivers;
+do not add a per-adapter process supervisor. Omitted selection remains SIGTERM.
 
 ### 3. Add a fixture
 

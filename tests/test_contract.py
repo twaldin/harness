@@ -11,6 +11,7 @@ from harness import (
     Adapter,
     BuildCommand,
     ClaudeCodeOptions,
+    ClineOptions,
     CodexOptions,
     HarnessError,
     RunSpec,
@@ -26,22 +27,23 @@ from harness import (
 )
 from harness.base import Capabilities
 
-BYPASS_FLAGS = {
-    "aider": "--yes-always",
-    "claude-code": "--dangerously-skip-permissions",
-    "openclaude": "--dangerously-skip-permissions",
-    "codex": "--dangerously-bypass-approvals-and-sandbox",
-    "factory-droid": "--skip-permissions-unsafe",
-    "gemini": "-y",
-    "hermes": "--yolo",
-    "copilot": "--allow-all",
-    "qwen": "-y",
-    "kilo": "--auto",
-    "omp": "--auto-approve",
-    "continue-cli": "--auto",
+BYPASS_ARGS = {
+    "aider": ("--yes-always",),
+    "claude-code": ("--dangerously-skip-permissions",),
+    "openclaude": ("--dangerously-skip-permissions",),
+    "codex": ("--dangerously-bypass-approvals-and-sandbox",),
+    "factory-droid": ("--skip-permissions-unsafe",),
+    "gemini": ("-y",),
+    "hermes": ("--yolo",),
+    "copilot": ("--allow-all",),
+    "qwen": ("-y",),
+    "kilo": ("--auto",),
+    "omp": ("--auto-approve",),
+    "continue-cli": ("--auto",),
+    "cline": ("--auto-approve", "true"),
 }
 BYPASS_ENVS = {"goose": {"GOOSE_MODE": "auto"}}
-ALL_KNOWN_BYPASS_FLAGS = set(BYPASS_FLAGS.values())
+ALL_KNOWN_BYPASS_FLAGS = {args[0] for args in BYPASS_ARGS.values()}
 NO_BYPASS = ["crush", "opencode", "pi", "swe-agent"]
 
 
@@ -88,12 +90,13 @@ def test_upstream_default_injects_no_bypass_flag(name: str, workdir: Path):
     assert not ALL_KNOWN_BYPASS_FLAGS.intersection(bc.args), bc.args
 
 
-@pytest.mark.parametrize("name,flag", sorted(BYPASS_FLAGS.items()))
-def test_explicit_bypass_injects_exactly_the_mapped_flag(name: str, flag: str, workdir: Path):
+@pytest.mark.parametrize("name,flags", sorted(BYPASS_ARGS.items()))
+def test_explicit_bypass_injects_exactly_the_mapped_flag(name: str, flags: tuple[str, ...], workdir: Path):
     upstream = build_command(_spec(name, workdir)).args
     bypass = build_command(_spec(name, workdir, permission_policy="bypass")).args
-    assert bypass.count(flag) == 1
-    assert [a for a in bypass if a != flag] == upstream
+    starts = [i for i in range(len(bypass)) if tuple(bypass[i:i + len(flags)]) == flags]
+    assert len(starts) == 1, bypass
+    assert bypass[:starts[0]] + bypass[starts[0] + len(flags):] == upstream
 
 
 @pytest.mark.parametrize("name", NO_BYPASS)
@@ -109,6 +112,13 @@ def test_unknown_policy_is_invalid_options(workdir: Path):
         build_command(_spec("claude-code", workdir, permission_policy="yolo"))
     assert exc.value.code == "invalid-options"
     assert list(workdir.iterdir()) == []
+
+
+def test_invalid_explicit_graceful_signal_cannot_fall_back(workdir: Path):
+    adapter = get_adapter("cline")
+    with pytest.raises(HarnessError) as exc:
+        adapter.finalize_command(_spec("cline", workdir), cmd="cline", args=[], graceful_signal="")
+    assert exc.value.code == "adapter-error"
 
 
 # ── backend selection ───────────────────────────────────────────────────────
@@ -241,6 +251,7 @@ def test_bad_native_values_are_invalid_options(name: str, options, workdir: Path
 def test_native_kind_is_fixed():
     assert ClaudeCodeOptions().kind == "claude-code"
     assert CodexOptions().kind == "codex"
+    assert ClineOptions().kind == "cline"
     with pytest.raises(TypeError):
         ClaudeCodeOptions(kind="codex")  # type: ignore[call-arg]
 
@@ -257,14 +268,15 @@ CONFIG_MAPPINGS = {
     "aider": (None, "--config"),
     "continue-cli": (None, "--config"),
     "omp": ("PI_CODING_AGENT_DIR", "--config"),
+    "cline": ("CLINE_DIR", None),
 }
 
 
 @pytest.mark.parametrize("name", list_adapters())
 def test_capabilities_reflect_shipped_support(name: str):
     caps = get_capabilities(name)
-    expected_policies = ("upstream", "bypass") if name in BYPASS_FLAGS or name in BYPASS_ENVS else ("upstream",)
-    expected_native = name if name in ("claude-code", "codex", "copilot") else None
+    expected_policies = ("upstream", "bypass") if name in BYPASS_ARGS or name in BYPASS_ENVS else ("upstream",)
+    expected_native = name if name in ("claude-code", "codex", "cline", "copilot") else None
     home_env, file_flag = CONFIG_MAPPINGS.get(name, (None, None))
     assert caps == Capabilities(
         backend="cli",

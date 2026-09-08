@@ -12,9 +12,11 @@ from harness.base import (
     BuildCommand,
     Capabilities,
     ClaudeCodeOptions,
+    ClineOptions,
     CodexOptions,
     CopilotOptions,
     ErrorCode,
+    GracefulSignal,
     HarnessError,
     InstallMeta,
     NativeOptions,
@@ -74,9 +76,11 @@ __all__ = [
     "BuildCommand",
     "Capabilities",
     "ClaudeCodeOptions",
+    "ClineOptions",
     "CodexOptions",
     "CopilotOptions",
     "ErrorCode",
+    "GracefulSignal",
     "HarnessError",
     "InstallMeta",
     "InstructionProjection",
@@ -126,4 +130,4 @@ __all__ = [
     "strip_ansi",
     "write_instructions",
 ]
-__version__ = "0.3.9"
+__version__ = "0.3.10"

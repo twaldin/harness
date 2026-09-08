@@ -10,6 +10,12 @@
   Native session metrics replace guessed schemas; Continue headless output
   remains non-telemetry. See [sources and runtime limits](ADAPTER-MATRIX.md#artifact-qualification--2026-09-08).
   Pane precedence and controlled-session ownership are unchanged.
+- Added the standalone `cline` CLI adapter in Python and TypeScript, with native
+  provider/approval options, `CLINE_DIR`, explicit instruction attachment and
+  terminal NDJSON usage. Upstream defaults to auto-approval.
+  Cline selects one SIGINT through the shared lifecycle engine; other adapters
+  retain SIGTERM. External command drivers must honor the planned graceful signal.
+  See [setup, cancellation and provider coverage limits](ADAPTER-MATRIX.md#cline).
 - Added `goose` in Python and TypeScript using the official headless JSONL CLI
   and shared subprocess lifecycle. Preserves caller-selected model/provider/extensions,
   supports inline instructions, `GOOSE_PATH_ROOT` and explicit `GOOSE_MODE=auto`,

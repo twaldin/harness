@@ -15,6 +15,12 @@ Modes:
                 /dev/null; pipe EOF must not bypass process cleanup.
   graceful      all three handle SIGTERM: write `<role>.term`, TERM and reap
                 their own child, exit 0.
+  interrupt     leader ignores SIGTERM and handles SIGINT only: write
+                `leader.int`, INT and reap a child it started in a NEW
+                SESSION (outside the runner's group; the child likewise
+                ignores SIGTERM and writes `child.int` on SIGINT), exit 0.
+                Models a CLI that owns a detached worker and shuts both down
+                cleanly on SIGINT but not on SIGTERM.
   escaped       leader spawns a child in a NEW SESSION (outside the runner's
                 process group) that keeps the pipes open, then exits 0.
                 The tester owns that child through `child.pid`.
@@ -36,7 +42,7 @@ STDOUT_TEXT = "tree stdout \u2713 \u65e5\u672c\u8a9e \U0001d11e\n"
 STDERR_MARKER = "PROCESS_TREE_STDERR_MARKER\n"
 PARTIAL_UTF8 = "h\u00e9llo ".encode() + b"\xe2\x9c"  # "✓" cut after two of three bytes
 
-MODES = ("tree", "early-exit", "closed-pipes", "graceful", "escaped", "solo", "self-signal", "partial-utf8")
+MODES = ("tree", "early-exit", "closed-pipes", "graceful", "interrupt", "escaped", "solo", "self-signal", "partial-utf8")
 
 
 def _record(directory: Path, name: str, content: str = "") -> None:
@@ -66,13 +72,15 @@ def _spawn(role: str, mode: str, directory: Path, *, new_session: bool = False) 
     )
 
 
-def _graceful_handler(directory: Path, role: str, child: subprocess.Popen | None):
+def _graceful_handler(directory: Path, role: str, child: subprocess.Popen | None, sig: int = signal.SIGTERM):
+    marker = f"{role}.{'int' if sig == signal.SIGINT else 'term'}"
+
     def handler(signum, frame):  # noqa: ARG001
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        _record(directory, f"{role}.term")
+        signal.signal(sig, signal.SIG_IGN)
+        _record(directory, marker)
         if child is not None:
             try:
-                child.send_signal(signal.SIGTERM)
+                child.send_signal(sig)
             except ProcessLookupError:
                 pass
             child.wait()
@@ -100,9 +108,19 @@ def _leader(mode: str, directory: Path) -> None:
             raise SystemExit(99)  # SIGTERM was not delivered; make the test fail loudly
         _sleep_forever()
 
-    child = _spawn("_child", mode, directory, new_session=(mode == "escaped"))
+    child = _spawn("_child", mode, directory, new_session=mode in ("escaped", "interrupt"))
     if mode == "graceful":
         signal.signal(signal.SIGTERM, _graceful_handler(directory, "leader", child))
+    if mode == "interrupt":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, _graceful_handler(directory, "leader", child, signal.SIGINT))
+        # The child records its pid only once its own handlers are armed, so
+        # `ready` implies both processes will honor SIGINT.
+        _wait_for(directory / "child.pid")
+        _record(directory, "ready")
+        # Do not re-enter Popen.wait() from the SIGINT handler while its
+        # waitpid lock is already held by this thread.
+        _sleep_forever()
     if mode in ("early-exit", "closed-pipes"):
         _wait_for(directory / "ready")
         raise SystemExit(7)
@@ -114,6 +132,11 @@ def _leader(mode: str, directory: Path) -> None:
 
 
 def _child(mode: str, directory: Path) -> None:
+    if mode == "interrupt":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, _graceful_handler(directory, "child", None, signal.SIGINT))
+        _record(directory, "child.pid", str(os.getpid()))
+        _sleep_forever()
     _record(directory, "child.pid", str(os.getpid()))
     if mode == "closed-pipes":
         with open(os.devnull, "wb") as sink:

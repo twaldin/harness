@@ -2,9 +2,12 @@
 and the prepare/cleanup lifecycle observed by a real fake executable."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import stat
+import sys
+from threading import Event
 from pathlib import Path
 
 import pytest
@@ -100,6 +103,13 @@ def test_config_file_unsupported_where_unmapped(name: str, workdir: Path, tmp_pa
 def test_relative_config_paths_are_invalid_options(workdir: Path, field: str):
     with pytest.raises(HarnessError) as exc:
         build_command(_spec("claude-code", workdir, **{field: Path("relative/path")}))
+    assert exc.value.code == "invalid-options"
+
+
+@pytest.mark.parametrize("workdir", ["", "bad\0path"])
+def test_invalid_workdir_rejected_before_planning(workdir: str):
+    with pytest.raises(HarnessError) as exc:
+        build_command(RunSpec(harness="codex", prompt="x", workdir=workdir))
     assert exc.value.code == "invalid-options"
 
 
@@ -261,20 +271,6 @@ async def test_run_async_snapshots_env_and_cleans_up(workdir: Path, fake_cli: Pa
     assert list(workdir.iterdir()) == []
 
 
-def test_run_snapshots_caller_env_before_building(workdir: Path, monkeypatch: pytest.MonkeyPatch):
-    from harness._subproc import SubprocOutcome
-
-    spec = _spec("pi", workdir, env={"HARNESS_T_B": "before"})
-    captured: dict = {}
-
-    def fake(cmd, *, cwd, timeout_seconds, extra_env=None, **_kw):
-        captured["env"] = dict(extra_env)
-        spec.env["HARNESS_T_B"] = "mutated-during-run"
-        return SubprocOutcome(exit_code=0, duration_seconds=0.0, stdout="", stderr="", timed_out=False)
-
-    monkeypatch.setattr("harness._subproc.run_subprocess", fake)
-    run(spec)
-    assert captured["env"] == {"HARNESS_T_B": "before"}
 
 
 def test_parse_exception_still_restores_workdir(workdir: Path, monkeypatch: pytest.MonkeyPatch):
@@ -296,10 +292,17 @@ def test_parse_exception_still_restores_workdir(workdir: Path, monkeypatch: pyte
     assert not (workdir / LOCK).exists()
 
 
-def test_spawn_exception_still_restores_workdir(workdir: Path):
-    with pytest.raises(FileNotFoundError):
-        run(_spec("pi", workdir, instructions="tmp", executable="/nonexistent/harness-fake-binary"))
-    assert list(workdir.iterdir()) == []
+@pytest.mark.parametrize("entrypoint", ["sync", "async"])
+async def test_launch_failure_still_restores_workdir(workdir: Path, entrypoint: str):
+    target = workdir / "AGENTS.md"
+    target.write_text("original")
+    identity = target.stat().st_ino
+    spec = _spec("pi", workdir, instructions="tmp", executable="/nonexistent/harness-fake-binary")
+    result = run(spec) if entrypoint == "sync" else await run_async(spec)
+    assert result.termination == "launch-failed"
+    assert target.read_text() == "original"
+    assert target.stat().st_ino == identity
+    assert not (workdir / LOCK).exists()
 
 
 def test_run_fails_before_spawning_when_workdir_is_leased(workdir: Path, fake_cli: Path):
@@ -308,3 +311,53 @@ def test_run_fails_before_spawning_when_workdir_is_leased(workdir: Path, fake_cl
         run(_spec("pi", workdir, instructions="tmp", executable=str(fake_cli)))
     assert exc.value.code == "instruction-conflict"
     assert sorted(p.name for p in workdir.iterdir()) == [LOCK]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="owned process-group cancellation is POSIX-only")
+@pytest.mark.parametrize("entrypoint", ["sync-event", "async-event", "task"])
+async def test_cancellation_keeps_instructions_until_child_teardown(workdir: Path, tmp_path: Path, entrypoint: str):
+    executable = tmp_path / "cancellable-agent"
+    executable.write_text(f"#!{sys.executable}\n" + """
+import signal, sys, time
+from pathlib import Path
+def stop(signum, frame):
+    time.sleep(0.08)
+    Path("teardown-observed").write_text(Path("AGENTS.md").read_text())
+    sys.exit(0)
+signal.signal(signal.SIGTERM, stop)
+Path("ready").touch()
+while True:
+    time.sleep(1)
+""")
+    executable.chmod(0o700)
+    target = workdir / "AGENTS.md"
+    target.write_text("original")
+    identity = target.stat().st_ino
+    cancellation = Event()
+    spec = _spec("codex", workdir, instructions="projected", executable=str(executable),
+                 cancel=cancellation, timeout_seconds=5)
+    invocation = asyncio.to_thread(run, spec) if entrypoint == "sync-event" else run_async(spec)
+    task = asyncio.create_task(invocation)
+    deadline = asyncio.get_running_loop().time() + 5
+    while not (workdir / "ready").exists() and not task.done() and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+    try:
+        assert (workdir / "ready").exists(), "child did not become ready"
+        if entrypoint == "task":
+            task.cancel()
+            await asyncio.sleep(0.02)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            cancellation.set()
+            result = await task
+            assert result.termination == "cancelled"
+        assert (workdir / "teardown-observed").read_text() == "projected"
+        assert target.read_text() == "original"
+        assert target.stat().st_ino == identity
+        assert not (workdir / LOCK).exists()
+    finally:
+        cancellation.set()
+        if not task.done():
+            await task

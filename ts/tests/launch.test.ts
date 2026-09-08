@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, relative } from 'path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { HarnessError } from '../src/base.js'
 import type { Adapter, BuildCommand, ErrorCode, RunSpec } from '../src/base.js'
 import { cleanupCommand, prepareCommand } from '../src/instructions.js'
@@ -318,7 +319,7 @@ describe('run lifecycle', () => {
       instructionsFilename: 'AGENTS.md',
       defaultModel: 'm',
       buildCommand(spec: RunSpec): BuildCommand {
-        return { cmd: 'minimal-cli', args: ['--flag'], cwd: spec.workdir, env: { HARNESS_PROBE: 'adapter' }, instructionsFile: null }
+        return { cmd: 'minimal-cli', args: ['--flag'], cwd: spec.workdir, env: { HARNESS_PROBE: 'adapter' }, instructionsFile: null, directories: ['nested/artifacts'] }
       },
       parseOutput() {
         return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
@@ -334,6 +335,10 @@ describe('run lifecycle', () => {
     expect(built.model).toBe('m')
     expect(built.instructionsFile).toBe(join(absolute, 'AGENTS.md'))
     expect(built.instructionContent).toBe('third party')
+    const prepared = prepareCommand(built)
+    expect(existsSync(join(absolute, 'nested/artifacts'))).toBe(true)
+    cleanupCommand(prepared)
+    expect(existsSync(join(absolute, 'nested'))).toBe(false)
 
     await runAsync(spec)
     const seen = record()
@@ -342,4 +347,63 @@ describe('run lifecycle', () => {
     expect(seen['FILE AGENTS.md']).toEqual(['third party'])
     expect(readdirSync(absolute)).toEqual([])
   })
+
+  for (const entrypoint of [run, runAsync]) {
+    test(`${entrypoint.name} restores original instructions after launch failure`, async () => {
+      const workdir = tmpDir()
+      const file = join(workdir, 'AGENTS.md')
+      writeFileSync(file, 'original')
+      const identity = statSync(file).ino
+      const result = await entrypoint({
+        harness: 'codex', prompt: 'x', workdir, instructions: 'projected',
+        executable: join(workdir, 'nonexistent-agent'),
+      })
+      expect(result.termination).toBe('launch-failed')
+      expect(readFileSync(file, 'utf-8')).toBe('original')
+      expect(statSync(file).ino).toBe(identity)
+      expect(existsSync(join(workdir, LOCK))).toBe(false)
+    })
+
+    test.skipIf(process.platform === 'win32')(`${entrypoint.name} retains instructions through cancelled child teardown`, async () => {
+      // This real child handles an OS signal; fake timers cannot control its readiness or teardown.
+      const workdir = tmpDir()
+      const executable = join(ROOT, `cancellable-${counter++}`)
+      writeFileSync(executable, `#!${process.execPath}
+const fs = require('node:fs');
+process.on('SIGTERM', () => {
+  setTimeout(() => {
+    fs.writeFileSync('teardown-observed', fs.readFileSync('AGENTS.md'));
+    process.exit(0);
+  }, 80);
+});
+fs.writeFileSync('ready', '');
+setInterval(() => {}, 1000);
+`, { mode: 0o700 })
+      const file = join(workdir, 'AGENTS.md')
+      writeFileSync(file, 'original')
+      const identity = statSync(file).ino
+      const cancellation = new AbortController()
+      const invocation = entrypoint({
+        harness: 'codex', prompt: 'x', workdir, instructions: 'projected',
+        executable, cancel: cancellation.signal, timeoutSeconds: 5,
+      })
+      try {
+        const deadline = Date.now() + 3000
+        while (!existsSync(join(workdir, 'ready')) && Date.now() < deadline) {
+          await delay(10)
+        }
+        expect(existsSync(join(workdir, 'ready'))).toBe(true)
+        cancellation.abort()
+        const result = await invocation
+        expect(result.termination).toBe('cancelled')
+        expect(readFileSync(join(workdir, 'teardown-observed'), 'utf-8')).toBe('projected')
+        expect(readFileSync(file, 'utf-8')).toBe('original')
+        expect(statSync(file).ino).toBe(identity)
+        expect(existsSync(join(workdir, LOCK))).toBe(false)
+      } finally {
+        cancellation.abort()
+        await invocation
+      }
+    })
+  }
 })

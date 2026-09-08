@@ -108,7 +108,8 @@ async def test_followup_resume_identity_and_local_only_close(tmp_path):
         assert ids[0] != ids[1]
         await asyncio.gather(session.close(), session.close())
         assert child.returncode is None
-        async with await open_session(replace(spec, resume=reference)) as resumed:
+        equivalent = replace(reference, endpoint=reference.endpoint.upper() + "/")
+        async with await open_session(replace(spec, resume=equivalent)) as resumed:
             assert resumed.reference == reference
             turn = resumed.start_turn("success")
             async for _ in turn.events:

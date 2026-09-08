@@ -31,6 +31,7 @@ async function peer(run, variant = 'normal') {
   child.stderr.on('data', (chunk) => { stderr += chunk.toString() })
   const lines = createInterface({ input: child.stdout })
   let primary
+  let failed = false
   try {
     const [endpoint] = await bounded(once(lines, 'line'), 5000, 'synthetic peer startup deadline')
     assert.match(endpoint, /^http:\/\/127\.0\.0\.1:\d+$/)
@@ -42,6 +43,7 @@ async function peer(run, variant = 'normal') {
     await run(spec, requests, child)
   } catch (error) {
     primary = error
+    failed = true
     throw error
   } finally {
     lines.close()
@@ -51,10 +53,12 @@ async function peer(run, variant = 'normal') {
     catch (error) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
       await exit
-      throw new AggregateError([primary, error].filter(Boolean), `synthetic peer cleanup: exit=${child.exitCode}, signal=${child.signalCode}, stderr=${stderr}`)
+      throw new AggregateError(failed ? [primary, error] : [error], `synthetic peer cleanup: exit=${child.exitCode}, signal=${child.signalCode}, stderr=${stderr}`)
     } finally { await rm(dir, { recursive: true, force: true }) }
-    assert.equal(child.exitCode, 0, stderr)
-    assert.equal(stderr, '')
+    if (!failed) {
+      assert.equal(child.exitCode, 0, stderr)
+      assert.equal(stderr, '')
+    }
   }
 }
 
@@ -77,6 +81,11 @@ async function collect(turn, onEvent) {
 
 export async function runOpenCodeConformance(api) {
   assert.equal(api.getSessionCapabilities('opencode', 'rpc').approval, true)
+  const primary = new Error('scenario failed before peer cleanup')
+  await assert.rejects(peer(async (_spec, _requests, child) => {
+    child.kill('SIGTERM')
+    throw primary
+  }), (error) => error === primary)
   for (const scenario of cases) {
     await peer(async (spec, requests, child) => {
       const session = await api.openSession({ ...spec, timeoutSeconds: scenario.timeout_seconds ?? spec.timeoutSeconds })
@@ -127,7 +136,7 @@ export async function runOpenCodeConformance(api) {
       assert.notEqual(ids[0], ids[1])
       await Promise.all([session.close(), session.close()])
       assert.equal(child.exitCode, null)
-      session = await api.openSession({ ...spec, resume: reference })
+      session = await api.openSession({ ...spec, resume: { ...reference, endpoint: reference.endpoint.toUpperCase() + '/' } })
       assert.deepEqual(session.reference, reference)
       assert.equal((await collect(session.startTurn('success'))).result.status, 'completed')
     } finally { await session.close() }

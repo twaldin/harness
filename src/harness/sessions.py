@@ -459,8 +459,9 @@ def _validate_opencode_reference(reference: object, endpoint: str, workdir: Path
         raise HarnessError("resume.session_file must be None for OpenCode; history lives on the server", code="invalid-options")
     if reference.endpoint is None:
         raise HarnessError("resume.endpoint is required for OpenCode sessions", code="invalid-options")
-    if reference.endpoint != endpoint:
-        raise HarnessError(f"resume.endpoint {reference.endpoint!r} does not match opencode.endpoint {endpoint!r}", code="invalid-options")
+    normalized = _normalize_endpoint(reference.endpoint, "resume.endpoint")
+    if normalized != endpoint:
+        raise HarnessError(f"resume.endpoint {normalized!r} does not match opencode.endpoint {endpoint!r}", code="invalid-options")
     if not isinstance(reference.workdir, (str, PurePath)) or _posix_dir(reference.workdir) != _posix_dir(workdir):
         raise HarnessError(f"resume.workdir {os.fspath(reference.workdir)!r} does not match the session workdir {_posix_dir(workdir)!r}", code="invalid-options")
     return SessionReference(session_id=session_id, session_file=None, workdir=workdir, endpoint=endpoint)
@@ -487,32 +488,32 @@ def _validate_server_workdir(value: object) -> Path:
     return Path(raw)
 
 
-def _normalize_endpoint(value: object) -> str:
+def _normalize_endpoint(value: object, field: str = "opencode.endpoint") -> str:
     """`http(s)://host[:port]` origin, lowercase scheme / host, default port
     dropped; anything beyond the origin is rejected rather than trimmed."""
     if not isinstance(value, str) or not value:
-        raise HarnessError("opencode.endpoint must be a non-empty http(s) origin", code="invalid-options")
+        raise HarnessError(f"{field} must be a non-empty http(s) origin", code="invalid-options")
     if _CONTROL_CHARS.search(value) is not None or any(ch.isspace() for ch in value):
-        raise HarnessError("opencode.endpoint must not contain whitespace or control characters", code="invalid-options")
+        raise HarnessError(f"{field} must not contain whitespace or control characters", code="invalid-options")
     if "\\" in value:
-        raise HarnessError("opencode.endpoint must not contain backslashes", code="invalid-options")
+        raise HarnessError(f"{field} must not contain backslashes", code="invalid-options")
     if "?" in value or "#" in value:
-        raise HarnessError("opencode.endpoint must not carry a query or fragment", code="invalid-options")
+        raise HarnessError(f"{field} must not carry a query or fragment", code="invalid-options")
     try:
         parts = urlsplit(value)
         port = parts.port
         hostname = parts.hostname
     except ValueError:
-        raise HarnessError("opencode.endpoint is not a valid URL", code="invalid-options") from None
+        raise HarnessError(f"{field} is not a valid URL", code="invalid-options") from None
     scheme = parts.scheme.lower()
     if scheme not in ("http", "https"):
-        raise HarnessError("opencode.endpoint must use http or https", code="invalid-options")
+        raise HarnessError(f"{field} must use http or https", code="invalid-options")
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
-        raise HarnessError("opencode.endpoint must not embed credentials; use auth='basic' with username / password", code="invalid-options")
+        raise HarnessError(f"{field} must not embed credentials; use auth='basic' with username / password", code="invalid-options")
     if not hostname or parts.netloc.endswith(":"):
-        raise HarnessError("opencode.endpoint has no host", code="invalid-options")
+        raise HarnessError(f"{field} has no host", code="invalid-options")
     if parts.path not in ("", "/"):
-        raise HarnessError("opencode.endpoint must be an origin without a path", code="invalid-options")
+        raise HarnessError(f"{field} must be an origin without a path", code="invalid-options")
     host = parts.netloc.lower()
     if port is not None:
         host = host.rsplit(":", 1)[0]

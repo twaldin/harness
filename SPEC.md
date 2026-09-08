@@ -318,6 +318,10 @@ What `run()` returns for each adapter on a successful invocation. `raw` holds th
 ### gemini
 
 Gemini CLI does not report a dollar cost. The adapter estimates `costUsd` from token totals and the first model in `stats.models` when that model has a known price; otherwise it returns null.
+Malformed nested usage returns null metrics, not exceptions or `NaN`.
+Counts must be nonnegative safe integers; decimal strings remain accepted.
+Absent fields in an otherwise valid legacy stats envelope retain their existing
+zero defaults. This compatibility behavior is not proof of zero billed usage.
 
 ```json
 {

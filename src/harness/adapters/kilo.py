@@ -37,8 +37,8 @@ class KiloAdapter(Adapter):
     submit_keys = ("Enter",)
     install_meta = InstallMeta(
         package_manager="npm",
-        install_command=("npm", "install", "-g", "kilo"),
-        update_command=("npm", "install", "-g", "kilo@latest"),
+        install_command=("npm", "install", "-g", "@kilocode/cli"),
+        update_command=("npm", "install", "-g", "@kilocode/cli@latest"),
         version_command=("kilo", "--version"),
     )
 

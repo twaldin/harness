@@ -162,6 +162,22 @@ def _json_candidates(stdout: str) -> list[str]:
     return [c for c in candidates if c]
 
 
+def _gemini_token_count(value: object) -> int | None:
+    """Accept nonnegative safe integers; preserve decimal-string compatibility."""
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        if re.fullmatch(r"\s*\+?[0-9]+\s*", value) is None:
+            return None
+        try:
+            value = int(value)
+        except ValueError:
+            return None
+    if type(value) in (int, float) and 0 <= value <= 9007199254740991 and int(value) == value:
+        return int(value)
+    return None
+
+
 def _parse_gemini_stats_blob(blob: str) -> dict:
     """Extract token/cost/model from a gemini stats envelope (`stats.models[*]`).
 
@@ -188,9 +204,17 @@ def _parse_gemini_stats_blob(blob: str) -> dict:
             continue
         if model is None:
             model = name
-        tokens = model_stats.get("tokens") or {}
-        tokens_in += int(tokens.get("input") or 0)
-        tokens_out += int(tokens.get("candidates") or 0)
+        tokens = model_stats.get("tokens")
+        if tokens is None:
+            tokens = {}
+        if not isinstance(tokens, dict):
+            return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": parsed}
+        count_in = _gemini_token_count(tokens.get("input"))
+        count_out = _gemini_token_count(tokens.get("candidates"))
+        if count_in is None or count_out is None:
+            return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": parsed}
+        tokens_in += count_in
+        tokens_out += count_out
 
     return {
         "tokens_in": tokens_in,

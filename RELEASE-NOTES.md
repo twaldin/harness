@@ -15,6 +15,11 @@
 - Aligned eager registry initialization, collision errors, model selection,
   root helper exports, and Python's optional pane/session-log helpers with
   TypeScript. Removed duplicated Python one-shot execution methods.
+- Malformed Gemini usage now returns unavailable telemetry in both languages,
+  rather than raising, producing `NaN`, or fabricating a zero count.
+- Corrected Kilo install/update metadata to the official `@kilocode/cli`
+  package. The bringup runner records unsupported requests per adapter and
+  continues the batch without executing an unsupported request.
 - Expanded [SPEC](SPEC.md) with ownership, future backend/session gates,
   telemetry limits, and paired migration examples. Existing results remain
   compatible; versions are unchanged and these source changes are not yet a

@@ -1,0 +1,556 @@
+{
+  "spec": {
+    "harness": "goose",
+    "prompt": "Say hello.",
+    "instructions": "Be terse.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "goose",
+    "args": [
+      "run",
+      "--quiet",
+      "--output-format",
+      "stream-json",
+      "--system=Be terse.\n",
+      "--text=Say hello."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": null,
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": null,
+    "configHomeEnv": "GOOSE_PATH_ROOT",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.2,
+    "timedOut": false,
+    "stdout": "goose is ready\n{\"type\":\"message\",\"message\":{\"id\":\"synthetic-message\",\"role\":\"assistant\",\"created\":0,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"metadata\":{\"userVisible\":true,\"agentVisible\":true}}}\n{\"type\":\"notification\",\"extension_id\":\"synthetic\",\"progress\":{\"progress\":1.0,\"total\":2.0,\"message\":\"Scanning\"}}\n{\"type\":\"complete\",\"total_tokens\":27,\"input_tokens\":20,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_write_input_tokens\":2,\"cost_usd\":0.125}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.125,
+    "tokensIn": 20,
+    "tokensOut": 7,
+    "raw": [
+      {
+        "type": "message",
+        "message": {
+          "id": "synthetic-message",
+          "role": "assistant",
+          "created": 0,
+          "content": [
+            {
+              "type": "text",
+              "text": "Synthetic answer."
+            }
+          ],
+          "metadata": {
+            "userVisible": true,
+            "agentVisible": true
+          }
+        }
+      },
+      {
+        "type": "notification",
+        "extension_id": "synthetic",
+        "progress": {
+          "progress": 1.0,
+          "total": 2.0,
+          "message": "Scanning"
+        }
+      },
+      {
+        "type": "complete",
+        "total_tokens": 27,
+        "input_tokens": 20,
+        "output_tokens": 7,
+        "cache_read_input_tokens": 5,
+        "cache_write_input_tokens": 2,
+        "cost_usd": 0.125
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "provider-stream-error-retains-zero-exit-and-complete",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message\",\"message\":{\"id\":\"synthetic-message\",\"role\":\"assistant\",\"created\":0,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"metadata\":{\"userVisible\":true,\"agentVisible\":true}}}\n{\"type\":\"error\",\"error\":\"Synthetic provider failure\"}\n{\"type\":\"complete\",\"total_tokens\":27,\"input_tokens\":20,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_write_input_tokens\":2,\"cost_usd\":0.125}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.125,
+        "tokensIn": 20,
+        "tokensOut": 7,
+        "raw": [
+          {
+            "type": "message",
+            "message": {
+              "id": "synthetic-message",
+              "role": "assistant",
+              "created": 0,
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "metadata": {
+                "userVisible": true,
+                "agentVisible": true
+              }
+            }
+          },
+          {
+            "type": "error",
+            "error": "Synthetic provider failure"
+          },
+          {
+            "type": "complete",
+            "total_tokens": 27,
+            "input_tokens": 20,
+            "output_tokens": 7,
+            "cache_read_input_tokens": 5,
+            "cache_write_input_tokens": 2,
+            "cost_usd": 0.125
+          }
+        ]
+      }
+    },
+    {
+      "name": "truncated-complete-keeps-message-without-inventing-usage",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message\",\"message\":{\"id\":\"synthetic-message\",\"role\":\"assistant\",\"created\":0,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"metadata\":{\"userVisible\":true,\"agentVisible\":true}}}\n{\"type\":\"complete\",\"input_tokens\":20",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "message",
+            "message": {
+              "id": "synthetic-message",
+              "role": "assistant",
+              "created": 0,
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "metadata": {
+                "userVisible": true,
+                "agentVisible": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "bootstrap-failure-has-no-json-events",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "error: Unknown provider: synthetic-provider\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "last-cumulative-complete-wins-including-zero",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"complete\",\"total_tokens\":27,\"input_tokens\":20,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_write_input_tokens\":2,\"cost_usd\":0.125}\n{\"type\":\"complete\",\"total_tokens\":0,\"input_tokens\":0,\"output_tokens\":0,\"cost_usd\":0}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "raw": [
+          {
+            "type": "complete",
+            "total_tokens": 27,
+            "input_tokens": 20,
+            "output_tokens": 7,
+            "cache_read_input_tokens": 5,
+            "cache_write_input_tokens": 2,
+            "cost_usd": 0.125
+          },
+          {
+            "type": "complete",
+            "total_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "later-missing-metrics-do-not-reuse-stale-totals",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"complete\",\"total_tokens\":27,\"input_tokens\":20,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_write_input_tokens\":2,\"cost_usd\":0.125}\n{\"type\":\"complete\",\"total_tokens\":40}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "complete",
+            "total_tokens": 27,
+            "input_tokens": 20,
+            "output_tokens": 7,
+            "cache_read_input_tokens": 5,
+            "cache_write_input_tokens": 2,
+            "cost_usd": 0.125
+          },
+          {
+            "type": "complete",
+            "total_tokens": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-metrics-are-not-coerced",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"complete\",\"total_tokens\":9,\"input_tokens\":true,\"output_tokens\":1.5,\"cost_usd\":-1}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "complete",
+            "total_tokens": 9,
+            "input_tokens": true,
+            "output_tokens": 1.5,
+            "cost_usd": -1
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics-validate-independently",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"complete\",\"total_tokens\":null,\"input_tokens\":2,\"output_tokens\":\"3\",\"cost_usd\":0.5}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.5,
+        "tokensIn": 2,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "complete",
+            "total_tokens": null,
+            "input_tokens": 2,
+            "output_tokens": "3",
+            "cost_usd": 0.5
+          }
+        ]
+      }
+    },
+    {
+      "name": "ignore-noise-retain-unknown-events-and-complete-without-newline",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "null\n42\n[]\n{\"not\":\"event\"}\ninvalid json\n{\"type\":\"future_event\",\"payload\":{\"synthetic\":true}}\n{\"type\": \"complete\", \"total_tokens\": 27, \"input_tokens\": 20, \"output_tokens\": 7, \"cache_read_input_tokens\": 5, \"cache_write_input_tokens\": 2, \"cost_usd\": 0.125}",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.125,
+        "tokensIn": 20,
+        "tokensOut": 7,
+        "raw": [
+          {
+            "type": "future_event",
+            "payload": {
+              "synthetic": true
+            }
+          },
+          {
+            "type": "complete",
+            "total_tokens": 27,
+            "input_tokens": 20,
+            "output_tokens": 7,
+            "cache_read_input_tokens": 5,
+            "cache_write_input_tokens": 2,
+            "cost_usd": 0.125
+          }
+        ]
+      }
+    },
+    {
+      "name": "caller-model-and-provider-remain-explicit",
+      "spec": {
+        "model": "  openrouter/vendor/model  ",
+        "env": {
+          "GOOSE_PROVIDER": "openrouter"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "goose",
+        "args": [
+          "run",
+          "--quiet",
+          "--output-format",
+          "stream-json",
+          "--model",
+          "openrouter/vendor/model",
+          "--system=Be terse.\n",
+          "--text=Say hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "GOOSE_PROVIDER": "openrouter"
+        },
+        "instructionsFile": null,
+        "directories": [],
+        "model": "  openrouter/vendor/model  "
+      }
+    },
+    {
+      "name": "configured-upstream-approval-is-preserved",
+      "spec": {
+        "env": {
+          "GOOSE_MODE": "approve"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "goose",
+        "args": [
+          "run",
+          "--quiet",
+          "--output-format",
+          "stream-json",
+          "--system=Be terse.\n",
+          "--text=Say hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "GOOSE_MODE": "approve"
+        },
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-bypass-selects-auto-in-child-env",
+      "spec": {
+        "permissionPolicy": "bypass"
+      },
+      "expectedCommand": {
+        "cmd": "goose",
+        "args": [
+          "run",
+          "--quiet",
+          "--output-format",
+          "stream-json",
+          "--system=Be terse.\n",
+          "--text=Say hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "GOOSE_MODE": "auto"
+        },
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "bypass-rejects-conflicting-explicit-mode",
+      "spec": {
+        "permissionPolicy": "bypass",
+        "env": {
+          "GOOSE_MODE": "chat"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "config-root-selects-upstream-state",
+      "spec": {
+        "configHome": "<root>/goose-state"
+      },
+      "expectedCommand": {
+        "cmd": "goose",
+        "args": [
+          "run",
+          "--quiet",
+          "--output-format",
+          "stream-json",
+          "--system=Be terse.\n",
+          "--text=Say hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "GOOSE_PATH_ROOT": "<root>/goose-state"
+        },
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "config-root-conflict-rejected",
+      "spec": {
+        "configHome": "<root>/goose-state",
+        "env": {
+          "GOOSE_PATH_ROOT": "<root>/other-state"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "leading-dash-and-multiline-text-remain-data",
+      "spec": {
+        "prompt": "--help\nSecond line",
+        "instructions": "--system\nKeep exact"
+      },
+      "expectedCommand": {
+        "cmd": "goose",
+        "args": [
+          "run",
+          "--quiet",
+          "--output-format",
+          "stream-json",
+          "--system=--system\nKeep exact",
+          "--text=--help\nSecond line"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "empty-system-is-explicit",
+      "spec": {
+        "instructions": ""
+      },
+      "expectedCommand": {
+        "cmd": "goose",
+        "args": [
+          "run",
+          "--quiet",
+          "--output-format",
+          "stream-json",
+          "--system=",
+          "--text=Say hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "omitted-system-and-empty-prompt",
+      "spec": {
+        "instructions": null,
+        "prompt": ""
+      },
+      "expectedCommand": {
+        "cmd": "goose",
+        "args": [
+          "run",
+          "--quiet",
+          "--output-format",
+          "stream-json",
+          "--text="
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "approval-error-exits-nonzero-with-partial-message",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"type\":\"message\",\"message\":{\"id\":\"synthetic-message\",\"role\":\"assistant\",\"created\":0,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic answer.\"}],\"metadata\":{\"userVisible\":true,\"agentVisible\":true}}}\n",
+        "stderr": "Tool approval required in non-interactive mode with GooseMode::approve.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "message",
+            "message": {
+              "id": "synthetic-message",
+              "role": "assistant",
+              "created": 0,
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Synthetic answer."
+                }
+              ],
+              "metadata": {
+                "userVisible": true,
+                "agentVisible": true
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -11,8 +11,8 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The seventeen adapters below are registered in **both** implementations and have
-shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `copilot`, `crush`,
+The eighteen adapters below are registered in **both** implementations and have
+shared fixture files: `aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`,
 `factory-droid`, `gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
@@ -59,6 +59,7 @@ versions below are dated observations, not a supported version range.
 | pi | [`@earendil-works/pi-coding-agent`; upstream](https://github.com/earendil-works/pi) (0.85.1) | not on PATH | Source-checked CLI JSON contract; old `@mariozechner/pi-coding-agent` 0.73.1 is explicitly deprecated. Install metadata corrected; runtime/RPC acceptance remains TWA-71. |
 | qwen | [`@qwen-code/qwen-code`; headless source](https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/headless.md) (0.23.0) | not on PATH | Source-checked flags/result array. Existing default `qwen3-coder` is not provider-qualified; current upstream also uses `coder-model`. Hash/project session layouts remain TWA-96. |
 | swe-agent | [`mini-swe-agent`; native CLI docs](https://mini-swe-agent.com/latest/usage/mini/) (registry 2.4.6) plus a **consumer-supplied wrapper** | dependency 2.2.8; wrapper help checked | Wrapper-only, not native SWE-agent/mini support. `mini --version` fails; metadata now queries the dependency via the wrapper's `python3`. Installing the dependency does not install the wrapper. Native mini is TWA-82. |
+| cline | [`cline`; standalone CLI](https://docs.cline.bot/cli/cli-reference), pinned [cli-v3.0.61](https://github.com/cline/cline/tree/cli-v3.0.61/apps/cli) | 3.0.61, isolated npm prefix | Help/version and real-CLI loopback protocol checked; JSON differs from docs. SIGINT stops ordinary shell tools; SIGTERM does not. Real Cline provider smoke failed without authentication; no successful real-provider coverage. |
 | goose | [`aaif-goose/goose` release binary](https://github.com/aaif-goose/goose/releases/tag/v1.49.0); [CLI reference](https://goose-docs.ai/docs/guides/goose-cli-commands) | isolated Darwin arm64 v1.49.0; not installed on PATH | Help/source-checked; bounded real CLI probes with synthetic localhost provider. No authenticated provider coverage. macOS stdio MCP children can escape group teardown; see below. |
 
 Off-PATH probes used absolute executables; Harness does not add them to PATH.
@@ -69,7 +70,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `copilot`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `cline`, `copilot`, `goose`, `hermes` and `omp`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
 upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
@@ -92,12 +93,13 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | aider | unwired | unwired | no session-log hooks |
 | hermes | unwired | unwired | no session-log hooks; the headless `raw.session_id` comes from stderr, not a log file |
 | omp | unwired | unwired | ephemeral headless JSONL; no latest-session discovery |
+| cline | unwired | unwired | foreground NDJSON only; no session resume or latest-session discovery |
 | goose | unwired | unwired | `complete` usage comes from stdout; no latest-session discovery or session ID in stream events |
 | copilot | unwired | unwired | native JSONL events only; no latest-session discovery |
 
 ## Backend and permission capabilities
 
-All seventeen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All eighteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -107,11 +109,12 @@ OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
-OMP and Copilot add install metadata but no pane or session-log heuristics.
+OMP, Cline and Copilot add install metadata but no pane or session-log heuristics.
 These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
-flags or mode environment overrides. This preserves upstream policy, not a guarantee of
+flags or mode environment overrides unless the caller explicitly supplies a native approval override. This
+preserves the selected upstream's policy, not a guarantee of
 sandboxing or an interactive approval channel. To intentionally regain the old
 auto-approval behavior, use `permission_policy="bypass"` /
 `permissionPolicy: "bypass"`. The mapping is:
@@ -127,22 +130,25 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
 | continue-cli | `--auto` |
+| cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto`; conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
 | crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
-Claude Code, Codex and Copilot currently have typed native options:
+Claude Code, Codex, Cline and Copilot have typed native options:
 `ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
-`CodexOptions.sandbox` / `{kind: 'codex', sandbox}` adds `--sandbox`.
-Sandbox plus bypass is a conflict, not a precedence rule. See
-[SPEC permission migration](SPEC.md#permission-policy-and-migration).
+`CodexOptions.sandbox` / `{kind: 'codex', sandbox}` adds `--sandbox`;
+`ClineOptions.provider` and `auto_approve` / `{kind: 'cline', provider, autoApprove}`
+add `--provider` and `--auto-approve true|false`. Codex sandbox or Cline
+autoApprove combined with bypass is a conflict, not a precedence rule.
+See [SPEC permission migration](SPEC.md#permission-policy-and-migration).
 `CopilotOptions.allow_tools` / `deny_tools` (TS `allowTools` / `denyTools`)
 emit explicit repeated `--allow-tool=<rule>` / `--deny-tool=<rule>` flags.
 Native denial takes precedence over grants and bypass.
 
 Configuration selection is also explicit: `executable` selects the binary;
 `configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
-Codex, `HERMES_HOME` for Hermes, `GOOSE_PATH_ROOT` for Goose, `COPILOT_HOME` for Copilot, and
+Codex, `HERMES_HOME` for Hermes, `GOOSE_PATH_ROOT` for Goose, `CLINE_DIR` for Cline, `COPILOT_HOME` for Copilot, and
 `PI_CODING_AGENT_DIR` plus `--profile default` for OMP. `configFile` maps to
 Claude Code `--settings`, or `--config` for Aider, Continue and OMP.
 Other adapters reject these typed overrides. Existing
@@ -174,6 +180,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
 | kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
 | hermes       | **null**          | **null**                      | not parsed; stdout is preserved verbatim, only `session_id:` stderr lines are read |
+| cline        | when reported     | when reported                 | last top-level `run_result.usage`; partial streams retain raw events with null totals |
 | goose        | optional upstream cost (may be estimated) | optional cumulative totals | last JSONL `complete` event; partial stream without completion has null metrics |
 | copilot      | **null**          | **null**                      | JSONL native events retained; premium requests/AI credits are not USD or token totals |
 
@@ -192,6 +199,7 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
   - **factory-droid** preserves managed model IDs and explicitly supplied `custom:` IDs; it never invents BYOK configuration.
   - **crush** preserves explicit provider prefixes and passes bare names through.
   - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
+  - **cline** has no library default; model IDs pass through trimmed, without provider-prefix inference. `ClineOptions.provider` selects the provider independently. Omitted choices use upstream configuration.
   - **copilot** preserves explicit model IDs after trimming; omitted model delegates to upstream selection and reports null.
   - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
   - **goose** preserves explicit model IDs without provider inference; omitted/empty model delegates to upstream config and reports null.
@@ -617,6 +625,55 @@ session_id: 20260908_094809_a1b2c3
 ```
 
 ---
+
+## cline
+
+- **Distribution:** standalone npm [`cline`](https://www.npmjs.com/package/cline), executable `cline`; not the VS Code extension, Continue's `cn`, or a hub client. The npm launcher runs Node and selects a platform binary with Bun embedded. [Official setup](https://docs.cline.bot/getting-started/installing-cline#cli) calls for Node 20+ (22 recommended).
+- **Setup:** install with `npm install -g cline`, then authenticate explicitly with `cline auth`. To use a separate existing config root, configure it with `cline --config /absolute/cline-home auth` and select the same path using Harness `configHome`. Harness never authenticates, copies credentials, or runs the advertised install/update commands.
+- **Command:** `cline --json --cwd <absolute-workdir> [--model <model>] [--provider <provider>] [--auto-approve true|false] -- <prompt>`. Empty/whitespace-only prompts reject before preparation. `--` protects leading-dash prompts. Finite stdin is also passed through; upstream appends it to the prompt.
+- **Model/provider:** no Harness default and no provider inference. Omitted options leave upstream configuration in charge. `BuildCommand.model` / `RunResult.model` report the requested model or null; native resolved provider/model remain in `raw` when upstream emits them.
+- **Instructions:** Harness temporarily projects `CLINE.md` in the workdir and prefixes the prompt with `Follow the instructions in @./CLINE.md` followed by a blank line. Cline's [native file-mention resolver](https://github.com/cline/cline/blob/595f1dbf2ea819e987afeadb4ed4dd9a0ae9a55e/apps/cli/src/runtime/prompt.ts#L104-L204) includes that file. The mention has no trailing punctuation, which upstream would treat as part of the filename. This is explicit attachment, not a claim that upstream auto-loads `CLINE.md`; upstream's existing project/global rules remain in effect.
+- **Permissions:** upstream normally auto-approves. Omitted policy adds no flag. `bypass` maps to `--auto-approve true`; `ClineOptions(auto_approve=False)` / `{kind: 'cline', autoApprove: false}` requests approval, which non-TTY tool execution denies. Combining any explicit native autoApprove with bypass rejects. Approval denial can still precede an exit-zero completed response; inspect native tool events when that distinction matters. Upstream `ask_question` may choose its first offered option with no TTY; Harness supplies no interactive response channel.
+- **Config:** `configHome` maps to native `CLINE_DIR`, the config root used by `--config`. This is not a sandbox or an isolation guarantee: upstream reads project/global rules and writes provider/model/session state. Existing `CLINE_DATA_DIR` and other caller-selected state overrides still apply. `configFile` is unsupported; `--config` takes a directory, not a config file.
+- **Owned mode:** every invocation sets `CLINE_SESSION_BACKEND_MODE=local`, `CLINE_NO_AUTO_UPDATE=1`, and `CLINE_RUN_AS_HUB_DAEMON=0`. These prevent shared-hub routing, the detached automatic npm updater, and accidental daemon entry. Conflicting explicit `env` values reject rather than silently changing execution mode. Effective `CLINE_TOOL_APPROVAL_MODE=desktop` rejects because it delegates approval to an external desktop service. No hub/daemon is started or stopped by Harness.
+- **Cancellation:** `BuildCommand.gracefulSignal="SIGINT"` selects one SIGINT through the common lifecycle engine, followed by the existing bounded SIGKILL fallback. Cline 3.0.61's one-shot SIGTERM handler cannot abort its active session; SIGINT disposes it, including ordinary shell tools that Cline places in separate process groups. External command drivers must honor the planned signal. Forced kill/crash, deliberately backgrounded tools and remote/container processes remain outside guaranteed cleanup; this is not a descendant-adoption supervisor.
+- **Capabilities:** CLI, raw chunk streaming, cancellation, native Cline provider/approval options, configHome and explicit bypass. No RPC/SDK fallback, controlled sessions, resume, daemon, pane or session-log helpers.
+
+### JSON and result parsing
+
+Cline 3.0.61 emits NDJSON objects such as `hook_event`, `agent_event`,
+`team_event`, `run_result` and `run_aborted`; timestamps are ISO strings.
+The documentation's `ask`/`say` table does not match this release.
+Harness retains every parsed stdout object, including unknown event kinds, in
+`raw`; malformed/non-object lines are skipped there but remain in `stdout`.
+Stderr remains verbatim, including JSON errors and non-JSON runtime warnings.
+
+Metrics come only from the **last top-level `run_result.usage`**:
+`inputTokens`, `outputTokens`, `totalCost`. Token counts must be nonnegative safe
+integer numbers; cost must be finite and nonnegative. Invalid or absent metrics
+are individually null. Repeated `agent_event.usage`, `done`, and the echoed
+`aggregateUsage` are not added again. Without a terminal result, raw partial
+events remain available and all metrics are null.
+
+`exitCode` is the actual process status, not synthesized agent success.
+A successful task requires a terminal `run_result.finishReason="completed"`
+as well as a successful process result. In particular, upstream can exit zero
+after SIGINT or an abort. Harness-triggered cancellation/timeouts retain their
+own terminal classification even when the CLI exits zero.
+
+### Qualification — 2026-09-08
+
+Isolated npm `cline@3.0.61` on macOS arm64, Node 26.6.0; `--version` and
+`--help` checked. Source pinned to
+[`595f1dbf`](https://github.com/cline/cline/tree/595f1dbf2ea819e987afeadb4ed4dd9a0ae9a55e/apps/cli).
+The official package was invoked against a synthetic loopback OpenAI-compatible
+endpoint: text completion, shell-tool execution, default/true approval,
+false approval under EOF, and SIGINT shell cleanup were exercised.
+These are **real CLI / synthetic provider** checks, not provider qualification.
+An isolated real Cline-provider attempt returned an explicit authentication
+error with exit 1. No real provider succeeded; no credentials were copied,
+global configuration changed, shared services stopped, or packages published.
+The isolated `--data-dir` probe lacked auth and did not qualify that mode.
 
 ## goose
 

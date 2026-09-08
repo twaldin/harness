@@ -2,6 +2,12 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added the standalone `cline` CLI adapter in Python and TypeScript, with native
+  provider/approval options, `CLINE_DIR`, explicit instruction attachment and
+  terminal NDJSON usage. Upstream defaults to auto-approval.
+  Cline selects one SIGINT through the shared lifecycle engine; other adapters
+  retain SIGTERM. External command drivers must honor the planned graceful signal.
+  See [setup, cancellation and provider coverage limits](ADAPTER-MATRIX.md#cline).
 - Added `goose` in Python and TypeScript using the official headless JSONL CLI
   and shared subprocess lifecycle. Preserves caller-selected model/provider/extensions,
   supports inline instructions, `GOOSE_PATH_ROOT` and explicit `GOOSE_MODE=auto`,

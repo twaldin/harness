@@ -41,12 +41,17 @@ ErrorCode = Literal[
     "protocol-error",
     "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "copilot"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
+#: Signal the runner sends the owned process group once before escalating to
+#: SIGKILL. SIGTERM is the default; adapters whose CLI only shuts down
+#: cleanly on SIGINT declare it through `Adapter.graceful_signal`.
+GracefulSignal = Literal["SIGTERM", "SIGINT"]
 
 BACKENDS: tuple[Backend, ...] = get_args(Backend)
 PERMISSION_POLICIES: tuple[PermissionPolicy, ...] = get_args(PermissionPolicy)
+GRACEFUL_SIGNALS: tuple[GracefulSignal, ...] = get_args(GracefulSignal)
 _CLAUDE_CODE_EFFORTS: tuple[str, ...] = get_args(ClaudeCodeEffort)
 _CODEX_SANDBOXES: tuple[str, ...] = get_args(CodexSandbox)
 
@@ -86,6 +91,22 @@ class CodexOptions:
 
 
 @dataclass(frozen=True)
+class ClineOptions:
+    """Typed `cline` CLI knobs. `provider` is emitted as `--provider <value>`
+    and `auto_approve` as `--auto-approve true|false`, in that order.
+
+    Both omitted: upstream configuration decides (no provider or approval
+    flags are injected). An explicit `auto_approve` combined with
+    `permission_policy="bypass"` is rejected: bypass is itself
+    `--auto-approve true`, so the two would either duplicate or contradict.
+    """
+
+    kind: Literal["cline"] = field(default="cline", init=False)
+    provider: str | None = None
+    auto_approve: bool | None = None
+
+
+@dataclass(frozen=True)
 class CopilotOptions:
     """Typed `copilot` CLI tool-permission rules.
 
@@ -103,7 +124,7 @@ class CopilotOptions:
     deny_tools: tuple[str, ...] | list[str] | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
 
 
 @dataclass
@@ -137,7 +158,7 @@ class RunSpec:
                       rejected with `unsupported-capability` when the adapter
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
-                      `CodexOptions`, `CopilotOptions`). The kind must match `harness`.
+                      `CodexOptions`, `ClineOptions`, `CopilotOptions`). The kind must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -212,6 +233,10 @@ class BuildCommand:
     #: the adapter default; None when selection is delegated to a
     #: caller-supplied config file.
     model: str | None = None
+    #: Signal the runner sends the owned process group once before its
+    #: SIGKILL escalation (see `Adapter.graceful_signal`); None keeps the
+    #: default SIGTERM.
+    graceful_signal: GracefulSignal | None = None
 
 
 class ParsedOutput(TypedDict):
@@ -452,6 +477,12 @@ class Adapter(ABC):
     #: None: `RunSpec.config_file` is rejected.
     config_file_flag: str | None = None
 
+    #: Signal the runner sends this CLI's process group once when a run must
+    #: stop (timeout, cancellation, leftover cleanup) before the bounded
+    #: SIGKILL escalation. None: the default SIGTERM. Declare "SIGINT" only
+    #: when the CLI shuts down cleanly on SIGINT but not on SIGTERM.
+    graceful_signal: GracefulSignal | None = None
+
     #: Scroll-key routing policy for terminal multiplexer integrations
     #: (for example flt's TUI). Consumers can use this to decide whether
     #: scroll-direction keys (j/k, ctrl-u/d, etc.) should be forwarded
@@ -540,9 +571,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, CopilotOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions or CopilotOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions or CopilotOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -559,7 +590,7 @@ class Adapter(ABC):
         elif isinstance(native, CopilotOptions):
             _validate_tool_rules("allow_tools", native.allow_tools)
             _validate_tool_rules("deny_tools", native.deny_tools)
-        else:
+        elif isinstance(native, CodexOptions):
             if native.sandbox is not None and native.sandbox not in _CODEX_SANDBOXES:
                 raise HarnessError(
                     f"invalid codex sandbox {native.sandbox!r}; expected one of {', '.join(_CODEX_SANDBOXES)}",
@@ -568,6 +599,21 @@ class Adapter(ABC):
             if native.sandbox is not None and spec.permission_policy == "bypass":
                 raise HarnessError(
                     "codex sandbox conflicts with permission_policy='bypass' (the bypass flag disables the sandbox); choose one",
+                    code="invalid-options",
+                )
+        elif isinstance(native, ClineOptions):
+            provider = native.provider
+            if provider is not None and (not isinstance(provider, str) or not provider or "\0" in provider):
+                raise HarnessError("cline provider must be None or a non-empty string without NUL bytes", code="invalid-options")
+            auto_approve = native.auto_approve
+            if auto_approve is not None and type(auto_approve) is not bool:
+                raise HarnessError(
+                    f"cline auto_approve must be None or a bool, got {type(auto_approve).__name__}",
+                    code="invalid-options",
+                )
+            if auto_approve is not None and spec.permission_policy == "bypass":
+                raise HarnessError(
+                    "cline auto_approve conflicts with permission_policy='bypass' (bypass is --auto-approve true); choose one",
                     code="invalid-options",
                 )
 
@@ -587,6 +633,11 @@ class Adapter(ABC):
             native_args = ("--effort", native.effort)
         elif isinstance(native, CodexOptions) and native.sandbox is not None:
             native_args = ("--sandbox", native.sandbox)
+        elif isinstance(native, ClineOptions):
+            if native.provider is not None:
+                native_args += ("--provider", native.provider)
+            if native.auto_approve is not None:
+                native_args += ("--auto-approve", "true" if native.auto_approve else "false")
         elif isinstance(native, CopilotOptions):
             native_args = (
                 *(f"--allow-tool={rule}" for rule in native.allow_tools or ()),
@@ -618,20 +669,28 @@ class Adapter(ABC):
         args: list[str],
         env: dict[str, str] | None = None,
         directories: tuple[Path, ...] = (),
+        graceful_signal: GracefulSignal | None = None,
     ) -> BuildCommand:
         """Assemble the `BuildCommand` every builder returns. Pure.
 
         Applies `spec.executable`, the absolute cwd, env layering
         (adapter additions, then `spec.env`, then the config-home variable),
-        the planned instructions projection, artifact directories and the
-        reported model. Idempotent, so registry entrypoints re-apply it to
-        third-party output.
+        the planned instructions projection, artifact directories, the
+        reported model and the graceful signal (`graceful_signal` when given,
+        else this adapter's declaration). Idempotent, so registry entrypoints
+        re-apply it to third-party output.
         """
         cwd = absolute_workdir(spec.workdir)
         merged = {**(env or {}), **spec.env}
         if spec.config_home is not None and self.config_home_env is not None:
             merged[self.config_home_env] = str(Path(spec.config_home))
         instructions_file = self.planned_instructions_file(spec)
+        signal_name = self.graceful_signal if graceful_signal is None else graceful_signal
+        if signal_name is not None and signal_name not in GRACEFUL_SIGNALS:
+            raise HarnessError(
+                f"harness {self.name!r} declares graceful_signal {signal_name!r}; expected one of {', '.join(GRACEFUL_SIGNALS)}",
+                code="adapter-error",
+            )
         return BuildCommand(
             cmd=spec.executable or cmd,
             args=list(args),
@@ -641,6 +700,7 @@ class Adapter(ABC):
             instruction_content=spec.instructions if instructions_file is not None else None,
             directories=tuple(cwd / d for d in directories),
             model=self.reported_model(spec),
+            graceful_signal=signal_name,
         )
 
     # ---- headless contract ----------------------------------------------
@@ -675,7 +735,10 @@ class Adapter(ABC):
 
     def _finalized(self, spec: RunSpec, built: BuildCommand) -> BuildCommand:
         """Re-apply the finalizer to any builder output (no-op for built-ins)."""
-        return self.finalize_command(spec, cmd=built.cmd, args=built.args, env=built.env, directories=built.directories)
+        return self.finalize_command(
+            spec, cmd=built.cmd, args=built.args, env=built.env, directories=built.directories,
+            graceful_signal=built.graceful_signal,
+        )
 
     def run(self, spec: RunSpec) -> RunResult:
         """Full headless invocation: build_command + prepare + exec + parse_output + cleanup."""
@@ -699,6 +762,7 @@ class Adapter(ABC):
                     inactivity_timeout_seconds=spec.inactivity_timeout_seconds,
                     max_output_bytes=spec.max_output_bytes,
                     cancel=spec.cancel,
+                    graceful_signal=bc.graceful_signal or "SIGTERM",
                 )
             except (ValueError, NotImplementedError, KeyboardInterrupt, SystemExit):
                 # Validation precedes launch; control-flow exceptions follow teardown.
@@ -732,6 +796,7 @@ class Adapter(ABC):
                     inactivity_timeout_seconds=spec.inactivity_timeout_seconds,
                     max_output_bytes=spec.max_output_bytes,
                     cancel=spec.cancel,
+                    graceful_signal=bc.graceful_signal or "SIGTERM",
                 )
             except asyncio.CancelledError as error:
                 # The engine chains a teardown failure as the cancellation's cause.

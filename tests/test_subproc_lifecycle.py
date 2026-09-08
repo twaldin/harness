@@ -154,6 +154,7 @@ OPTION_NAMES = {
     "inactivityTimeoutSeconds": "inactivity_timeout_seconds",
     "maxOutputBytes": "max_output_bytes",
     "stdin": "stdin",
+    "gracefulSignal": "graceful_signal",
 }
 OUTCOME_FIELDS = {
     "termination": "termination",

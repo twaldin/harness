@@ -55,6 +55,7 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   kilo: ['--auto'],
   omp: ['--auto-approve'],
   'continue-cli': ['--auto'],
+  cline: ['--auto-approve', 'true'],
   copilot: ['--allow-all'],
 }
 const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MODE: 'auto' } }
@@ -241,6 +242,7 @@ describe('getCapabilities', () => {
       aider: [null, '--config'],
       'continue-cli': [null, '--config'],
       omp: ['PI_CODING_AGENT_DIR', '--config'],
+      cline: ['CLINE_DIR', null],
       copilot: ['COPILOT_HOME', null],
     }
     for (const name of SHIPPED) {
@@ -256,7 +258,7 @@ describe('getCapabilities', () => {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS || name in BYPASS_ENVS)
-      if (name !== 'claude-code' && name !== 'codex' && name !== 'copilot') expect(caps.nativeOptions).toBeNull()
+      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot') expect(caps.nativeOptions).toBeNull()
       else expect(caps.nativeOptions).toBe(name)
       expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)

@@ -354,9 +354,12 @@ async function supervise(): Promise<void> {
   const parsed: unknown = JSON.parse(await readStdin())
   if (!isLaunchRequest(parsed)) throw new Error('supervisor received a malformed launch request')
   const controller = new AbortController()
-  const parent = process.ppid
-  // The parent blocks in spawnSync; if it dies we are reparented and must not
-  // keep its command alive.
+  const parent = Number(process.argv[4])
+  if (!Number.isInteger(parent) || parent < 1) throw new Error('supervisor requires its caller PID')
+  // Capture identity in the caller, not here: it may die before this module
+  // loads. A broken result pipe also cancels rather than crashing with EPIPE.
+  process.stdout.on('error', () => controller.abort())
+  if (process.ppid !== parent) controller.abort()
   const watch = setInterval(() => {
     if (process.ppid !== parent) controller.abort()
   }, 250)
@@ -372,7 +375,7 @@ async function supervise(): Promise<void> {
 /** Blocks the calling thread by running the async engine inside a supervisor process. */
 export function runLifecycleSync(request: LaunchRequest): Required<SubprocOutcome> {
   const nonce = randomUUID()
-  const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url), SUPERVISOR_FLAG, nonce], {
+  const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url), SUPERVISOR_FLAG, nonce, String(process.pid)], {
     env: { ...process.env, [SUPERVISOR_ENV]: nonce },
     input: JSON.stringify(request),
     stdio: ['pipe', 'pipe', 'pipe'],

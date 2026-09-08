@@ -98,6 +98,9 @@ class RunSpec:
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
                       `CodexOptions`). The kind must match `harness`.
+    `cancel`        — optional threading.Event. Setting it returns a cancelled
+                      result after owned-process cleanup; a set event launches
+                      nothing. Async Task.cancel instead propagates CancelledError.
     """
 
     harness: str

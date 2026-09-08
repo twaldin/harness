@@ -998,8 +998,9 @@ approval-response or arbitrary native-options channel.
 `sessionId`, `sessionFile` (absolute path or null), `workdir` (absolute).
 Native persistence may be lazy: a reported path is not proof the file exists.
 Resume requires an existing session file whose header identifies the exact
-requested native ID and workdir; startup verifies the native state response
-again. The library never chooses the newest session, silently forks, or deletes
+requested native ID and workdir. The requested spawn workdir must identify that
+same directory; startup verifies the native state response again.
+The library never chooses the newest session, silently forks, or deletes
 upstream history. A missing/unusable reference is an error, not a fresh session.
 
 `session.startTurn(prompt)` synchronously reserves the active slot and returns
@@ -1016,6 +1017,9 @@ events; `turn.events` exposes events and responses associated with the active
 turn. Both are single-consumer streams. Unknown event types stay visible.
 Native events have no common upstream turn ID; serial turn ownership provides
 the local correlation while retaining native request IDs verbatim.
+Stopping iteration does not discard queued events or disable the byte bound.
+Continue draining the acquired iterator or close the session; an unconsumed
+stream still fails loudly on overflow.
 
 Responses correlate by ID and command, not arrival order. A prompt response is
 only acknowledgement. Completion requires the valid prompt response plus

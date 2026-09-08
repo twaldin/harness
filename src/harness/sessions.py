@@ -385,6 +385,11 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
         raise HarnessError(f"max_buffer_bytes must be a non-negative safe integer, got {buffer!r}", code="invalid-options")
     workdir = absolute_workdir(spec.workdir)
     resume = _validate_reference(spec.resume) if spec.resume is not None else None
+    if resume is not None and not _same_dir(str(resume.workdir), workdir):
+        raise HarnessError(
+            f"resume.workdir {str(resume.workdir)!r} does not match the session workdir {str(workdir)!r}",
+            code="invalid-options",
+        )
     return replace(spec, workdir=workdir, model=model, env=dict(spec.env), resume=resume)
 
 

@@ -138,6 +138,8 @@ def test_session_capabilities_for_pi_rpc():
         ("pi", "cli", "unsupported-backend"),
         ("pi", "sdk", "unsupported-backend"),
         ("pi", "grpc", "invalid-options"),
+        ("codex", "grpc", "invalid-options"),
+        ("nope", "grpc", "unknown-harness"),
     ],
 )
 def test_session_capabilities_rejections(name: str, backend: str, code: str):
@@ -153,6 +155,8 @@ def test_session_capabilities_rejections(name: str, backend: str, code: str):
         ({"harness": "claude-code"}, "unsupported-backend"),
         ({"backend": "cli"}, "unsupported-backend"),
         ({"backend": "grpc"}, "invalid-options"),
+        ({"harness": "codex", "backend": "grpc"}, "invalid-options"),
+        ({"harness": "nope", "backend": "grpc"}, "unknown-harness"),
         ({"permission_policy": "bypass"}, "unsupported-capability"),
         ({"permission_policy": "yolo"}, "invalid-options"),
         ({"model": "   "}, "invalid-options"),
@@ -306,6 +310,18 @@ async def test_close_kills_sigterm_ignoring_descendant(tmp_path: Path):
     assert not (tmp_path / LOCK_DIRNAME).exists()
 
 
+async def test_leader_exit_stops_descendant_without_inherited_stdio(tmp_path: Path):
+    async with await open_session(_spec("descendant_exit", tmp_path, instructions="held")) as session:
+        turn = session.start_turn("fork")
+        result = await turn.result
+        assert result.status == "exited"
+        pid = int((tmp_path / "synthetic-child.pid").read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        assert not (tmp_path / "AGENTS.md").exists()
+        assert not (tmp_path / LOCK_DIRNAME).exists()
+
+
 async def test_cancelled_open_tears_child_down(tmp_path: Path):
     opening = asyncio.ensure_future(open_session(_spec("startup_hang", tmp_path, request_timeout_seconds=30, instructions="X")))
     await asyncio.sleep(0.3)
@@ -359,6 +375,19 @@ async def test_unconsumed_overflow_fails_loudly_but_keeps_buffered_events(tmp_pa
     await session.close()
 
 
+async def test_breaking_event_iteration_keeps_overflow_detection(tmp_path: Path):
+    async with await open_session(_spec("flood_after_break", tmp_path, max_buffer_bytes=4096)) as session:
+        turn = session.start_turn("hello")
+        async for event in turn.events:
+            assert event.type == "response"
+            break
+        (tmp_path / "continue-flood").touch()
+        result = await turn.result
+        assert result.status == "protocol-error"
+        assert result.events_truncated
+        assert session.closed
+
+
 async def test_events_iterator_is_single_consumer(tmp_path: Path):
     async with await open_session(_spec("success", tmp_path)) as session:
         turn = session.start_turn("hello")
@@ -405,6 +434,10 @@ async def test_resume_verifies_header_before_spawn_and_identity_after(tmp_path: 
 
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
+    with pytest.raises(HarnessError) as info:
+        async with await open_session(_spec("success", elsewhere, resume=reference)):
+            pass
+    assert info.value.code == "invalid-options"
     with pytest.raises(HarnessError) as info:
         await open_session(_spec("success", tmp_path, resume=SessionReference(reference.session_id, reference.session_file, elsewhere)))
     assert info.value.code == "invalid-options"

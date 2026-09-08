@@ -201,10 +201,11 @@ function resolveBackendForSession(raw: unknown): SessionBackend {
   return raw
 }
 
-/** The registry lookup decides `unknown-harness`; every known harness other than `pi` is `unsupported-backend`. */
-function requirePiHarness(name: unknown): 'pi' {
+/** Resolve the harness first, then validate the backend before rejecting an unsupported known harness. */
+function requirePiHarness(name: unknown, backend: unknown): 'pi' {
   if (typeof name !== 'string') throw invalid('harness must be a string')
   const adapter = getAdapter(name)
+  resolveBackendForSession(backend)
   if (adapter.name !== 'pi') {
     throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" is supported`, 'unsupported-backend')
   }
@@ -216,9 +217,9 @@ function requirePiHarness(name: unknown): 'pi' {
  * `getCapabilities`: this documents session operations, not one-shot execution.
  */
 export function getSessionCapabilities(name: string, backend: Backend = 'rpc'): SessionCapabilities {
-  requirePiHarness(name)
+  requirePiHarness(name, backend)
   return {
-    backend: resolveBackendForSession(backend),
+    backend: 'rpc',
     events: true,
     interrupt: true,
     followUp: true,
@@ -250,8 +251,8 @@ function resolveReference(raw: unknown, workdir: string): SessionReference {
 /** Apply defaults and validate. Pure: nothing is touched on disk. */
 function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   if (!isJsonObject(spec)) throw invalid('spec must be a SessionSpec object')
-  const harness = requirePiHarness(spec.harness)
-  const backend = resolveBackendForSession(spec.backend)
+  const harness = requirePiHarness(spec.harness, spec.backend)
+  const backend = 'rpc'
   const rawWorkdir: unknown = spec.workdir
   if (typeof rawWorkdir !== 'string' || rawWorkdir === '' || rawWorkdir.includes('\0')) {
     throw invalid('workdir must be a non-empty string without NUL bytes')
@@ -435,7 +436,6 @@ class EventQueue implements AsyncIterable<SessionEvent> {
   #items: { event: SessionEvent; bytes: number }[] = []
   #bytes = 0
   #ended = false
-  #abandoned = false
   #claimed = false
   #waiter: ((result: IteratorResult<SessionEvent, undefined>) => void) | null = null
 
@@ -445,7 +445,7 @@ class EventQueue implements AsyncIterable<SessionEvent> {
   }
 
   push(event: SessionEvent, bytes: number): void {
-    if (this.#ended || this.#abandoned) return
+    if (this.#ended) return
     const waiter = this.#waiter
     if (waiter !== null) {
       this.#waiter = null
@@ -479,24 +479,13 @@ class EventQueue implements AsyncIterable<SessionEvent> {
           this.#bytes -= item.bytes
           return Promise.resolve({ value: item.event, done: false })
         }
-        if (this.#ended || this.#abandoned) return Promise.resolve({ value: undefined, done: true })
+        if (this.#ended) return Promise.resolve({ value: undefined, done: true })
         if (this.#waiter !== null) {
           return Promise.reject(new HarnessError('Session event iterators are single-consumer; await next() sequentially', 'unsupported-capability'))
         }
         return new Promise((resolve) => {
           this.#waiter = resolve
         })
-      },
-      return: (): Promise<IteratorResult<SessionEvent, undefined>> => {
-        this.#abandoned = true
-        this.#items = []
-        this.#bytes = 0
-        const waiter = this.#waiter
-        if (waiter !== null) {
-          this.#waiter = null
-          waiter({ value: undefined, done: true })
-        }
-        return Promise.resolve({ value: undefined, done: true })
       },
     }
   }
@@ -1095,7 +1084,7 @@ export class LiveSession {
     return this.#teardown
   }
 
-  /** stdin EOF, TERM the group, GRACE_MS, KILL, then wait at most DRAIN_MS for the leader reap and pipe closure before force-closing. */
+  /** stdin EOF, TERM the group, GRACE_MS, KILL, then bounded group/leader/stdio drain before force-closing. */
   async #stopGroup(): Promise<void> {
     const child = this.#child
     try {
@@ -1116,15 +1105,13 @@ export class LiveSession {
         if (alive) signalGroup(pgid, 'SIGKILL')
       }
     }
-    const reaped = new Promise<void>((done) => {
-      const check = (): void => {
-        if ((this.#leader !== null || this.#pid === null) && this.#stdoutClosed && this.#stderrClosed) done()
-      }
-      this.#onLeaderKnown.push(check)
-      this.#onStdioClosed.push(check)
-      check()
-    })
-    await Promise.race([reaped, sleep(DRAIN_MS)])
+    const drainEnd = performance.now() + DRAIN_MS
+    while (performance.now() < drainEnd) {
+      const groupGone = this.#pid === null || !signalGroup(this.#pid, 0)
+      const leaderReaped = this.#leader !== null || this.#pid === null
+      if (groupGone && leaderReaped && this.#stdoutClosed && this.#stderrClosed) break
+      await sleep(PROBE_MS)
+    }
     child.stdout?.destroy()
     child.stderr?.destroy()
     child.stdin?.destroy()

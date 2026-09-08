@@ -124,9 +124,29 @@ for line in sys.stdin.buffer:
             continue
         elif CASE == "oversized":
             os.write(1, b'{"type":"unknown","text":"' + b"x" * 1_048_576 + b'"}\n')
-        elif CASE == "flood":
+        elif CASE in ("flood", "flood_after_break"):
+            if CASE == "flood_after_break":
+                while not Path("continue-flood").exists():
+                    time.sleep(0.01)
             for _ in range(2000):
                 emit({"type": "unknown", "text": "x" * 1024})
+        elif CASE == "descendant_exit":
+            ready_read, ready_write = os.pipe()
+            child = os.fork()
+            if child == 0:
+                os.close(ready_read)
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                for fd in (0, 1, 2):
+                    os.close(fd)
+                Path("synthetic-child.pid").write_text(str(os.getpid()))
+                os.write(ready_write, b"ready")
+                os.close(ready_write)
+                while True:
+                    time.sleep(1)
+            os.close(ready_write)
+            os.read(ready_read, 5)
+            os.close(ready_read)
+            sys.exit(0)
         elif CASE == "descendant":
             child = os.fork()
             if child == 0:

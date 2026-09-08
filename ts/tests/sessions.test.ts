@@ -305,6 +305,21 @@ describe('buffering', () => {
     expect(events[0]?.type).toBe('response')
   })
 
+  test('breaking event iteration keeps overflow detection', async () => {
+    const dir = workdir()
+    const session = await open('flood_after_break', dir, { maxBufferBytes: 4096, timeoutSeconds: 1 })
+    const turn = session.startTurn('hello')
+    for await (const event of turn.events) {
+      expect(event.type).toBe('response')
+      break
+    }
+    writeFileSync(join(dir, 'continue-flood'), '')
+    const result = await turn.result
+    expect(result.status).toBe('protocol-error')
+    expect(result.eventsTruncated).toBe(true)
+    expect(session.closed).toBe(true)
+  })
+
   test('idle frames flow through session.events with a null turnId', async () => {
     const dir = workdir()
     const session = await open('idle_unknown', dir)
@@ -410,6 +425,17 @@ describe('close and ownership', () => {
     expect(existsSync(join(dir, LOCK))).toBe(false)
   })
 
+  test('leader exit stops a descendant without inherited stdio', async () => {
+    const dir = workdir()
+    const session = await open('descendant_exit', dir, { instructions: 'held' })
+    const turn = session.startTurn('fork')
+    expect((await turn.result).status).toBe('exited')
+    const pid = Number(readFileSync(join(dir, 'synthetic-child.pid'), 'utf-8'))
+    expect(() => process.kill(pid, 0)).toThrow()
+    expect(existsSync(join(dir, 'AGENTS.md'))).toBe(false)
+    expect(existsSync(join(dir, LOCK))).toBe(false)
+  })
+
   test('a session holds the workdir lease for its lifetime', async () => {
     const dir = workdir()
     const session = await open('success', dir)
@@ -431,6 +457,8 @@ describe('spec validation and capabilities', () => {
       [{ backend: 'cli' }, 'unsupported-backend'],
       [{ backend: 'sdk' }, 'unsupported-backend'],
       [{ backend: 'grpc' }, 'invalid-options'],
+      [{ harness: 'codex', backend: 'grpc' }, 'invalid-options'],
+      [{ harness: 'nope', backend: 'grpc' }, 'unknown-harness'],
       [{ backend: undefined }, 'invalid-options'],
       [{ permissionPolicy: 'bypass' }, 'unsupported-capability'],
       [{ permissionPolicy: 'yolo' }, 'invalid-options'],
@@ -456,6 +484,8 @@ describe('spec validation and capabilities', () => {
     expect(() => getSessionCapabilities('pi', 'cli')).toThrow(expect.objectContaining({ code: 'unsupported-backend' }))
     expect(() => getSessionCapabilities('codex')).toThrow(expect.objectContaining({ code: 'unsupported-backend' }))
     expect(() => getSessionCapabilities('missing')).toThrow(expect.objectContaining({ code: 'unknown-harness' }))
+    expect(() => getSessionCapabilities('codex', 'grpc' as SessionSpec['backend'])).toThrow(expect.objectContaining({ code: 'invalid-options' }))
+    expect(() => getSessionCapabilities('missing', 'grpc' as SessionSpec['backend'])).toThrow(expect.objectContaining({ code: 'unknown-harness' }))
   })
 })
 

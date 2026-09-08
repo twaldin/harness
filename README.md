@@ -88,10 +88,25 @@ after a bounded grace period.
 Pass `cancel=threading.Event()` in Python or `cancel: controller.signal` from
 an `AbortController` in TypeScript. Explicit cancellation returns a result;
 Python task cancellation propagates `CancelledError` after process cleanup.
-Check `termination` for `exited`, `signaled`, `timed-out`, `cancelled` or
-`launch-failed`; existing exit codes, timeout flag and metrics remain available.
-See [ownership and execution](SPEC.md#ownership-and-execution) for deadlines,
-launch-error migration, synchronous cancellation limits and tested OS support.
+Check `termination` for `exited`, `signaled`, `timed-out`, `cancelled`,
+`launch-failed` or `callback-error`. Output is capped at 1 MiB per stream by
+default; check `stdout_truncated` / `stdoutTruncated` and the stderr equivalent
+before treating captured output or parsed metrics as complete.
+
+Pass finite `stdin` text to deliver UTF-8 input followed by EOF. Optional
+`on_output(chunk, stream)` / `onOutput(chunk, stream)` callbacks receive decoded
+stdout/stderr chunks independently of the capture cap. Async runs await callbacks
+with backpressure. Callbacks are chunks, not JSONL records or normalized events.
+
+`inactivity_timeout_seconds` / `inactivityTimeoutSeconds` is opt-in: silence is
+not failure by default. The wall timeout remains 1800 seconds unless overridden;
+explicit `None` / `null` disables it. `timeout_kind` / `timeoutKind` distinguishes
+wall and inactivity expiry. Callback or parser failure retains the terminal result
+with `callback_error` / `callbackError` or `parse_error` / `parseError`.
+
+See [streaming, stdin and output limits](SPEC.md#streaming-stdin-and-output-limits)
+for capture controls, callback restrictions, interrupted delivery and migration.
+The [ownership contract](SPEC.md#ownership-and-execution) defines cleanup and OS support.
 
 ---
 

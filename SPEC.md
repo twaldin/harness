@@ -41,7 +41,7 @@ interface RunSpec {
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
   instructions?: string            // temporarily projected into the adapter's instruction file
-  timeoutSeconds?: number          // default 1800
+  timeoutSeconds?: number | null   // default 1800; null disables wall timeout
   env?: Record<string, string>     // extra env vars merged onto process.env
   modelNoResolve?: boolean         // skip harness-specific rewriting; whitespace is still trimmed
   backend?: Backend               // default 'cli'; 'rpc' and 'sdk' explicitly unsupported today
@@ -51,6 +51,10 @@ interface RunSpec {
   configHome?: string              // absolute, caller-selected upstream config/state home
   configFile?: string              // absolute, caller-selected config file; supported adapters only
   cancel?: AbortSignal             // Python: threading.Event; explicit cancellation returns a result
+  stdin?: string | null            // finite UTF-8 input, then EOF; omitted/empty means EOF
+  onOutput?: OutputCallback        // decoded chunks, not framed agent events
+  inactivityTimeoutSeconds?: number // opt-in positive finite seconds
+  maxOutputBytes?: number          // per-stream raw prefix cap; default 1048576
 }
 
 // BuildCommand — what to invoke, without invoking it (for interactive consumers like flt)
@@ -77,13 +81,22 @@ interface RunResult {
   termination?: Termination | null // always populated by execution; optional for legacy constructed results
   signal?: string | null           // leader's terminating signal, e.g. SIGTERM
   launchError?: string | null      // OS code such as ENOENT or EACCES
+  stdoutBytes?: number             // total raw bytes read, including discarded bytes
+  stderrBytes?: number
+  stdoutTruncated?: boolean        // cap exceeded or pipe forced closed before EOF
+  stderrTruncated?: boolean
+  timeoutKind?: 'wall' | 'inactivity' | null
+  callbackError?: string | null    // callback failure or interrupted delivery
+  parseError?: string | null       // parser exception; execution outcome is retained
   costUsd: number | null           // null if adapter can't report cost
   tokensIn: number | null
   tokensOut: number | null
   raw: unknown | null              // adapter-specific structured payload (parsed JSON)
 }
 
-type Termination = 'exited' | 'signaled' | 'timed-out' | 'cancelled' | 'launch-failed'
+type Termination = 'exited' | 'signaled' | 'timed-out' | 'cancelled' | 'launch-failed' | 'callback-error'
+type OutputStream = 'stdout' | 'stderr'
+type OutputCallback = (chunk: string, stream: OutputStream) => void | Promise<void>
 ```
 
 (Python equivalents are dataclasses with snake_case fields, such as `exit_code` and `cost_usd`; the TypeScript examples below use camelCase. The Python CLI's JSON output uses snake_case and omits `raw`.)
@@ -185,9 +198,12 @@ preparation and before any subprocess starts. A caller can
 catch `HarnessError` without parsing its message. Existing message-only
 construction retains `adapter-error`.
 
-Non-zero subprocess exit, timeout, explicit cancellation and OS launch failure
-are represented in `RunResult`, not `HarnessError`. Python task cancellation
-propagates `CancelledError` after cleanup. Invalid low-level arguments and
+Non-zero subprocess exit, timeout, explicit cancellation, OS launch failure and
+output callback failure are represented in `RunResult`, not `HarnessError`.
+Execution catches parser exceptions into `parseError`, with null metrics/raw and
+the original terminal outcome and captured text. Standalone `parseOutput` remains
+strict. Python task cancellation propagates `CancelledError` after cleanup.
+Invalid low-level arguments and
 unsupported operating systems raise before launch. Cleanup failures (including
 failure to reap the leader within the cleanup deadline) raise rather than
 returning a result that falsely implies completed cleanup. See
@@ -202,8 +218,8 @@ Selecting `rpc` or `sdk` currently raises `unsupported-backend` in both language
 importing Harness loads no optional SDK and does not initialize upstream settings.
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
-native option kind `"codex"`, `true` for cancellation, and `false` for streaming
-and sessions. All thirteen CLI adapters share these lifecycle capabilities.
+native option kind `"codex"`, `true` for cancellation and streaming, and `false`
+for sessions. All thirteen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -641,14 +657,16 @@ Current execution behavior and limits:
 |---|---|
 | sync execution | Python `run` and both low-level `run_subprocess` / `runSubprocess` helpers block |
 | async execution | Python `run_async` is a coroutine; TS `run` and `runAsync` are non-blocking Promises |
-| stdin | closed by the headless entry points; there is no prompt/approval input channel |
-| output | stdout/stderr captured separately; no output callback or backpressure API |
-| timeout | finite non-negative seconds, default 1800; zero expires immediately after launch; `exitCode=-1`, `timedOut=true` |
+| stdin | finite `stdin` UTF-8 text, fed concurrently with output reads, then EOF; omitted/null/empty closes stdin; no interactive approval channel |
+| output | stdout/stderr separate; optional `onOutput(chunk, stream)` with serialized callback backpressure |
+| timeout | finite non-negative seconds, default 1800; null/None disables; zero expires immediately after launch; `exitCode=-1`, `timedOut=true`, `timeoutKind="wall"` |
+| inactivity | disabled by default; positive finite seconds since the last raw byte on either output stream; expiry sets `timeoutKind="inactivity"` |
 | process cleanup | fresh owned POSIX process group; SIGTERM, then SIGKILL after 0.5 seconds if still present; drain/close within a further 1 second |
 | cancellation | optional `cancel`: Python `threading.Event`, TS `AbortSignal`; explicit cancellation returns `termination="cancelled"`, `exitCode=-1`, `timedOut=false` |
 | launch failure | `termination="launch-failed"`, `exitCode=-1`, `launchError` / `launch_error` carries the OS code |
 | signal reporting | `termination="signaled"`, negative signal number as exit code and a separate signal name; SIGTERM alone is not a timeout |
-| memory/decoding | captured output is memory-buffered; UTF-8 replacement decoding preserves characters split across reads |
+| memory/decoding | per-stream raw prefix cap `maxOutputBytes`, default 1 MiB; incremental UTF-8 decoding; visible byte counts/truncation flags |
+| callback failure | `callbackError` retains the exception; while the leader runs, `termination="callback-error"`, `exitCode=-1`, `timedOut=false`; same owned teardown |
 
 `termination="exited"` covers both zero and non-zero ordinary exits. Timeout
 and cancellation retain their cause even if the leader handles SIGTERM and
@@ -656,6 +674,75 @@ exits zero. `signal` records the leader's actual terminating signal, if any.
 The first terminal condition observed by the runner wins. After ordinary
 leader exit, cleanup stops leftover group members without changing the leader's
 result; inherited pipes must not turn a completed leader into a timeout.
+
+### Streaming, stdin and output limits
+
+The same controls apply to `RunSpec` and low-level subprocess options (snake_case
+in Python). They are execution controls, not command flags: `buildCommand` does
+not copy them into argv or change an adapter's prompt transport. External drivers
+must pass their selected controls to the subprocess helper. `stdin` adds no
+newline and does not replace `prompt`. A child may close stdin early; EPIPE ends
+the feed without replacing its terminal outcome. Python's legacy low-level
+`stdin_close=False` inherits stdin only when `stdin` is absent; combining it with
+any supplied text, including empty text, is rejected.
+
+Callbacks receive nonempty decoded chunks in per-stream order. There is no
+cross-stream ordering guarantee, line boundary, JSONL frame, or normalized
+agent-event schema. Multi-byte UTF-8 sequences split across reads remain intact;
+invalid bytes and an incomplete sequence at actual EOF use U+FFFD replacement.
+Consumers framing JSONL must retain a partial record across callbacks. The
+terminal Codex/Pi parsers retain complete records preceding a partial final
+record; that tail remains visible in captured stdout. A parser exception does
+not erase interrupted output or change the process termination cause.
+
+`maxOutputBytes` is a finite non-negative safe integer, applied separately to
+the first raw bytes of stdout and stderr. Zero disables capture, not draining or
+streaming. Capture discards further bytes while continuing to read, count and
+deliver callbacks. A cap cutting a valid UTF-8 sequence omits the incomplete
+codepoint rather than manufacturing replacement text. `stdoutBytes` and
+`stderrBytes` count all raw bytes read, not decoded string lengths or bytes the
+child attempted to write. Truncation flags mean the cap was exceeded or a pipe
+was force-closed before EOF; bytes beyond that closure cannot be counted.
+Flags are metadata, not markers inserted into potentially structured output.
+The CLI exposes them in JSON and warns in human output.
+
+Capture and callback decoding are independent: callbacks can receive more than
+the capture cap. The library retains bounded capture plus bounded read buffers
+and one outstanding callback, not an accumulating callback queue. Memory the
+consumer retains, the supplied finite stdin, and adapter-owned external artifacts
+are outside the output-capture budget. Parsed metrics may be incomplete when
+capture is truncated; callers must check the flags before treating them as totals.
+
+Python `run_async` invokes callbacks on the caller's event loop and awaits
+awaitables; TypeScript `run`/`runAsync` await returned Promises. Reading pauses
+while a callback is outstanding. Wall timeout and cancellation remain active;
+inactivity excludes time spent waiting on the consumer. Only received output
+bytes reset inactivity, not stdin writes or callback completion. Silence alone
+is never an inactivity failure unless the watchdog was explicitly enabled.
+
+Callbacks must be cooperative: synchronous code that blocks the caller's event
+loop cannot be preempted. Python blocking `run` accepts synchronous callbacks
+only; they run on its reading thread and must return promptly. An async callable
+is rejected before launch; an unexpected awaitable/non-None return is a callback
+error. TypeScript's low-level blocking `runSubprocess` rejects `onOutput` before
+launch because its supervisor cannot serialize caller functions; use its async
+counterpart. This restriction does not apply to either public TypeScript run API.
+
+Teardown retains the existing bounded drain budget, including callback delivery.
+A callback that remains pending at the deadline is abandoned and reported via
+`callbackError`; no new callbacks start after delivery is disabled. Python
+requests cancellation of the pending callback task; TypeScript consumes late
+Promise rejection. User callback work cannot be forcibly terminated. After a
+callback failure, reads continue for bounded capture without further callbacks.
+The first observed terminal cause wins: a later callback failure does not replace
+an already observed exit, timeout or cancellation, but `callbackError` still
+reports it. Python `RunResult.ok` is false for callback or parser errors even
+when the child exited zero.
+
+Migration: output is now capped by default. Raise `maxOutputBytes` explicitly for
+larger terminal JSON envelopes, or consume output incrementally with `onOutput`.
+There is no implicit unbounded-capture mode. New outcome fields are optional only
+for caller-constructed legacy outcomes; execution populates them in both languages.
 
 Python `Task.cancel()` sets a private stop event and waits for the shielded
 worker's cleanup before re-raising `CancelledError`, including repeated task
@@ -670,6 +757,14 @@ To retain its synchronous return type without blocking cleanup timers,
 The supervisor exits with that invocation; it is not a daemon. It requires
 an on-disk module and a Node/Bun `process.execPath` capable of loading it;
 compiled single-file Bun executables are not a supported hosting mode.
+
+The TypeScript engine uses descriptor-backed POSIX FIFOs rather than runtime
+subprocess stream wrappers, so Node and Bun both enforce backpressure before
+reading more output. It requires `/usr/bin/mkfifo` on the supported macOS/Linux
+hosts and a writable system temporary directory. Pipe paths are created in an
+owned private directory and unlinked after opening; only descriptors survive
+launch, and teardown closes them. Pipe setup failure returns a launch-failed
+outcome without starting the agent.
 
 Ownership is the newly created process group, not a global PID/name search.
 The direct child is reaped; descendants are stopped and reaped by their parents
@@ -878,9 +973,9 @@ live evidence. Existing language skew is repaired before adding backends.
 Not adopted: mandatory bypass, billing-tier inference from headless/live mode,
 historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
-API PRs or source-text/member-count tests as parity proof. Streaming, controlled
-sessions and SDKs remain implementation-gated above, not hidden as shipped
-features behind no-op methods. No package release is implied by this contract.
+API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
+now ships under the execution contract above; controlled sessions and SDKs remain
+implementation-gated, not hidden behind no-op methods. No package release is implied.
 
 ---
 
@@ -910,7 +1005,6 @@ Explicit non-goals, to keep the library narrow:
 - challenge seeding, grading, ELO — **agentelo's job**
 - prompt mutation, GEPA, training loops — **hone's job**
 - Vertex/OAuth proxy shims, regional routing — **agentelo's job** (context-specific, varies by billing arrangement)
-- Streaming callbacks (`onOutput`) — not implemented; use `run_async()` / `runAsync()` for non-blocking subprocess execution without streaming callbacks
 
 Harness provides CLI command construction, output parsing and headless execution, plus instruction-projection, pricing and session helpers. It does not own the consumer's terminal lifecycle.
 

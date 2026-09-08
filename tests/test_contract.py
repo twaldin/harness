@@ -261,7 +261,7 @@ def test_capabilities_reflect_shipped_support(name: str):
         backend="cli",
         permission_policies=expected_policies,
         native_options=expected_native,
-        streaming=False,
+        streaming=True,
         cancellation=True,
         sessions=False,
         config_home_env=home_env,

@@ -24,6 +24,21 @@ try {
     assert.equal(normal.exitCode, 7)
     assert.equal(normal.stdout, 'synthetic λ')
 
+    // A CI shell may inherit unrelated FIFOs. Check duplicates of our two
+    // capture pipes by device/inode, not all FIFO descriptors in the process.
+    const descriptors = await run(['python3', '-c', [
+      'import json, os',
+      'owned = {(os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in (1, 2)}',
+      'pipes = []',
+      'for fd in range(256):',
+      '    try:',
+      '        info = os.fstat(fd)',
+      '        if (info.st_dev, info.st_ino) in owned: pipes.append(fd)',
+      '    except OSError: pass',
+      'print(json.dumps(pipes))',
+    ].join('\n')], { cwd })
+    assert.deepEqual(JSON.parse(descriptors.stdout), [1, 2], 'private FIFO descriptors leaked into the child')
+
     const signaled = await run([process.execPath, '-e', 'process.kill(process.pid, "SIGTERM")'], { cwd })
     assert.equal(signaled.termination, 'signaled')
     assert.equal(signaled.signal, 'SIGTERM')
@@ -48,6 +63,98 @@ try {
   const cancelled = await pending
   assert.equal(cancelled.termination, 'cancelled')
   assert.equal(cancelled.timedOut, false)
+
+  // ---- streaming and I/O under Node: the pause() backpressure path Bun cannot exercise ----
+  for (const run of [runSubprocess, runSubprocessAsync]) {
+    const fed = await run(['sh', '-c', 'cat; printf " %s" "$(cat)"'], { cwd, stdin: 'a'.repeat(200_000) + ' λ', maxOutputBytes: 300_000 })
+    assert.equal(fed.termination, 'exited')
+    assert.equal(fed.stdout, 'a'.repeat(200_000) + ' λ ')
+    assert.equal(fed.stdoutBytes, 200_000 + 4)
+    assert.equal(fed.stdoutTruncated, false)
+
+    const capped = await run(['sh', '-c', 'head -c 3000000 /dev/zero | tr "\\0" q; printf "e\\303" >&2'], { cwd, maxOutputBytes: 1000 })
+    assert.equal(capped.stdout, 'q'.repeat(1000))
+    assert.equal(capped.stdoutBytes, 3_000_000)
+    assert.equal(capped.stdoutTruncated, true)
+    assert.equal(capped.stderr, 'e\ufffd') // genuinely incomplete at EOF decodes with replacement
+    assert.equal(capped.stderrTruncated, false)
+
+    const idle = await run(['sh', '-c', 'echo up; sleep 30'], { cwd, timeoutSeconds: null, inactivityTimeoutSeconds: 0.2 })
+    assert.equal(idle.termination, 'timed-out')
+    assert.equal(idle.timeoutKind, 'inactivity')
+    assert.equal(idle.stdout, 'up\n')
+    assert.ok(idle.durationSeconds < 3, 'inactivity teardown exceeded deadline')
+  }
+  assert.throws(() => runSubprocess(['true'], { cwd, onOutput: () => {} }), (err) => err.code === 'unsupported-capability')
+
+  // A slow async consumer must throttle the producer: with pause() honored,
+  // the child cannot finish 8 MiB while each 64 KiB read waits 10ms, so it is
+  // still alive when half of the output has been delivered.
+  const producer = join(cwd, 'producer.pid')
+  let aliveAtHalf = null
+  let delivered = 0
+  let inFlight = 0
+  let maxInFlight = 0
+  const streamed = await runSubprocessAsync(['sh', '-c', `echo $$ > ${JSON.stringify(producer)}; head -c 8388608 /dev/zero | tr "\\0" s`], {
+    cwd,
+    maxOutputBytes: 0,
+    onOutput: async (chunk, stream) => {
+      assert.equal(stream, 'stdout')
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      delivered += chunk.length
+      inFlight -= 1
+      if (aliveAtHalf === null && delivered >= 4_194_304) {
+        try {
+          process.kill(Number(readFileSync(producer, 'utf8')), 0)
+          aliveAtHalf = true
+        } catch {
+          aliveAtHalf = false
+        }
+      }
+    },
+  })
+  assert.equal(streamed.termination, 'exited')
+  assert.equal(streamed.callbackError, null)
+  assert.equal(maxInFlight, 1)
+  assert.equal(delivered, 8_388_608)
+  assert.equal(streamed.stdoutBytes, 8_388_608)
+  assert.equal(streamed.stdout, '')
+  assert.equal(streamed.stdoutTruncated, true)
+  assert.equal(aliveAtHalf, true, 'producer finished before half of its output was consumed: no backpressure')
+
+  // A stalled consumer never blocks cancellation. Whether output was lost
+  // depends on how much the producer wrote versus what was read before the
+  // forced close; the flag must agree with the producer's own count.
+  const stallController = new AbortController()
+  let firstChunk
+  const sawFirst = new Promise((resolve) => { firstChunk = resolve })
+  const count = join(cwd, 'count')
+  const stalled = runSubprocessAsync(['sh', '-c', `i=0; while :; do i=$((i+1)); echo $i > ${JSON.stringify(count)}; echo tick; sleep 0.05; done`], {
+    cwd,
+    cancel: stallController.signal,
+    onOutput: () => { firstChunk(); return new Promise(() => {}) },
+  })
+  await sawFirst
+  stallController.abort()
+  const abandoned = await stalled
+  assert.equal(abandoned.termination, 'cancelled')
+  assert.equal(abandoned.callbackError, 'onOutput callback did not complete before teardown finished')
+  const attempted = Number(readFileSync(count, 'utf8'))
+  if (abandoned.stdoutTruncated) assert.ok(abandoned.stdoutBytes < attempted * 5, 'flagged truncated but nothing was lost')
+  else assert.ok(abandoned.stdoutBytes >= (attempted - 1) * 5, 'lost output without the truncated flag')
+  assert.equal(abandoned.stdout, 'tick\n'.repeat(abandoned.stdoutBytes / 5))
+  assert.ok(abandoned.durationSeconds < 3, 'stalled callback delayed cancellation teardown')
+
+  const refused = await runSubprocessAsync(['sh', '-c', 'echo go; sleep 30'], {
+    cwd,
+    onOutput: () => { throw new RangeError('refused') },
+  })
+  assert.equal(refused.termination, 'callback-error')
+  assert.equal(refused.callbackError, 'RangeError: refused')
+  assert.equal(refused.exitCode, -1)
+  assert.ok(refused.durationSeconds < 3, 'callback failure delayed teardown')
 
   // Hold the supervisor before its module loads, then kill its caller. It
   // must not mistake its new OS parent for the caller and launch an orphan.
@@ -118,7 +225,7 @@ try {
   assert.equal(built.status, 0, built.stderr)
   const bundled = spawnSync(process.execPath, [bundle], { encoding: 'utf8', timeout: 10_000, killSignal: 'SIGKILL' })
   assert.equal(bundled.status, 0, bundled.stderr)
-  console.log('PASS: bundled Node sync/async outcomes, startup cancellation and supervisor parent-death ownership')
+  console.log('PASS: bundled Node sync/async outcomes, streaming backpressure and I/O fields, startup cancellation and supervisor parent-death ownership')
 } finally {
   rmSync(cwd, { recursive: true, force: true })
 }

@@ -147,9 +147,11 @@ Keep the library narrow while qualifying optional agent SDK/protocol backends:
 - Challenge seeding, grading, ELO scoring — `agentelo`'s job.
 - Prompt mutation, GEPA, training loops — `hone`'s job.
 - Vertex / OAuth proxy shims — context-specific, lives in the consumer.
-- Streaming subprocess output callbacks — not implemented. Python `run()` and
-  the low-level synchronous subprocess helpers block. Python `run_async()` and
-  TypeScript `run()` / `runAsync()` provide cancellable async execution.
+- Streaming subprocess output callbacks — Python `run_async()` and TypeScript
+  `run()` / `runAsync()` support awaited, backpressured callbacks. Python `run()`
+  accepts cooperative synchronous callbacks; TS's blocking low-level helper
+  rejects callbacks. Both runtimes provide finite stdin, bounded capture and
+  opt-in inactivity deadlines. See SPEC's streaming contract before changing I/O.
 - Optional SDK/RPC backends are authorized scope but not implemented. They must
   satisfy SPEC ownership, permission, capability and compatibility requirements
   without importing SDKs for CLI callers or becoming a fleet/application layer.

@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Event
-from typing import TYPE_CHECKING, Literal, TypedDict, get_args
+from typing import TYPE_CHECKING, Awaitable, Callable, Literal, TypedDict, get_args
 
 from harness.model_normalization import normalize_model_for_harness
 
@@ -16,7 +16,19 @@ if TYPE_CHECKING:
 
 Backend = Literal["cli", "rpc", "sdk"]
 PermissionPolicy = Literal["upstream", "bypass"]
-Termination = Literal["exited", "signaled", "timed-out", "cancelled", "launch-failed"]
+Termination = Literal["exited", "signaled", "timed-out", "cancelled", "launch-failed", "callback-error"]
+TimeoutKind = Literal["wall", "inactivity"]
+OutputStream = Literal["stdout", "stderr"]
+#: Receives decoded output chunks as they arrive. Chunk boundaries are
+#: arbitrary (not line or JSONL framed); order is preserved per stream and
+#: unspecified across streams. Synchronous callbacks must return None and
+#: return promptly: they run cooperatively on the reading thread (`run`) or
+#: the caller's event loop (`run_async`) and cannot be preempted. Async
+#: callbacks are awaited one at a time on the caller's event loop; reading
+#: pauses (backpressure) until the awaited callback settles.
+OutputCallback = Callable[[str, OutputStream], "None | Awaitable[None]"]
+#: Default per-stream capture cap in raw bytes (1 MiB).
+DEFAULT_MAX_OUTPUT_BYTES = 1_048_576
 ErrorCode = Literal[
     "adapter-error",
     "unknown-harness",
@@ -88,7 +100,8 @@ class RunSpec:
                       (CLAUDE.md / AGENTS.md / GEMINI.md / ...). Planned by
                       `build_command`, projected into `workdir` by
                       `prepare_command` and restored by `cleanup_command`.
-    `timeout_seconds` — wall-clock cap. Adapter SHOULD enforce this.
+    `timeout_seconds` — wall-clock cap in seconds (default 1800). None
+                      disables it; zero expires immediately after launch.
     `env`           — caller environment additions layered over the adapter's
                       own additions; the inherited process environment is
                       applied at execution. Never mutated by harness.
@@ -117,6 +130,23 @@ class RunSpec:
     `cancel`        — optional threading.Event. Setting it returns a cancelled
                       result after owned-process cleanup; a set event launches
                       nothing. Async Task.cancel instead propagates CancelledError.
+    `stdin`         — UTF-8 text written to the child's stdin, then EOF. None
+                      or "" closes stdin immediately. Never rewritten; there is
+                      no prompt/approval channel.
+    `on_output`     — `OutputCallback` receiving decoded stdout/stderr chunks
+                      as they arrive (see `OutputCallback`). `run` accepts
+                      synchronous callbacks only; `run_async` also awaits
+                      async callbacks on the caller's event loop. A raised
+                      callback stops the run with `termination="callback-error"`.
+    `inactivity_timeout_seconds` — optional watchdog: seconds without any raw
+                      stdout/stderr byte before the run is stopped with
+                      `termination="timed-out"`, `timeout_kind="inactivity"`.
+                      Silence alone is not failure: None (default) disables it.
+                      Time spent waiting on an outstanding callback is excluded.
+    `max_output_bytes` — per-stream capture cap in raw bytes (default 1 MiB).
+                      Output beyond it is read and discarded, `RunResult`
+                      flags `stdout_truncated` / `stderr_truncated`, and
+                      callbacks still receive everything.
     """
 
     harness: str
@@ -124,7 +154,7 @@ class RunSpec:
     workdir: Path
     model: str | None = None
     instructions: str | None = None
-    timeout_seconds: float = 1800
+    timeout_seconds: float | None = 1800
     env: dict[str, str] = field(default_factory=dict)
     model_no_resolve: bool = False
     backend: Backend = "cli"
@@ -134,6 +164,10 @@ class RunSpec:
     config_home: Path | None = None
     config_file: Path | None = None
     cancel: Event | None = None
+    stdin: str | None = None
+    on_output: OutputCallback | None = None
+    inactivity_timeout_seconds: float | None = None
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
 
 
 @dataclass
@@ -235,7 +269,16 @@ class InstallMeta:
 
 @dataclass
 class RunResult:
-    """Structured outcome of a single harness invocation."""
+    """Structured outcome of a single harness invocation.
+
+    `stdout` / `stderr` hold the first `max_output_bytes` raw bytes of each
+    stream decoded as UTF-8; `stdout_bytes` / `stderr_bytes` count everything
+    the child wrote. `*_truncated` reports a cap hit or output lost to forced
+    pipe closure. `callback_error` records an `on_output` failure or a
+    callback still pending when teardown finished; `parse_error` records a
+    `parse_output` exception (metrics and `raw` are then None). `timeout_kind`
+    distinguishes the wall clock from the inactivity watchdog.
+    """
 
     harness: str
     model: str | None
@@ -251,10 +294,17 @@ class RunResult:
     termination: Termination | None = None
     signal: str | None = None
     launch_error: str | None = None
+    stdout_bytes: int = 0
+    stderr_bytes: int = 0
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    callback_error: str | None = None
+    timeout_kind: TimeoutKind | None = None
+    parse_error: str | None = None
 
     @property
     def ok(self) -> bool:
-        return self.exit_code == 0 and not self.timed_out
+        return self.exit_code == 0 and not self.timed_out and self.callback_error is None and self.parse_error is None
 
 
 @dataclass(frozen=True)
@@ -305,6 +355,29 @@ def snapshot_run_spec(spec: RunSpec) -> RunSpec:
     """Copy `spec` with its own `env` dict so later caller mutation cannot leak
     into an in-flight run."""
     return replace(spec, env=dict(spec.env))
+
+
+def _validate_run_io(spec: RunSpec, *, synchronous: bool = False) -> None:
+    """Apply the runner's I/O option rules to a RunSpec as `invalid-options`.
+
+    `synchronous` additionally rejects async `on_output` callbacks, which
+    the blocking entry point cannot await.
+    """
+    from harness._subproc import require_sync_callback, validate_io_options
+
+    try:
+        validate_io_options(
+            timeout_seconds=spec.timeout_seconds,
+            inactivity_timeout_seconds=spec.inactivity_timeout_seconds,
+            max_output_bytes=spec.max_output_bytes,
+            stdin=spec.stdin,
+            on_output=spec.on_output,
+        )
+        if synchronous:
+            require_sync_callback(spec.on_output)
+    except (TypeError, ValueError) as exc:
+        raise HarnessError(str(exc), code="invalid-options") from None
+
 
 
 class Adapter(ABC):
@@ -377,7 +450,8 @@ class Adapter(ABC):
         subprocess side effects. Raises `HarnessError` with a stable `code`.
 
         Order: backend, permission policy, native options, executable,
-        config_home, config_file, workdir.
+        config_home, config_file, workdir, run I/O options (timeouts,
+        stdin, on_output, max_output_bytes).
         """
         validate_backend(spec.backend)
 
@@ -430,6 +504,7 @@ class Adapter(ABC):
                 )
             _absolute_option("config_file", spec.config_file)
         absolute_workdir(spec.workdir)
+        _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
         if type(native) not in (ClaudeCodeOptions, CodexOptions):
@@ -568,6 +643,7 @@ class Adapter(ABC):
 
         spec = snapshot_run_spec(spec)
         bc = self._finalized(spec, self.build_command(spec))
+        _validate_run_io(spec, synchronous=True)
         prepared = prepare_command(bc)
         cleanup_safe = False
         try:
@@ -577,6 +653,10 @@ class Adapter(ABC):
                     cwd=bc.cwd,
                     timeout_seconds=spec.timeout_seconds,
                     extra_env=bc.env,
+                    stdin=spec.stdin,
+                    on_output=spec.on_output,
+                    inactivity_timeout_seconds=spec.inactivity_timeout_seconds,
+                    max_output_bytes=spec.max_output_bytes,
                     cancel=spec.cancel,
                 )
             except (ValueError, NotImplementedError, KeyboardInterrupt, SystemExit):
@@ -596,6 +676,7 @@ class Adapter(ABC):
 
         spec = snapshot_run_spec(spec)
         bc = self._finalized(spec, self.build_command(spec))
+        _validate_run_io(spec)
         prepared = prepare_command(bc)
         cleanup_safe = False
         try:
@@ -605,6 +686,10 @@ class Adapter(ABC):
                     cwd=bc.cwd,
                     timeout_seconds=spec.timeout_seconds,
                     extra_env=bc.env,
+                    stdin=spec.stdin,
+                    on_output=spec.on_output,
+                    inactivity_timeout_seconds=spec.inactivity_timeout_seconds,
+                    max_output_bytes=spec.max_output_bytes,
                     cancel=spec.cancel,
                 )
             except asyncio.CancelledError as error:
@@ -621,7 +706,14 @@ class Adapter(ABC):
                 cleanup_command(prepared)
 
     def _run_result(self, spec: RunSpec, built: BuildCommand, outcome: SubprocOutcome) -> RunResult:
-        parsed = self.parse_output(spec, outcome)
+        parsed: ParsedOutput | dict = {}
+        parse_error = None
+        try:
+            parsed = self.parse_output(spec, outcome)
+        except Exception as exc:
+            # Terminal stdout/stderr survive a parser failure; only the
+            # metrics become unknown. Direct `parse_output` stays strict.
+            parse_error = f"{type(exc).__name__}: {exc}"
         return RunResult(
             harness=self.name,
             model=built.model,
@@ -637,6 +729,13 @@ class Adapter(ABC):
             tokens_in=parsed.get("tokens_in"),
             tokens_out=parsed.get("tokens_out"),
             raw=parsed.get("raw"),
+            stdout_bytes=outcome.stdout_bytes,
+            stderr_bytes=outcome.stderr_bytes,
+            stdout_truncated=outcome.stdout_truncated,
+            stderr_truncated=outcome.stderr_truncated,
+            callback_error=outcome.callback_error,
+            timeout_kind=outcome.timeout_kind,
+            parse_error=parse_error,
         )
 
     # ---- session-aware (optional; None = not supported by this adapter) --

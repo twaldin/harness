@@ -1,7 +1,7 @@
 import type { Adapter, Backend, BuildCommand, Capabilities, ParsedOutput, RunResult, RunSpec, SubprocOutcome } from './base.js'
 import { HarnessError, finalizeCommand, resolveBackend, validateRunSpec } from './base.js'
 import { cleanupCommand, prepareCommand } from './instructions.js'
-import { runSubprocessAsync } from './subproc.js'
+import { describeError, prepareLaunch, runLifecycle } from './lifecycle.js'
 
 const registry = new Map<string, Adapter>()
 
@@ -41,7 +41,7 @@ export function getCapabilities(name: string, backend: Backend = 'cli'): Capabil
     nativeOptions: adapter.nativeOptionsKind ?? null,
     configHomeEnv: adapter.configHomeEnv ?? null,
     configFileFlag: adapter.configFileFlag ?? null,
-    streaming: false,
+    streaming: true,
     cancellation: true,
     sessions: false,
   }
@@ -64,30 +64,39 @@ export function parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutpu
   return adapter.parseOutput(spec, outcome)
 }
 
-/** Caller-owned spec and env are copied before command planning and execution. */
+/**
+ * Caller-owned spec and env are copied before command planning and execution.
+ * Run I/O options are validated before the workdir is touched, so a bad
+ * option never leaves a lease behind. A parser exception becomes
+ * `parseError` with null metrics; the process outcome is kept.
+ */
 async function execute(spec: RunSpec): Promise<RunResult> {
   const frozen = spec.env === undefined ? { ...spec } : { ...spec, env: { ...spec.env } }
   const adapter = getAdapter(frozen.harness)
   const built = buildCommand(frozen)
+  const request = prepareLaunch([built.cmd, ...built.args], {
+    cwd: built.cwd,
+    timeoutSeconds: frozen.timeoutSeconds,
+    inactivityTimeoutSeconds: frozen.inactivityTimeoutSeconds,
+    maxOutputBytes: frozen.maxOutputBytes,
+    stdin: frozen.stdin,
+    onOutput: frozen.onOutput,
+    extraEnv: built.env,
+    cancel: frozen.cancel,
+  })
   const prepared = prepareCommand(built)
   let cleanupSafe = false
   try {
-    let outcome: SubprocOutcome
-    try {
-      outcome = await runSubprocessAsync([built.cmd, ...built.args], {
-        cwd: built.cwd,
-        timeoutSeconds: frozen.timeoutSeconds,
-        extraEnv: built.env,
-        cancel: frozen.cancel,
-      })
-    } catch (error) {
-      // Only validation errors prove that no child was launched.
-      cleanupSafe = error instanceof HarnessError
-        && (error.code === 'invalid-options' || error.code === 'unsupported-capability')
-      throw error
-    }
+    // Only a resolved outcome proves the group is stopped; a rejection here is a teardown failure.
+    const outcome = await runLifecycle(request, frozen.cancel, undefined, frozen.onOutput)
     cleanupSafe = true
-    const parsed = adapter.parseOutput(frozen, outcome)
+    let parsed: ParsedOutput = { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
+    let parseError: string | null = null
+    try {
+      parsed = adapter.parseOutput(frozen, outcome)
+    } catch (error) {
+      parseError = describeError(error)
+    }
     return {
       harness: frozen.harness,
       model: built.model === undefined ? frozen.model || adapter.defaultModel : built.model,
@@ -99,6 +108,13 @@ async function execute(spec: RunSpec): Promise<RunResult> {
       termination: outcome.termination,
       signal: outcome.signal,
       launchError: outcome.launchError,
+      stdoutBytes: outcome.stdoutBytes,
+      stderrBytes: outcome.stderrBytes,
+      stdoutTruncated: outcome.stdoutTruncated,
+      stderrTruncated: outcome.stderrTruncated,
+      callbackError: outcome.callbackError,
+      timeoutKind: outcome.timeoutKind,
+      parseError,
       costUsd: parsed.costUsd,
       tokensIn: parsed.tokensIn,
       tokensOut: parsed.tokensOut,

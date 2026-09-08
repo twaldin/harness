@@ -24,6 +24,7 @@ const SLACK = 1.5
 
 /** `ps` state letters, or null when the kernel no longer knows the pid. Zombies report `Z`. */
 function processState(pid: number): string | null {
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`invalid recorded PID: ${pid}`)
   try {
     process.kill(pid, 0)
   } catch (error) {
@@ -136,7 +137,8 @@ describe('timeout', () => {
     const dir = treeDir()
     const outcome = await runSubprocessAsync(fixtureCmd('solo', dir), { cwd: dir, timeoutSeconds: 1 })
     expect(outcome.termination).toBe('timed-out')
-    const leader = recorded(dir).leader!
+    const leader = recorded(dir).leader
+    if (leader === undefined) throw new Error('fixture did not record its leader PID')
     expect(await waitGone([leader], 500)).toEqual([])
     expect(isZombie(leader)).toBe(false)
   })

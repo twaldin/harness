@@ -153,6 +153,8 @@ def _run_subprocess(
         # Pipes can be held by a deliberately detached process outside our
         # group. Closing our endpoints is bounded; waiting for its EOF isn't.
         if proc.returncode is None:
+            # Preserve TimeoutExpired if the leader cannot be reaped within
+            # the existing budget; never manufacture a completed outcome.
             proc.wait(timeout=max(0, drain_end - time.monotonic()))
         if group_error is not None:
             raise group_error

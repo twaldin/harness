@@ -61,7 +61,7 @@ interface BuildCommand {
 interface RunResult {
   harness: string
   model: string | null
-  exitCode: number                 // -1 on timeout
+  exitCode: number                 // -1 for timeout/cancel/launch failure; termination disambiguates
   durationSeconds: number
   stdout: string
   stderr: string
@@ -169,7 +169,9 @@ construction retains `adapter-error`.
 Non-zero subprocess exit, timeout, explicit cancellation and OS launch failure
 are represented in `RunResult`, not `HarnessError`. Python task cancellation
 propagates `CancelledError` after cleanup. Invalid low-level arguments and
-unsupported operating systems raise before launch. See
+unsupported operating systems raise before launch. Cleanup failures (including
+failure to reap the leader within the cleanup deadline) raise rather than
+returning a result that falsely implies completed cleanup. See
 [ownership and execution](#ownership-and-execution).
 
 ### Backend selection and capabilities

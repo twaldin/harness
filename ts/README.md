@@ -147,7 +147,7 @@ interface RunSpec {
 interface RunResult {
   harness: string
   model: string | null
-  exitCode: number           // -1 on timeout
+  exitCode: number           // -1 for timeout/cancel/launch failure; termination disambiguates
   durationSeconds: number
   stdout: string
   stderr: string

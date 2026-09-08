@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain seventeen adapters, with shared fixture files:
+After adapter initialization, both registries contain eighteen adapters, with shared fixture files:
 `aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `factory-droid`,
-`gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
+`gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
@@ -46,6 +46,8 @@ upstream compatibility.
 - `hermes` now ships local quiet chat in both languages ([TWA-73](https://linear.app/twaldin/issue/TWA-73)).
   See its [qualification and smoke limits](ADAPTER-MATRIX.md#hermes); the gateway,
   controlled sessions and machine-readable usage are not part of this adapter.
+- `goose` now ships local `run` with JSONL output in both languages ([TWA-74](https://linear.app/twaldin/issue/TWA-74)).
+  See its [setup, permissions and detached-extension limits](ADAPTER-MATRIX.md#goose).
 - Refresh the shipped set in [TWA-68](https://linear.app/twaldin/issue/TWA-68).
   Pi's current upstream advertises `@earendil-works/pi-coding-agent`
   ([upstream](https://github.com/earendil-works/pi)); the checked-in adapter
@@ -84,18 +86,6 @@ specific checks supplement the [common validation scope](#validation-and-mainten
   Do not implement cleanup with global `shutdown` or manage unrelated background
   agents. Its own subagents do not make the single-run CLI an orchestration API.
 
-### Goose — [TWA-74](https://linear.app/twaldin/issue/TWA-74)
-
-- **Identity / maintenance:** [aaif-goose/goose](https://github.com/aaif-goose/goose),
-  Apache-2.0; v1.49.0 released September 3. `block/goose` redirects here: this was
-  a repository transfer, not a separate fork. The README's release installer
-  `releases/download/stable/download_cli.sh` supplies `goose`.
-- **Path:** [`goose run -q --output-format json --no-session -t "PROMPT"`](https://goose-docs.ai/docs/guides/goose-cli-commands).
-- **Gate / validation:** provider-specific auth, explicit model/tool extensions and
-  permission configuration. [Output source](https://github.com/aaif-goose/goose/blob/main/crates/goose-cli/src/session/mod.rs)
-  exposes input/output/cache totals and optional `cost_usd`. Verify JSON metadata
-  versus stream-json completion events, absent pricing and accumulation; do not
-  assume session export is JSONL or that an estimate proves billed spend.
 
 
 

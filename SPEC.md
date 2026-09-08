@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (16 adapters)
+│   ├── adapters/*.py       (17 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "cline" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "copilot"
+  harness: string                  // "claude-code" | "cline" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "copilot" | "goose"
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -242,7 +242,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All seventeen CLI adapters share these lifecycle capabilities.
+for sessions. All eighteen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -251,7 +251,7 @@ installation/authentication/version checks; see the adapter matrix for evidence.
 
 ### Permission policy and migration
 
-Omitted policy and `"upstream"` mean Harness adds no approval/bypass flag unless
+Omitted policy and `"upstream"` mean Harness adds no approval/bypass flag or mode environment override unless
 the caller explicitly supplies a native override such as `ClineOptions.autoApprove`.
 Upstream policy still depends on the selected tool, its headless mode, caller
 environment and existing configuration. This does **not** promise a sandbox,
@@ -261,7 +261,7 @@ approval request by silently escalating.
 
 `"bypass"` is an explicit request to use the adapter's documented bypass mapping:
 
-| adapter | explicit bypass flag |
+| adapter | explicit bypass mapping |
 |---|---|
 | claude-code, openclaude | `--dangerously-skip-permissions` |
 | codex | `--dangerously-bypass-approvals-and-sandbox` (also disables sandboxing) |
@@ -272,6 +272,7 @@ approval request by silently escalating.
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
 | cline | `--auto-approve true` |
+| goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
 
 The other four adapters reject `"bypass"` as unsupported; a missing mapping is
@@ -582,6 +583,17 @@ configuration selects the model.
 }
 ```
 
+### goose
+
+`raw` retains typed JSONL objects from `goose run --quiet --output-format stream-json`.
+The last `complete` event supplies optional cumulative `input_tokens`,
+`output_tokens` and `cost_usd`; no complete means null metrics with partial
+events retained. Upstream cost can be estimated, not necessarily billed spend.
+An upstream provider error can emit `error`, then `complete`, and exit zero:
+inspect `raw` for agent failure; Harness preserves the actual process status.
+Setup and noninteractive approval failures can exit nonzero without `complete`.
+See [Goose](ADAPTER-MATRIX.md#goose) for its config, output and teardown limits.
+
 ### copilot
 
 `raw` is the ordered array of complete JSON objects from stdout, including
@@ -608,7 +620,7 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `hermes` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `hermes`, `goose` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
@@ -687,6 +699,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | codex | `CODEX_HOME` | unsupported |
 | hermes | `HERMES_HOME` | unsupported |
 | cline | `CLINE_DIR` | unsupported |
+| goose | `GOOSE_PATH_ROOT` | unsupported |
 | copilot | `COPILOT_HOME` | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
@@ -708,7 +721,7 @@ Raw `HOME`, `XDG_*` and native env overrides remain caller-controlled; passing
 an env variable does not claim the upstream supports it or separates credentials.
 Harness does not rewrite a user's settings to make a model selection stick.
 An omitted/empty model retains the existing adapter default contract; for Hermes,
-Cline and Copilot that contract is no `--model` flag and a null reported model.
+Cline, Goose and Copilot that contract is no `--model` flag and a null reported model.
 
 OMP preserves the requested model string, including unknown provider prefixes;
 it does not apply Pi's `openai-codex/` inference. An explicit OMP `configHome`
@@ -726,6 +739,14 @@ Native provider and approval choices are independent of the model. `configHome`
 selects existing Cline configuration; upstream writes still occur in that home.
 See the [Cline adapter reference](ADAPTER-MATRIX.md#cline) for the exact env
 contract, instruction attachment, event parsing, cancellation and coverage limits.
+
+Goose preserves explicit model IDs without provider inference. `GOOSE_PROVIDER`
+and extensions remain caller-configured. `GOOSE_PATH_ROOT` relocates config,
+data and state directories, but system config, additional config paths and
+project discovery can still apply; it is not credential isolation. Instructions
+use `--system=<text>` without a projected file. See the
+[Goose adapter reference](ADAPTER-MATRIX.md#goose) for official sources and
+the observed macOS stdio-extension process-group escape.
 
 Continue no longer generates YAML containing API keys. Its former explicit
 OpenAI-compatible env branch requires a caller-selected `configFile`.
@@ -1260,7 +1281,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "claude-code", "codex", "continue-cli", "crush", "factory-droid", "gemini", "hermes", "kilo", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "claude-code", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)
@@ -1304,7 +1325,7 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.8` and TypeScript `0.2.12`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.9` and TypeScript `0.2.13`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

@@ -2,6 +2,17 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added the standalone `cline` CLI adapter in Python and TypeScript, with native
+  provider/approval options, `CLINE_DIR`, explicit instruction attachment and
+  terminal NDJSON usage. Upstream defaults to auto-approval.
+  Cline selects one SIGINT through the shared lifecycle engine; other adapters
+  retain SIGTERM. External command drivers must honor the planned graceful signal.
+  See [setup, cancellation and provider coverage limits](ADAPTER-MATRIX.md#cline).
+- Added `goose` in Python and TypeScript using the official headless JSONL CLI
+  and shared subprocess lifecycle. Preserves caller-selected model/provider/extensions,
+  supports inline instructions, `GOOSE_PATH_ROOT` and explicit `GOOSE_MODE=auto`,
+  and retains final cumulative usage plus native error events.
+  See [setup, synthetic-provider smoke and extension cleanup limits](ADAPTER-MATRIX.md#goose).
 - Added `copilot` in Python and TypeScript for the current official GitHub Copilot
   CLI, with JSONL native events, explicit `CopilotOptions` tool allow/deny rules,
   opt-in bypass and `COPILOT_HOME` selection through the shared subprocess lifecycle.
@@ -47,8 +58,8 @@
   continues the batch without executing an unsupported request.
 - Expanded [SPEC](SPEC.md) with ownership, future backend/session gates,
   telemetry limits, and paired migration examples. Existing results remain
-  compatible; versions are unchanged and these source changes are not yet a
-  package release.
+  compatible; these source changes are not yet a package release. Paired
+  fixture-update patch bumps follow SPEC and do not publish packages.
 
 ## 2026-05-06 (later)
 

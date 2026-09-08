@@ -41,7 +41,7 @@ ErrorCode = Literal[
     "protocol-error",
     "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe", "kiro"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 #: Signal the runner sends the owned process group once before escalating to
@@ -153,7 +153,26 @@ class VibeOptions:
     trust: bool | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions
+@dataclass(frozen=True)
+class KiroOptions:
+    """Typed `kiro-cli chat` headless knobs. `trust_tools` is emitted as
+    `--trust-tools=<value>` and `require_mcp_startup` as a bare
+    `--require-mcp-startup` when True, in that order.
+
+    `trust_tools` is upstream's comma-separated tool-category list (e.g.
+    `"read,grep"`), passed through verbatim without NUL bytes. An empty string
+    explicitly trusts no tools; whitespace-only strings are invalid.
+    It conflicts with `permission_policy="bypass"` (`--trust-all-tools`) and
+    the pair is rejected with `invalid-options`. `require_mcp_startup=False`
+    injects nothing.
+    """
+
+    kind: Literal["kiro"] = field(default="kiro", init=False)
+    trust_tools: str | None = None
+    require_mcp_startup: bool | None = None
+
+
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
 
 
 @dataclass
@@ -188,7 +207,8 @@ class RunSpec:
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
                       `CodexOptions`, `ClineOptions`, `CopilotOptions`,
-                      `AmpOptions`, `VibeOptions`). The kind must match `harness`.
+                      `AmpOptions`, `VibeOptions`, `KiroOptions`). The kind
+                      must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -601,9 +621,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions or VibeOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions or KiroOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -660,6 +680,21 @@ class Adapter(ABC):
                     f"mistral-vibe trust must be None or a bool, got {type(trust).__name__}",
                     code="invalid-options",
                 )
+        elif isinstance(native, KiroOptions):
+            trust_tools = native.trust_tools
+            if trust_tools is not None and (not isinstance(trust_tools, str) or (trust_tools != "" and not trust_tools.strip()) or "\0" in trust_tools):
+                raise HarnessError("kiro trust_tools must be None, empty (trust none), or a non-blank string without NUL bytes", code="invalid-options")
+            if trust_tools is not None and spec.permission_policy == "bypass":
+                raise HarnessError(
+                    "kiro trust_tools conflicts with permission_policy='bypass' (bypass is --trust-all-tools); choose one",
+                    code="invalid-options",
+                )
+            require_mcp_startup = native.require_mcp_startup
+            if require_mcp_startup is not None and type(require_mcp_startup) is not bool:
+                raise HarnessError(
+                    f"kiro require_mcp_startup must be None or a bool, got {type(require_mcp_startup).__name__}",
+                    code="invalid-options",
+                )
 
     def resolve_run_spec(self, spec: RunSpec) -> ResolvedSpec:
         """Validate `spec` and resolve the adapter-facing model and extra argv.
@@ -694,6 +729,11 @@ class Adapter(ABC):
                 native_args += (f"--agent={native.agent}",)
             if native.trust is True:
                 native_args += ("--trust",)
+        elif isinstance(native, KiroOptions):
+            if native.trust_tools is not None:
+                native_args += (f"--trust-tools={native.trust_tools}",)
+            if native.require_mcp_startup is True:
+                native_args += ("--require-mcp-startup",)
         config_args: tuple[str, ...] = ()
         if spec.config_file is not None:
             config_args = (self.config_file_flag, str(Path(spec.config_file)))  # type: ignore[assignment]

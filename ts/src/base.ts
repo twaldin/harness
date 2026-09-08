@@ -69,8 +69,20 @@ export interface VibeOptions {
   trust?: boolean
 }
 
+export interface KiroOptions {
+  kind: 'kiro'
+  /**
+   * Emitted verbatim as `--trust-tools=<value>` (Kiro's own comma-separated
+   * tool-name grammar applies inside the value); empty explicitly trusts no tools. Conflicts with
+   * `permissionPolicy: 'bypass'` (which is `--trust-all-tools`).
+   */
+  trustTools?: string
+  /** Emitted as the bare `--require-mcp-startup` flag when true and omitted when false. */
+  requireMcpStartup?: boolean
+}
+
 /** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
-export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions
+export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions
 
 export type OutputStream = 'stdout' | 'stderr'
 
@@ -424,6 +436,8 @@ type NativeField =
   | { readonly shape: 'nonblank'; readonly flag: string }
   /** Non-blank NUL-free identifier emitted as `flag=value` (equals form survives names starting with '-'). */
   | { readonly shape: 'name'; readonly flag: string }
+  /** Native tool set emitted as `flag=value`; empty explicitly trusts no tools. */
+  | { readonly shape: 'tool-set'; readonly flag: string }
 /** Per native-options kind: field name → schema. Field order is argv order. */
 const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Record<string, NativeField>>>> = {
   'claude-code': {
@@ -446,6 +460,10 @@ const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Reco
   'mistral-vibe': {
     agent: { shape: 'name', flag: '--agent' },
     trust: { shape: 'switch', flag: '--trust' },
+  },
+  kiro: {
+    trustTools: { shape: 'tool-set', flag: '--trust-tools' },
+    requireMcpStartup: { shape: 'switch', flag: '--require-mcp-startup' },
   },
 }
 const NATIVE_OPTION_KINDS = Object.keys(NATIVE_OPTION_FIELDS).map((kind) => JSON.stringify(kind)).join(', ')
@@ -524,9 +542,10 @@ function resolveNativeOptions(adapter: Adapter, spec: RunSpec): ResolvedNativeOp
         throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a ${expected} string without NUL bytes`, 'invalid-options')
       }
       args.push(field.flag, value)
-    } else if (field.shape === 'name') {
-      if (typeof value !== 'string' || value.trim() === '' || value.includes('\0')) {
-        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a non-blank string without NUL bytes`, 'invalid-options')
+    } else if (field.shape === 'name' || field.shape === 'tool-set') {
+      const emptySet = field.shape === 'tool-set' && value === ''
+      if (typeof value !== 'string' || (!emptySet && value.trim() === '') || value.includes('\0')) {
+        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a non-blank string without NUL bytes${field.shape === 'tool-set' ? ' or empty to trust no tools' : ''}`, 'invalid-options')
       }
       args.push(`${field.flag}=${value}`)
     } else {
@@ -607,6 +626,12 @@ export function validateRunSpec(adapter: Adapter, spec: RunSpec): ValidatedRunSp
   if (nativeOptions?.kind === 'cline' && nativeOptions.autoApprove !== undefined && permissionPolicy === 'bypass') {
     throw new HarnessError(
       'nativeOptions.autoApprove conflicts with permissionPolicy "bypass" (cline bypass is --auto-approve true); choose one',
+      'invalid-options',
+    )
+  }
+  if (nativeOptions?.kind === 'kiro' && nativeOptions.trustTools !== undefined && permissionPolicy === 'bypass') {
+    throw new HarnessError(
+      'nativeOptions.trustTools conflicts with permissionPolicy "bypass" (kiro bypass is --trust-all-tools); choose one',
       'invalid-options',
     )
   }

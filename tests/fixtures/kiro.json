@@ -1,0 +1,440 @@
+{
+  "spec": {
+    "harness": "kiro",
+    "prompt": "Summarize the synthetic repository.",
+    "instructions": "Use only the synthetic repository.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "kiro-cli",
+    "args": [
+      "chat",
+      "--no-interactive",
+      "--agent-engine",
+      "v2",
+      "--output-format",
+      "stream-json",
+      "--",
+      "Summarize the synthetic repository."
+    ],
+    "cwd": "<workdir>",
+    "env": {},
+    "instructionsFile": "<workdir>/AGENTS.md",
+    "directories": [],
+    "model": null
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": "kiro",
+    "configHomeEnv": null,
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.1,
+    "timedOut": false,
+    "stdout": "{\"type\":\"synthetic-success\",\"text\":\"One source file.\"}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": null,
+    "tokensIn": null,
+    "tokensOut": null,
+    "raw": [
+      {
+        "type": "synthetic-success",
+        "text": "One source file."
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "explicit-trust-none",
+      "spec": {"nativeOptions": {"kind": "kiro", "trustTools": ""}},
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": ["chat", "--no-interactive", "--agent-engine", "v2", "--output-format", "stream-json", "--trust-tools=", "--", "Summarize the synthetic repository."],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "trust-none-conflicts-with-bypass",
+      "spec": {"permissionPolicy": "bypass", "nativeOptions": {"kind": "kiro", "trustTools": ""}},
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "native-auth-failure",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "",
+        "stderr": "Authentication required.\n"
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "partial-output-on-failure",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"synthetic-success\",\"text\":\"One source file.\"}\n{\"type\":",
+        "stderr": ""
+      }
+    },
+    {
+      "name": "mcp-startup-failure-retains-events",
+      "sampleOutput": {
+        "exitCode": 3,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"synthetic-error\",\"message\":\"MCP startup failed\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "synthetic-error",
+            "message": "MCP startup failed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "noise-nonobjects-and-incomplete-lines",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "noise\nnull\n[]\n42\n{\"bad\":NaN}\n{\"bad\":Infinity}\n{\"type\":\"synthetic-success\",\"text\":\"One source file.\"}",
+        "stderr": ""
+      }
+    },
+    {
+      "name": "unknown-events-remain-opaque",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.1,
+        "timedOut": false,
+        "stdout": "{\"type\":\"future\",\"usage\":{\"input_tokens\":100},\"cost\":2}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "type": "future",
+            "usage": {
+              "input_tokens": 100
+            },
+            "cost": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "trusted-tool-subset-and-required-mcp",
+      "spec": {
+        "nativeOptions": {
+          "kind": "kiro",
+          "trustTools": "read,grep",
+          "requireMcpStartup": true
+        }
+      },
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": [
+          "chat",
+          "--no-interactive",
+          "--agent-engine",
+          "v2",
+          "--output-format",
+          "stream-json",
+          "--trust-tools=read,grep",
+          "--require-mcp-startup",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-bypass",
+      "spec": {
+        "permissionPolicy": "bypass"
+      },
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": [
+          "chat",
+          "--no-interactive",
+          "--agent-engine",
+          "v2",
+          "--output-format",
+          "stream-json",
+          "--trust-all-tools",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "native-false-preserves-upstream",
+      "spec": {
+        "nativeOptions": {
+          "kind": "kiro",
+          "requireMcpStartup": false
+        }
+      },
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": [
+          "chat",
+          "--no-interactive",
+          "--agent-engine",
+          "v2",
+          "--output-format",
+          "stream-json",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "exact-model-and-leading-hyphen-prompt",
+      "spec": {
+        "model": "  custom/provider/model  ",
+        "prompt": "--trust-all-tools"
+      },
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": [
+          "chat",
+          "--no-interactive",
+          "--agent-engine",
+          "v2",
+          "--output-format",
+          "stream-json",
+          "--model=custom/provider/model",
+          "--",
+          "--trust-all-tools"
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "  custom/provider/model  "
+      }
+    },
+    {
+      "name": "empty-model-upstream-selection",
+      "spec": {
+        "model": ""
+      },
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": [
+          "chat",
+          "--no-interactive",
+          "--agent-engine",
+          "v2",
+          "--output-format",
+          "stream-json",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "no-instruction-projection",
+      "spec": {
+        "instructions": null
+      },
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": [
+          "chat",
+          "--no-interactive",
+          "--agent-engine",
+          "v2",
+          "--output-format",
+          "stream-json",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {},
+        "instructionsFile": null,
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "explicit-child-environment",
+      "spec": {
+        "env": {
+          "KIRO_API_KEY": "synthetic-fixture-not-a-credential"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "kiro-cli",
+        "args": [
+          "chat",
+          "--no-interactive",
+          "--agent-engine",
+          "v2",
+          "--output-format",
+          "stream-json",
+          "--",
+          "Summarize the synthetic repository."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "KIRO_API_KEY": "synthetic-fixture-not-a-credential"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": null
+      }
+    },
+    {
+      "name": "empty-prompt",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "conflicting-permission-choices",
+      "spec": {
+        "permissionPolicy": "bypass",
+        "nativeOptions": {
+          "kind": "kiro",
+          "trustTools": "read"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "blank-trust-tools",
+      "spec": {
+        "nativeOptions": {
+          "kind": "kiro",
+          "trustTools": "  "
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "nul-in-trust-tools",
+      "spec": {
+        "nativeOptions": {
+          "kind": "kiro",
+          "trustTools": "read\u0000write"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "trust-tools-not-string",
+      "spec": {
+        "nativeOptions": {
+          "kind": "kiro",
+          "trustTools": [
+            "read"
+          ]
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "mcp-switch-not-boolean",
+      "spec": {
+        "nativeOptions": {
+          "kind": "kiro",
+          "requireMcpStartup": "true"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "unsupported-engine-selection",
+      "spec": {
+        "nativeOptions": {
+          "kind": "kiro",
+          "engine": "v3"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "unsupported-config-file",
+      "spec": {
+        "configFile": "<root>/config.json"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "unsupported-config-home",
+      "spec": {
+        "configHome": "<root>/home"
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "unsupported-sdk",
+      "spec": {
+        "backend": "sdk"
+      },
+      "expectedError": "unsupported-backend"
+    },
+    {
+      "name": "unsupported-rpc",
+      "spec": {
+        "backend": "rpc"
+      },
+      "expectedError": "unsupported-backend"
+    }
+  ]
+}

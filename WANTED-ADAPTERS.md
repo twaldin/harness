@@ -60,8 +60,10 @@ upstream compatibility.
   that unanswered decision. Do not create another Pi owner.
 - Oh My Pi (`omp`) now ships in both languages through [TWA-70](https://linear.app/twaldin/issue/TWA-70).
   See [its adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for current
-  installation, headless behavior and qualification limits. RPC and optional
-  SDK support remain separate work.
+  installation, headless behavior and qualification limits. Optional SDK sessions
+  now ship in both languages through [TWA-85](https://linear.app/twaldin/issue/TWA-85);
+  see the [owned Bun bridge contract](SPEC.md#optional-omp-sdk-sessions).
+  OMP RPC remains unsupported.
 - Cline CLI now ships in both languages through [TWA-75](https://linear.app/twaldin/issue/TWA-75).
   See [setup, local ownership and qualification limits](ADAPTER-MATRIX.md#cline).
   It uses standalone foreground JSON and SIGINT teardown; controlled sessions,

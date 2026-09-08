@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC sessions and optional externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to controlled sessions and future backends; SDK execution remains unsupported.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC and optional OMP SDK sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -1456,11 +1456,115 @@ Sources refreshed September 8:
 [Pi session implementation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/agent-session.ts),
 [OMP RPC differences](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md).
 
+## Optional OMP SDK sessions
+
+`open_session` / `openSession` also accept `harness: "omp", backend: "sdk"`.
+They retain the session types, serial turns, event queues, native references,
+deadlines, instruction lease, interruption and owned disposal described above.
+The one-shot `RunSpec` API remains CLI-only; there is no automatic fallback.
+
+### Explicit dependencies and host-local configuration
+
+The qualified SDK is **`@oh-my-pi/pi-coding-agent` 18.1.14**, with **Bun
+>=1.3.14**. Other package names/versions reject at startup (`launch-failed`).
+Install the SDK separately in a caller-owned project. Harness does not install
+it, declare it as a mandatory dependency, or load it during ordinary imports,
+CLI execution or capability queries.
+
+Both languages use the **same shipped Bun bridge worker**, hosting one native
+`createAgentSession` per owned process. This is a supported Python and Node
+bridge, not a native Python SDK or in-process embedding into the caller's
+TypeScript runtime. OMP imports mutate process-global environment/discovery
+state and register CLI-oriented signal handlers; process isolation prevents
+these from changing the caller's OMP settings, environment, cwd or listeners.
+The worker owns its own termination handlers and calls native SDK disposal.
+
+`SessionSpec.omp_sdk` / `ompSdk` is required for OMP SDK and rejected for Pi RPC.
+The exported `OmpSdkOptions` has three required fields:
+
+| TypeScript / Python | meaning |
+|---|---|
+| `packageRoot` / `package_root` | absolute directory of the installed SDK package, containing its `package.json` |
+| `agentDir` / `agent_dir` | absolute caller-selected OMP profile/state directory |
+| `auth` | `"local"` opens `<agentDir>/agent.db`; `"environment"` uses an in-memory credential database |
+
+`executable` selects Bun (bare name or absolute path), default `bun`.
+`model` is the native model pattern, trimmed but otherwise unchanged; omission
+retains native model/config/resume selection. Native fallback notices remain
+visible as `harness_model_fallback` events. Both auth modes preserve upstream
+environment, dotenv and `models.yml` key resolution. `"environment"` means
+no persisted credential database is opened for authentication, not an
+environment whitelist or a promise of no upstream state writes. `"local"`
+permits native credential-store schema/cache writes and OAuth refresh in the
+selected database; Harness neither copies credentials nor discovers a broker.
+
+The worker pins OMP's default profile resolver and both agent/config roots to
+`agentDir` before importing the SDK. It translates the config root into OMP's
+HOME-relative `PI_CONFIG_DIR` format. Conflicting explicit
+`PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`, `OMP_PROFILE` or `PI_PROFILE` entries
+reject before preparation. Inherited named profiles cannot redirect this
+selection. Other environment entries are inherited and overlaid as usual.
+`Settings.loadReadOnly` avoids settings migration/persistence; native model
+configuration, caches, session files and tools can still perform upstream
+writes in their selected locations. This is not a filesystem sandbox.
+
+`--no-env-file` disables **Bun's** automatic dotenv loading, not OMP's own
+profile/project/HOME dotenv loading. Native project discovery, configured
+extensions, tools, MCP and permission defaults remain upstream behavior.
+Choose a trusted profile/workdir and set child `HOME` explicitly when isolation
+from ambient home configuration is required. No approval-response channel or
+permission bypass is exposed; unsupported common operations reject rather than
+being simulated. Custom SDK objects, steering, queued follow-up, forks and
+arbitrary native method calls have no Harness mapping.
+
+### SDK events, settlement and resume
+
+`get_session_capabilities("omp", "sdk")` /
+`getSessionCapabilities("omp", "sdk")` reports `backend: "sdk"`, with events,
+interrupt, follow-up and resume true; concurrent turns and approval false.
+It reports implemented behavior, not installed dependencies or authentication.
+
+SDK subscriptions feed the same bounded async event streams. Events carry
+`backend: "sdk", harness: "omp"` and retain the complete native event in `raw`;
+transport wrappers are not exposed. Request responses carry bridge request
+IDs, not invented upstream request IDs. Native `agent_end` snapshots remain
+available, including `isTerminal: false`, unknown events and usage fields.
+Do not sum repeated cumulative usage snapshots.
+
+Completion waits for the native `prompt()` promise, `waitForIdle()` and pending
+owner-scoped async work, never an intermediate `agent_end` or Pi's
+`agent_settled`. SDK-local commands can finish without a model event.
+Thrown prompt errors produce `agent-error` with an explicitly identified
+`sdk_settled` bridge error in `raw`; assistant errors/aborts retain native
+`agent_end`. Native abort acknowledgement and turn settlement must both finish
+before follow-up. An interrupt that cannot settle reaches the configured
+request deadline and owned teardown rather than pretending to have stopped.
+
+Native session files/IDs are preserved. Resume validates the exact ID/workdir
+before startup and again after opening the SDK manager. OMP's optional leading
+title record is accepted only for this backend; it does not weaken Pi framing.
+Close unsubscribes, calls `beginDispose`/`dispose`, closes the owned auth store,
+and retains persisted history. The existing 500 ms TERM / KILL / 1000 ms drain
+bound applies. Failed or forced SDK disposal raises `adapter-error` after owned
+cleanup instead of claiming native disposal succeeded.
+
+Shared `tests/omp_sdk_cases.json` and a synthetic SDK package exercise the
+actual bridge in Python, Bun and packaged Node without provider dependencies.
+Native 18.1.14/Bun 1.3.14 qualification uses isolated homes and a local
+synthetic SSE provider, separate from credentialed provider success. No real
+provider success or cross-version SDK compatibility is claimed.
+
+Sources refreshed September 8:
+[SDK guide](https://github.com/can1357/oh-my-pi/blob/main/docs/sdk.md),
+[18.1.14 package metadata](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent/v/18.1.14),
+[native environment](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/utils/src/env.ts),
+[SDK session lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/coding-agent/src/session/agent-session.ts).
+
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC session implementation above and
-future backends. They replace the old SDK exclusion while keeping the common
-library small; they do not enable SDKs or additional native protocols by themselves.
+These requirements govern the shipped Pi RPC and OMP SDK session implementations
+above and future backends. They keep the common library small; they do not
+enable additional SDKs or native protocols by themselves.
 
 - Backend selection is explicit and stable for a run/session. SDK dependencies
   are optional and lazy; importing or selecting CLI must not load/configure an
@@ -1532,8 +1636,9 @@ Not adopted: mandatory bypass, billing-tier inference from headless/live mode,
 historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
-now ships under the execution contract above; controlled Pi RPC sessions ship
-through their explicit API. Additional protocols and SDKs remain implementation-gated.
+now ships under the execution contract above; controlled Pi RPC and optional
+OMP SDK sessions ship through their explicit API. Additional protocols and
+SDKs remain implementation-gated.
 No package release is implied.
 
 ---
@@ -1569,8 +1674,8 @@ Harness provides CLI command construction, output parsing and headless execution
 
 Optional agent SDK/protocol integrations are now in scope for the library.
 This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
-consumer-owned host/fleet boundary. There is no SDK backend implemented yet;
-its dependency and behavior requirements are defined in the implementation gates above. A raw model API,
+consumer-owned host/fleet boundary. The optional OMP SDK bridge implements the
+dependency and behavior requirements above. A raw model API,
 fleet manager, Linear engine or application is not an agent backend.
 
 ---

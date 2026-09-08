@@ -67,6 +67,12 @@
 - Added explicit backend selection and static capability queries. The one-shot
   API executes only `cli`; `rpc` and `sdk` fail before preparation or process
   creation. Controlled Pi RPC now uses the separate session API.
+- Added optional OMP SDK sessions in Python and TypeScript through one owned
+  Bun child per session, with explicit package, profile and credential-store
+  selection. Native events and session IDs survive streaming, follow-up and
+  resume; interruption and disposal use the existing session lifecycle.
+  Harness imports do not initialize OMP, and CLI behavior stays unchanged.
+  See [SDK setup, runtime and qualification limits](SPEC.md#optional-omp-sdk-sessions).
 - Added typed Claude Code effort and Codex sandbox options, validated before
   file writes. Codex sandbox and bypass cannot be combined.
 - Aligned eager registry initialization, collision errors, model selection,

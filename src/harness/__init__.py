@@ -60,6 +60,7 @@ from harness._instructions import (
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.sessions import (
     LiveSession,
+    OmpSdkOptions,
     SessionCapabilities,
     SessionEvent,
     SessionReference,
@@ -94,6 +95,7 @@ __all__ = [
     "LiveSession",
     "ModelPricing",
     "NativeOptions",
+    "OmpSdkOptions",
     "OutputCallback",
     "OutputStream",
     "ParsedOutput",

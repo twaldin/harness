@@ -10,7 +10,7 @@ export type {
 export type { InstructionProjection, ProjectInstructionsOptions, PreparedCommand } from './instructions.js'
 export type { RunSubprocessOptions } from './subproc.js'
 export type {
-  SessionBackend, JsonObject, SessionReference, SessionSpec, SessionCapabilities,
+  SessionBackend, JsonObject, SessionReference, OmpSdkOptions, SessionSpec, SessionCapabilities,
   SessionTurnStatus, SessionEvent, SessionTurnResult, SessionTurn,
 } from './sessions.js'
 export { HarnessError, validateRunSpec } from './base.js'

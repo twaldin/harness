@@ -65,6 +65,23 @@ See the [paired runnable usage](../README.md#controlled-pi-rpc-sessions) and
 errors, bounded output, deadlines, local-only extension limitations, and the
 separate offline/native/provider qualification evidence.
 
+## Optional OMP SDK backend
+
+`openSession({ harness: 'omp', backend: 'sdk', workdir, ompSdk })` uses the same
+session operations through an owned Bun bridge. `ompSdk` requires absolute
+`packageRoot` and `agentDir` paths and `auth: 'local' | 'environment'`.
+Install `@oh-my-pi/pi-coding-agent@18.1.14` separately; the bridge requires
+Bun >=1.3.14 (`executable` selects it, default `bun`). Neither CLI execution nor
+ordinary imports load/configure the SDK.
+
+This works from Node or Bun and has a matching Python bridge; it is not SDK
+embedding into the caller's process. `local` auth opens the selected profile's
+credential DB; `environment` uses an in-memory DB. Both honor native provider
+environment/dotenv/models.yml resolution. Native configuration/tools are not
+a sandbox. Always close in `finally`; resume passes the exact native reference.
+See the [paired SDK examples](../README.md#optional-oh-my-pi-sdk-sessions) and
+[SDK contract](../SPEC.md#optional-omp-sdk-sessions).
+
 ## API reference
 
 ### `run(spec: RunSpec): Promise<RunResult>`

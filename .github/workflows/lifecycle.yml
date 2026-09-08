@@ -51,3 +51,6 @@ jobs:
       - name: Built-package RPC session conformance (Node)
         run: node tests/node-sessions.mjs
         working-directory: ts
+      - name: Built-package OMP SDK bridge conformance (Node)
+        run: node tests/node-omp-sdk.mjs
+        working-directory: ts

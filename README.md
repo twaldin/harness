@@ -167,6 +167,63 @@ are not completion. See [the session contract](SPEC.md#controlled-rpc-sessions)
 for terminal statuses, deadlines, local-only extension limitations, ownership,
 and the distinction between offline conformance and native/provider smoke.
 
+### Optional Oh My Pi SDK sessions
+
+Select `harness="omp", backend="sdk"` explicitly. Both languages host the
+optional **OMP 18.1.14 SDK in an owned Bun >=1.3.14 child** and expose the same
+turn/events/result/interrupt/close API as Pi sessions. This is a supported
+Python/Node bridge, not a native Python SDK or caller-process TypeScript
+embedding. Ordinary Harness imports and CLI use do not load OMP or initialize
+its settings.
+
+Install the optional package in a caller-owned project, for example
+`bun add @oh-my-pi/pi-coding-agent@18.1.14`. Then supply its absolute package
+directory and an explicit OMP profile:
+
+```python
+from pathlib import Path
+from harness import OmpSdkOptions, SessionSpec, open_session
+
+session = await open_session(SessionSpec(
+    harness="omp", backend="sdk", workdir=Path("/tmp/scratch"),
+    omp_sdk=OmpSdkOptions(
+        package_root=Path("/your/project/node_modules/@oh-my-pi/pi-coding-agent"),
+        agent_dir=Path("/your/omp-profile"),
+        auth="environment",
+    ),
+    model="openai/gpt-4.1",
+    # executable="/absolute/path/to/bun",  # optional, default: "bun"
+))
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+const session = await openSession({
+  harness: 'omp', backend: 'sdk', workdir: '/tmp/scratch',
+  ompSdk: {
+    packageRoot: '/your/project/node_modules/@oh-my-pi/pi-coding-agent',
+    agentDir: '/your/omp-profile',
+    auth: 'environment',
+  },
+  model: 'openai/gpt-4.1',
+})
+```
+
+Consume turns and close in `finally` as in the examples above. `"local"` auth
+opens the selected profile's credential database; `"environment"` uses an
+in-memory credential database. Both still honor native provider environment,
+dotenv and model configuration. Set child `HOME` through `env` when needed;
+the selected profile/workdir and their extensions must be trusted. Neither
+mode is a sandbox, permission bypass or guarantee of no upstream state writes.
+
+`get_session_capabilities("omp", "sdk")` /
+`getSessionCapabilities("omp", "sdk")` reports events, interruption, follow-up
+and exact native resume; concurrent turns and approval responses are unsupported.
+No package/binary/backend fallback occurs. See the
+[full SDK contract](SPEC.md#optional-omp-sdk-sessions) for configuration
+precedence, disposal bounds, native event semantics and qualification limits.
+
 ---
 
 ## Who should use this

@@ -17,7 +17,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=node && tsc -p tsconfig.build.json",
+    "build": "bun build src/index.ts --outdir=dist --target=node && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && tsc -p tsconfig.build.json",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test"

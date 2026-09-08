@@ -1,21 +1,36 @@
-"""Live Pi RPC sessions — an owned `pi --mode rpc` child driven over JSONL.
+"""Live sessions — an owned child driven over JSONL.
 
-`open_session(spec)` spawns Pi in its own POSIX process group, completes the
-`get_state` handshake and returns a `LiveSession`. Each `start_turn(prompt)`
-sends one `prompt` request; the native event stream is delivered through the
-turn's bounded async iterator and the turn settles on `agent_settled` (plus the
-prompt acknowledgement and any in-flight abort acknowledgement). Frames that
+Two backends share one engine:
+
+- `pi` / `rpc`: `pi --mode rpc`, the native JSONL protocol on stdio.
+- `omp` / `sdk`: an owned Bun child running the sibling `_omp_sdk.mjs` bridge,
+  which loads the caller-installed `@oh-my-pi/pi-coding-agent` SDK from
+  `OmpSdkOptions.package_root` and speaks the same request framing
+  (`get_state` / `prompt` / `abort` responses). Native SDK events arrive
+  wrapped as `{"type": "sdk_event", "event": {...}}` and are delivered with
+  the native event as `raw`; the bridge's own `{"type": "sdk_settled"}` frame
+  is the authoritative end of a turn and never enters an event queue.
+
+`open_session(spec)` spawns the child in its own POSIX process group,
+completes the `get_state` handshake and returns a `LiveSession`. Each
+`start_turn(prompt)` sends one `prompt` request; the native event stream is
+delivered through the turn's bounded async iterator and the turn settles on the
+backend's terminal signal (Pi `agent_settled`, bridge `sdk_settled`) plus the
+prompt acknowledgement and any in-flight abort acknowledgement. Frames that
 arrive while no turn is active flow through `LiveSession.events`.
 
 Only the Pi RPC protocol shipped with @earendil-works/pi-coding-agent 0.85.1
 (`agent_settled` terminal event) is supported. `agent_end` is retained as the
-completion payload but never treated as the end of a turn: Pi may still retry,
-compact or continue after it. Local extension / slash prompts and input-hook
-interceptions have no guaranteed terminal event; `timeout_seconds` bounds them.
+completion payload but never treated as the end of a turn: the agent may still
+retry, compact or continue after it. Local extension / slash prompts and
+input-hook interceptions have no guaranteed terminal event; `timeout_seconds`
+bounds them.
 
 Transport or protocol failures invalidate the handle: the owned process group
 receives SIGTERM, then SIGKILL after 500 ms, and pipes are drained for at most
-one further second before the active turn settles with the failure status.
+one further second before the active turn settles with the failure status. The
+SDK bridge disposes its session on SIGTERM/EOF; a non-zero exit or a forced
+SIGKILL during `close()` is reported as `adapter-error` after cleanup.
 """
 from __future__ import annotations
 
@@ -61,12 +76,23 @@ DEFAULT_MAX_BUFFER_BYTES = 1_048_576
 MAX_FRAME_BYTES = 1_048_576
 #: Pi distribution whose RPC protocol this module is qualified against.
 SUPPORTED_PI_DISTRIBUTION = "@earendil-works/pi-coding-agent 0.85.1"
+#: OMP SDK distribution the `_omp_sdk.mjs` bridge is qualified against.
+SUPPORTED_OMP_SDK_DISTRIBUTION = "@oh-my-pi/pi-coding-agent 18.1.14"
 
 _READ_SIZE = 65536
 _TICK = 0.02
 _TERM_GRACE = 0.5
 _DRAIN_BUDGET = 1.0
-_SESSION_HARNESS = "pi"
+#: Qualified (harness, backend) pairs; every other combination is rejected.
+_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk"}
+_SDK_WORKER = Path(__file__).with_name("_omp_sdk.mjs")
+#: Child environment the SDK bridge owns (both pinned to `agent_dir` so the
+#: selected profile is also the config root); conflicting caller entries are
+#: rejected. `bun --no-env-file` only silences Bun's own dotenv loading; the
+#: SDK still reads the selected profile / project / HOME dotenv files.
+_SDK_OWNED_ENV = ("PI_CODING_AGENT_DIR", "PI_CONFIG_DIR")
+
+OmpSdkAuth = Literal["local", "environment"]
 
 
 # ── public types ────────────────────────────────────────────────────────────
@@ -74,11 +100,11 @@ _SESSION_HARNESS = "pi"
 
 @dataclass(frozen=True)
 class SessionReference:
-    """Native identity of a Pi session.
+    """Native identity of a session.
 
     `session_id`   — the full native session ID (never a prefix).
-    `session_file` — absolute path of the native session log, or None while Pi
-                     has not persisted the session yet.
+    `session_file` — absolute path of the native session log, or None while the
+                     agent has not persisted the session yet.
     `workdir`      — absolute directory the session was opened in.
     """
 
@@ -87,24 +113,53 @@ class SessionReference:
     workdir: Path
 
 
+@dataclass(frozen=True)
+class OmpSdkOptions:
+    """Where the `omp` / `sdk` bridge finds the caller's SDK and profile.
+
+    Nothing here is guessed: every field is required and validated before any
+    side effect.
+
+    `package_root` — absolute directory of the caller-installed
+                     `@oh-my-pi/pi-coding-agent` package the bridge imports.
+    `agent_dir`    — absolute caller-selected profile directory; exported to
+                     the child as `PI_CODING_AGENT_DIR`.
+    `auth`         — "local" opens the profile credential database;
+                     "environment" uses an in-memory credential database.
+                     Both retain upstream environment/dotenv/models.yml auth.
+    """
+
+    package_root: Path
+    agent_dir: Path
+    auth: OmpSdkAuth
+
+
 @dataclass
 class SessionSpec:
-    """Everything needed to open a live Pi RPC session.
+    """Everything needed to open a live session.
 
-    `harness`         — must be "pi"; other registered harnesses raise
-                        `unsupported-backend`, unknown names `unknown-harness`.
+    `harness`         — "pi" (backend "rpc") or "omp" (backend "sdk"); other
+                        registered harnesses raise `unsupported-backend`,
+                        unknown names `unknown-harness`.
     `workdir`         — cwd for the child (absolute against the process cwd).
-    `backend`         — must be "rpc". "cli"/"sdk" raise `unsupported-backend`.
-    `model`           — passed as `--model <model>` (trimmed); None keeps Pi's
-                        own default. Empty after trimming is `invalid-options`.
-    `env`             — additions layered over the inherited environment.
-    `executable`      — bare binary name or absolute path; default "pi".
+    `backend`         — "rpc" with "pi" or "sdk" with "omp"; any other pairing
+                        and "cli" raise `unsupported-backend`.
+    `model`           — Pi: passed as `--model <model>`; OMP: handed to the
+                        bridge (trimmed). None keeps the agent's own default.
+                        Empty after trimming is `invalid-options`.
+    `env`             — additions layered over the inherited environment. The
+                        sdk backend owns `PI_CODING_AGENT_DIR` and
+                        `PI_CONFIG_DIR` (both `agent_dir`); conflicting
+                        entries are `invalid-options`.
+    `executable`      — bare binary name or absolute path; default "pi" for
+                        rpc, "bun" for sdk.
     `permission_policy` — only "upstream"; "bypass" raises `unsupported-capability`.
     `instructions`    — projected to `AGENTS.md` under the workdir lease for the
                         life of the process tree.
     `resume`          — existing session to continue. Requires `session_file`;
                         the file header is verified before spawn and the native
                         `get_state` ID after startup.
+    `omp_sdk`         — required with backend "sdk", rejected with "rpc".
     `timeout_seconds` — wall-clock cap per turn (default 1800). None disables
                         it. Expiry tears the session down (`timed-out`).
     `request_timeout_seconds` — cap on every correlated request (default 30).
@@ -125,6 +180,7 @@ class SessionSpec:
     timeout_seconds: float | None = 1800
     request_timeout_seconds: float = 30
     max_buffer_bytes: int = DEFAULT_MAX_BUFFER_BYTES
+    omp_sdk: OmpSdkOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -142,10 +198,11 @@ class SessionCapabilities:
 
 @dataclass(frozen=True)
 class SessionEvent:
-    """One native frame. `raw` is the parsed JSON object, untouched."""
+    """One native frame. `raw` is the parsed JSON object, untouched: the Pi
+    RPC frame, or the native SDK event unwrapped from the bridge's `sdk_event`."""
 
-    backend: Literal["rpc"]
-    harness: Literal["pi"]
+    backend: Literal["rpc", "sdk"]
+    harness: Literal["pi", "omp"]
     session_id: str
     turn_id: str | None
     request_id: str | None
@@ -157,8 +214,9 @@ class SessionEvent:
 class SessionTurnResult:
     """Terminal outcome of one turn.
 
-    `raw` is the last `agent_end` payload or the rejecting `response` frame.
-    Usage inside it is Pi's own cumulative accounting; nothing is aggregated.
+    `raw` is the last `agent_end` payload, the rejecting `response` frame or
+    (sdk) the failing `sdk_settled` bridge frame. Usage inside it is the
+    agent's own cumulative accounting; nothing is aggregated.
     `exit_code` / `signal` are the observed leader exit, None while it runs.
     """
 
@@ -256,13 +314,14 @@ def get_session_capabilities(name: str, backend: Backend = "rpc") -> SessionCapa
     """Live-session operations `name` supports on `backend`. Pure.
 
     Raises `unknown-harness` for unregistered names, `unsupported-backend` for
-    registered harnesses without a session backend and for cli/sdk, and
-    `invalid-options` for unknown backends.
+    registered harnesses without a session backend, for cli and for a
+    backend the harness is not qualified on, and `invalid-options` for
+    unknown backends.
     """
     _adapter_class(name)
     _validate_session_backend(name, backend)
     return SessionCapabilities(
-        backend="rpc",
+        backend=_SESSION_BACKENDS[name],
         events=True,
         interrupt=True,
         follow_up=True,
@@ -275,10 +334,13 @@ def get_session_capabilities(name: str, backend: Backend = "rpc") -> SessionCapa
 def _validate_session_backend(name: str, backend: object) -> None:
     if backend not in BACKENDS:
         raise HarnessError(f"unknown backend {backend!r}; expected one of {', '.join(BACKENDS)}", code="invalid-options")
-    if backend != "rpc":
-        raise HarnessError(f"backend {backend!r} has no live session support; use 'rpc' with harness 'pi'", code="unsupported-backend")
-    if name != _SESSION_HARNESS:
-        raise HarnessError(f"harness {name!r} has no rpc session support; only 'pi' is qualified", code="unsupported-backend")
+    if backend == "cli":
+        raise HarnessError("backend 'cli' has no live session support; use 'rpc' with harness 'pi' or 'sdk' with harness 'omp'", code="unsupported-backend")
+    expected = _SESSION_BACKENDS.get(name)
+    if expected is None:
+        raise HarnessError(f"harness {name!r} has no live session support; only 'pi' (rpc) and 'omp' (sdk) are qualified", code="unsupported-backend")
+    if backend != expected:
+        raise HarnessError(f"harness {name!r} has no {backend} session support; use backend {expected!r}", code="unsupported-backend")
 
 
 def _finite(name: str, value: object, *, minimum: float, exclusive: bool) -> None:
@@ -316,19 +378,24 @@ def _same_dir(a: str, b: Path) -> bool:
         return False
 
 
-def _verify_session_header(reference: SessionReference) -> None:
-    """The first line of a Pi session file is `{"type":"session","id":...,"cwd":...}`."""
+def _verify_session_header(reference: SessionReference, backend: Backend) -> None:
+    """Read the exact native header, allowing OMP's single title preamble."""
     assert reference.session_file is not None
     path = reference.session_file
     try:
         with open(path, "rb") as fh:
-            first = fh.readline(MAX_FRAME_BYTES + 1)
+            for index in range(2):
+                line = fh.readline(MAX_FRAME_BYTES + 1)
+                if len(line) > MAX_FRAME_BYTES:
+                    raise ValueError("header exceeds byte bound")
+                header = json.loads(line.decode("utf-8"))
+                if index == 0 and backend == "sdk" and isinstance(header, dict) and header.get("type") == "title":
+                    continue
+                break
     except OSError as exc:
         raise HarnessError(f"cannot read resume.session_file {path}: {exc.strerror or exc}", code="invalid-options") from None
-    try:
-        header = json.loads(first.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
-        raise HarnessError(f"resume.session_file {path} does not start with a JSON session header", code="invalid-options") from None
+        raise HarnessError(f"resume.session_file {path} does not start with a bounded JSON session header", code="invalid-options") from None
     if not isinstance(header, dict) or header.get("type") != "session":
         raise HarnessError(f"resume.session_file {path} header is not type 'session'", code="invalid-options")
     if header.get("id") != reference.session_id:
@@ -353,7 +420,7 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
             code="invalid-options",
         )
     if spec.permission_policy == "bypass":
-        raise HarnessError("pi rpc sessions have no permission bypass mapping; use permission_policy='upstream'", code="unsupported-capability")
+        raise HarnessError(f"{spec.harness} {spec.backend} sessions have no permission bypass mapping; use permission_policy='upstream'", code="unsupported-capability")
     model = spec.model
     if model is not None:
         if not isinstance(model, str):
@@ -390,23 +457,81 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
             f"resume.workdir {str(resume.workdir)!r} does not match the session workdir {str(workdir)!r}",
             code="invalid-options",
         )
-    return replace(spec, workdir=workdir, model=model, env=dict(spec.env), resume=resume)
+    omp_sdk = _validate_omp_sdk(spec)
+    return replace(spec, workdir=workdir, model=model, env=dict(spec.env), resume=resume, omp_sdk=omp_sdk)
+
+
+def _absolute_option(name: str, value: object) -> Path:
+    if not isinstance(value, (str, os.PathLike)) or not os.fspath(value) or "\0" in os.fspath(value):
+        raise HarnessError(f"{name} must be a non-empty NUL-free path", code="invalid-options")
+    if not os.path.isabs(os.fspath(value)):
+        raise HarnessError(f"{name} {os.fspath(value)!r} must be absolute", code="invalid-options")
+    return Path(value)
+
+
+def _validate_omp_sdk(spec: SessionSpec) -> OmpSdkOptions | None:
+    """Snapshot `spec.omp_sdk`: required for omp/sdk, rejected otherwise.
+    Nothing is defaulted or probed; a package that fails to load is the
+    bridge's startup error (`launch-failed`), not a guess made here."""
+    options = spec.omp_sdk
+    if spec.backend != "sdk":
+        if options is not None:
+            raise HarnessError(f"omp_sdk applies only to omp sdk sessions, not {spec.harness} {spec.backend}", code="invalid-options")
+        return None
+    if not isinstance(options, OmpSdkOptions):
+        raise HarnessError("omp sdk sessions require omp_sdk=OmpSdkOptions(package_root, agent_dir, auth)", code="invalid-options")
+    package_root = _absolute_option("omp_sdk.package_root", options.package_root)
+    agent_dir = _absolute_option("omp_sdk.agent_dir", options.agent_dir)
+    if options.auth not in ("local", "environment"):
+        raise HarnessError(f"omp_sdk.auth must be 'local' or 'environment', got {options.auth!r}", code="invalid-options")
+    for key in _SDK_OWNED_ENV:
+        if key in spec.env and spec.env[key] != str(agent_dir):
+            raise HarnessError(f"env[{key!r}]={spec.env[key]!r} conflicts with omp_sdk.agent_dir {str(agent_dir)!r}; omit it", code="invalid-options")
+    for key in ("OMP_PROFILE", "PI_PROFILE"):
+        if key in spec.env and spec.env[key] != "default":
+            raise HarnessError(f"env[{key!r}] conflicts with the explicit SDK profile path; omit it", code="invalid-options")
+    return OmpSdkOptions(package_root=package_root, agent_dir=agent_dir, auth=options.auth)
 
 
 def _build(spec: SessionSpec) -> BuildCommand:
     adapter_cls = _adapter_class(spec.harness)
-    args = ["--mode", "rpc"]
-    if spec.model is not None:
-        args += ["--model", spec.model]
-    if spec.resume is not None:
-        assert spec.resume.session_file is not None
-        args += ["--session", str(spec.resume.session_file)]
+    env = dict(spec.env)
+    if spec.backend == "sdk":
+        assert spec.omp_sdk is not None
+        resume = None
+        if spec.resume is not None:
+            assert spec.resume.session_file is not None
+            resume = {
+                "sessionId": spec.resume.session_id,
+                "sessionFile": str(spec.resume.session_file),
+                "workdir": str(spec.resume.workdir),
+            }
+        launch = {
+            "packageRoot": str(spec.omp_sdk.package_root),
+            "agentDir": str(spec.omp_sdk.agent_dir),
+            "auth": spec.omp_sdk.auth,
+            "cwd": str(spec.workdir),
+            "model": spec.model,
+            "resume": resume,
+        }
+        cmd = spec.executable or "bun"
+        args = ["--no-env-file", str(_SDK_WORKER), json.dumps(launch)]
+        for key in _SDK_OWNED_ENV:
+            env[key] = str(spec.omp_sdk.agent_dir)
+    else:
+        cmd = spec.executable or "pi"
+        args = ["--mode", "rpc"]
+        if spec.model is not None:
+            args += ["--model", spec.model]
+        if spec.resume is not None:
+            assert spec.resume.session_file is not None
+            args += ["--session", str(spec.resume.session_file)]
     instructions_file = spec.workdir / adapter_cls.instructions_filename if spec.instructions is not None else None
     return BuildCommand(
-        cmd=spec.executable or "pi",
+        cmd=cmd,
         args=args,
         cwd=spec.workdir,
-        env=dict(spec.env),
+        env=env,
         instructions_file=instructions_file,
         instruction_content=spec.instructions if instructions_file is not None else None,
         model=spec.model,
@@ -452,6 +577,8 @@ class _Turn:
     abort_id: str | None = None
     abort_response: dict[str, object] | None = None
     last_end: dict[str, object] | None = None
+    #: sdk: the `sdk_settled` bridge frame that reported an error, if any.
+    sdk_failure: dict[str, object] | None = None
     finished: bool = False
     timer: asyncio.TimerHandle | None = None
 
@@ -480,7 +607,8 @@ class _Stderr:
 
 
 class LiveSession:
-    """An open `pi --mode rpc` child. Create with `open_session`.
+    """An open session child (`pi --mode rpc` or the OMP SDK bridge). Create
+    with `open_session`.
 
     One turn at a time; the next `start_turn` after a settled result is a
     follow-up in the same native session. Use as an async context manager or
@@ -490,6 +618,8 @@ class LiveSession:
     def __init__(self, spec: SessionSpec, prepared: PreparedCommand) -> None:
         self._spec = spec
         self._prepared = prepared
+        self._sdk = spec.backend == "sdk"
+        self._child = "omp sdk bridge" if self._sdk else "pi"
         self._loop = asyncio.get_running_loop()
         self._proc: asyncio.subprocess.Process | None = None
         self._reference: SessionReference | None = None
@@ -705,6 +835,20 @@ class LiveSession:
             if pending is None:
                 return
             turn = pending.turn or turn
+        elif self._sdk:
+            # The bridge speaks exactly three frame types: correlated
+            # responses, wrapped native events and its own settlement.
+            if kind == "sdk_settled":
+                self._settle_sdk(turn, frame)
+                return
+            if kind != "sdk_event":
+                self._fail("protocol-error", f"unexpected {kind!r} frame from the omp sdk bridge")
+                return
+            event = frame.get("event")
+            if not isinstance(event, dict) or not isinstance(event.get("type"), str) or not event["type"]:
+                self._fail("protocol-error", "sdk_event frame has no event object with a non-empty string 'type'")
+                return
+            frame, kind = event, event["type"]
         if pending is None or pending.command != "get_state":
             self._deliver(frame, kind, turn, len(line))
         if pending is not None:
@@ -740,8 +884,8 @@ class LiveSession:
             return
         request_id = frame.get("id")
         event = SessionEvent(
-            backend="rpc",
-            harness=_SESSION_HARNESS,
+            backend=self._spec.backend,  # type: ignore[arg-type]  # validated: rpc or sdk
+            harness=self._spec.harness,  # type: ignore[arg-type]  # validated: pi or omp
             session_id=self._reference.session_id,
             turn_id=None if turn is None else turn.handle.id,
             request_id=request_id if isinstance(request_id, str) else None,
@@ -770,9 +914,23 @@ class LiveSession:
     def _observe(self, turn: _Turn, frame: dict[str, object], kind: str) -> None:
         if kind == "agent_end":
             turn.last_end = frame
-        elif kind == "agent_settled":
+        elif kind == "agent_settled" and not self._sdk:
+            # Native `agent_settled` from the SDK is just an event: the bridge's
+            # `sdk_settled` is the only authority on SDK turn completion.
             turn.settled = True
             self._maybe_finish(turn)
+
+    def _settle_sdk(self, turn: _Turn | None, frame: dict[str, object]) -> None:
+        error = frame.get("error")
+        if error is not None and (not isinstance(error, str) or not error):
+            self._fail("protocol-error", "sdk_settled 'error' must be a non-empty string when present")
+            return
+        if turn is None:
+            return  # settlement of a turn that already finished (e.g. a rejected prompt)
+        turn.settled = True
+        if error is not None:
+            turn.sdk_failure = frame
+        self._maybe_finish(turn)
 
     def _maybe_finish(self, turn: _Turn) -> None:
         if turn.finished or self._failure is not None:
@@ -786,6 +944,9 @@ class LiveSession:
             self._finish(turn, "agent-error", response, f"prompt rejected: {_stringify(response.get('error') or 'no error given')}")
             return
         if not turn.settled:
+            return
+        if turn.sdk_failure is not None:
+            self._finish(turn, "agent-error", turn.sdk_failure, f"sdk turn failed: {turn.sdk_failure['error']}")
             return
         status, error = self._classify(turn)
         self._finish(turn, status, turn.last_end, error)
@@ -871,11 +1032,11 @@ class LiveSession:
             return
         code = self._returncode
         if code is None:
-            self._fail("disconnected", f"{detail} while pi kept running")
+            self._fail("disconnected", f"{detail} while {self._child} kept running")
         elif code < 0:
-            self._fail("signaled", f"pi was killed by {_signal_name(code)}")
+            self._fail("signaled", f"{self._child} was killed by {_signal_name(code)}")
         else:
-            self._fail("exited", f"pi exited with code {code}")
+            self._fail("exited", f"{self._child} exited with code {code}")
 
     async def _read_stderr(self) -> None:
         assert self._proc is not None and self._proc.stderr is not None
@@ -973,8 +1134,27 @@ class LiveSession:
         if group_error is not None:
             raise group_error
         if not self._exited.is_set():
-            raise HarnessError(f"pi process {proc.pid} could not be reaped within the teardown budget", code="adapter-error")
+            raise HarnessError(f"{self._child} process {proc.pid} could not be reaped within the teardown budget", code="adapter-error")
         cleanup_command(self._prepared)
+        code = self._returncode
+        if self._sdk and failure.status not in ("exited", "signaled") and code not in (0, -signal.SIGTERM):
+            # The bridge unsubscribes and disposes the SDK session on SIGTERM/EOF
+            # and exits 0 only when that succeeded; anything else is a real
+            # disposal failure the caller must see, not a silent success. Death
+            # by our own SIGTERM means it had not yet installed handlers, i.e.
+            # nothing existed to dispose.
+            assert code is not None
+            if code >= 0:
+                detail = f"exit code {code}"
+            elif escalated:
+                detail = f"did not dispose within {_TERM_GRACE}s and was killed by {_signal_name(code)}"
+            else:
+                detail = f"killed by {_signal_name(code)}"
+            stderr = self._stderr.text().strip()
+            raise HarnessError(
+                f"{self._child} failed to dispose the session: {detail}" + (f"; stderr: {stderr[:2000]}" if stderr else ""),
+                code="adapter-error",
+            )
         if stdin_error is not None:
             raise stdin_error
 
@@ -1035,7 +1215,7 @@ class LiveSession:
             code = "launch-failed"
         else:
             code = "protocol-error"
-        detail = f"pi rpc startup failed ({failure.status}" + (f": {failure.error})" if failure.error else ")")
+        detail = f"{self._child} startup failed ({failure.status}" + (f": {failure.error})" if failure.error else ")")
         if self._returncode is not None:
             detail += f"; exit code {self._returncode}"
         stderr = self._stderr.text().strip()
@@ -1061,7 +1241,7 @@ class LiveSession:
             raise HarnessError("get_state reported isStreaming != false at startup")
         resume = self._spec.resume
         if resume is not None and session_id != resume.session_id:
-            raise HarnessError(f"pi resumed session {session_id!r}, expected {resume.session_id!r}")
+            raise HarnessError(f"{self._child} resumed session {session_id!r}, expected {resume.session_id!r}")
         return SessionReference(
             session_id=session_id,
             session_file=Path(session_file) if session_file else None,
@@ -1091,18 +1271,20 @@ def _signal_name(returncode: int | None) -> str | None:
 
 
 async def open_session(spec: SessionSpec) -> LiveSession:
-    """Spawn `pi --mode rpc` for `spec` and complete the `get_state` handshake.
+    """Spawn the session child for `spec` (`pi --mode rpc`, or `bun` running the
+    OMP SDK bridge) and complete the `get_state` handshake.
 
     Validation (harness, backend, options, resume header) happens before any
     filesystem or process side effect. Instructions are projected under the
     workdir lease and restored when the session closes. Cancellation while
-    opening tears the child down before `CancelledError` propagates.
+    opening tears the child down before `CancelledError` propagates. The
+    parent environment is copied, never mutated.
     """
     spec = _validate_session_spec(spec)
     if sys.platform not in ("darwin", "linux"):
         raise NotImplementedError("Owned subprocess groups require macOS or Linux")
     if spec.resume is not None:
-        _verify_session_header(spec.resume)
+        _verify_session_header(spec.resume, spec.backend)
     built = _build(spec)
     prepared = prepare_command(built)
     session = LiveSession(spec, prepared)
@@ -1133,6 +1315,7 @@ async def open_session(spec: SessionSpec) -> LiveSession:
 
 __all__ = [
     "LiveSession",
+    "OmpSdkOptions",
     "SessionCapabilities",
     "SessionEvent",
     "SessionReference",

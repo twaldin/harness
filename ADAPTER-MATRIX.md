@@ -187,6 +187,10 @@ controlled sessions false. The separate `get_session_capabilities("pi")` /
 Its current official package is `@earendil-works/pi-coding-agent`; older Pi and
 OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
+OMP SDK sessions use `getSessionCapabilities("omp", "sdk")` /
+`get_session_capabilities("omp", "sdk")`, qualified for the optional 18.1.14
+package on Bun >=1.3.14. Python and Node use the same owned bridge worker;
+ordinary CLI imports have no SDK dependency.
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
 Amp, Auggie, OMP, Cline, Copilot, Cursor and mini-SWE-agent add install metadata but no pane or session-log heuristics.
@@ -379,7 +383,7 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
 - **Configuration:** `configHome` selects `PI_CODING_AGENT_DIR` and emits `--profile default`, since named profiles otherwise ignore that variable. It does not isolate global/project discovery or all caches. `configFile` is an additional upstream config overlay. Existing env/profile choices remain upstream-controlled when no typed home override is supplied.
 - **Permission:** omitted policy leaves upstream behavior intact. Explicit bypass emits `--auto-approve`; no sandbox or interactive approval transport is provided. No typed native options are claimed.
 - **Lifecycle:** the shared runner owns only its child process group, deadline/cancellation, bounded stdout/stderr capture and instruction lease. `--no-session` makes the primary conversation ephemeral; it is not a promise of zero upstream cache/state writes. Cleanup never invokes global `omp ps`, GC or daemon shutdown.
-- **Backend boundary:** chunk streaming and cancellation work through the common CLI API. Controlled sessions, resume, RPC, ACP and SDK are not exposed by this headless adapter; unsupported backend requests reject. [TWA-69](https://linear.app/twaldin/issue/TWA-69) owns the shared session contract and [TWA-85](https://linear.app/twaldin/issue/TWA-85) owns optional SDK work.
+- **Backend boundary:** chunk streaming and cancellation work through the common CLI API. One-shot SDK/RPC selection still rejects. The separate session API exposes an explicit OMP SDK backend through an owned Bun bridge in both languages; OMP RPC/ACP remain unsupported. See [SDK dependencies, configuration and capability limits](SPEC.md#optional-omp-sdk-sessions).
 
 ### Structured output and failures
 

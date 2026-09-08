@@ -1,0 +1,8 @@
+[
+  {"prompt":"success","status":"completed","event_types":["response","agent_start","message_update","agent_end"]},
+  {"prompt":"error","status":"agent-error"},
+  {"prompt":"reject","status":"agent-error"},
+  {"prompt":"retry","status":"completed","event_types":["response","agent_start","agent_end","auto_retry_start","message_update","agent_end"]},
+  {"prompt":"unknown","status":"completed"},
+  {"prompt":"local","status":"completed","event_types":["response"]}
+]

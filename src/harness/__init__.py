@@ -17,6 +17,8 @@ from harness.base import (
     HarnessError,
     InstallMeta,
     NativeOptions,
+    OutputCallback,
+    OutputStream,
     ParsedOutput,
     PermissionPolicy,
     ReadyState,
@@ -25,6 +27,7 @@ from harness.base import (
     ScrollKeys,
     SessionTelemetry,
     Termination,
+    TimeoutKind,
 )
 from harness.pricing import ModelPricing, derive_cost, lookup_pricing
 from harness.registry import (
@@ -63,6 +66,8 @@ __all__ = [
     "HarnessError",
     "InstallMeta",
     "NativeOptions",
+    "OutputCallback",
+    "OutputStream",
     "ParsedOutput",
     "PermissionPolicy",
     "ReadyState",
@@ -71,6 +76,7 @@ __all__ = [
     "ScrollKeys",
     "SessionTelemetry",
     "Termination",
+    "TimeoutKind",
     "SubprocOutcome",
     "InstructionProjection",
     "PreparedCommand",

@@ -62,3 +62,31 @@ def test_run_rejects_unsupported_backend_without_spawning(monkeypatch, tmp_path:
     assert result.exit_code == 2
     assert "unsupported-backend" in result.output
     assert not (tmp_path / "AGENTS.md").exists()
+
+
+@pytest.mark.parametrize("json_out", [False, True])
+def test_run_makes_bounded_capture_visible(monkeypatch, tmp_path: Path, json_out: bool):
+    binary = tmp_path / "codex"
+    binary.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os\n"
+        "chunk = b'x' * 65536\n"
+        "for _ in range(20):\n"
+        "    os.write(1, chunk)\n"
+    )
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    args = ["run", "synthetic output", "--harness", "codex", "--workdir", str(tmp_path)]
+    if json_out:
+        args.append("--json")
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0
+    if json_out:
+        payload = json.loads(result.stdout[result.stdout.index("{"):])
+        assert payload["stdout"] == "x" * 1048576
+        assert payload["stdout_bytes"] == 20 * 65536
+        assert payload["stdout_truncated"] is True
+        assert payload["stderr_truncated"] is False
+    else:
+        assert "stdout truncated" in result.output
+        assert "capture is incomplete" in result.output

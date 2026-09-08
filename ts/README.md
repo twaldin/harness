@@ -125,8 +125,8 @@ Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'co
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
 Reports implemented support without loading optional SDKs or probing local
-installation/auth. All current adapters use CLI and support cancellation;
-streaming and controlled sessions remain unsupported. Pure pane/session-log
+installation/auth. All current adapters use CLI and support cancellation and
+chunk streaming. Controlled sessions remain unsupported; pure pane/session-log
 helpers are not controlled sessions. Native options are typed per agent:
 
 ```typescript
@@ -150,7 +150,7 @@ interface RunSpec {
   workdir: string            // normalized absolute cwd; must exist when prepared
   model?: string             // canonical or adapter-specific (normalized per harness; see ADAPTER-MATRIX.md)
   instructions?: string      // temporarily projected while the prepared command is owned
-  timeoutSeconds?: number    // default 1800
+  timeoutSeconds?: number | null // default 1800; null disables wall timeout
   env?: Record<string, string>
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
@@ -160,6 +160,10 @@ interface RunSpec {
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file
   cancel?: AbortSignal       // abort returns a cancelled result after cleanup
+  stdin?: string | null      // finite UTF-8 payload then EOF; no newline added
+  onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void | Promise<void>
+  inactivityTimeoutSeconds?: number // positive finite seconds; disabled by default
+  maxOutputBytes?: number    // per-stream raw prefix cap; default 1048576
 }
 
 interface RunResult {
@@ -173,6 +177,13 @@ interface RunResult {
   termination?: Termination | null
   signal?: string | null
   launchError?: string | null
+  stdoutBytes?: number       // all raw bytes read, including discarded bytes
+  stderrBytes?: number
+  stdoutTruncated?: boolean  // cap exceeded or pipe force-closed
+  stderrTruncated?: boolean
+  timeoutKind?: 'wall' | 'inactivity' | null
+  callbackError?: string | null
+  parseError?: string | null
   costUsd: number | null     // reported or estimated cost; null when unavailable
   tokensIn: number | null
   tokensOut: number | null
@@ -181,6 +192,27 @@ interface RunResult {
 ```
 
 Headless `parseOutput` returns null cost for codex, aider and qwen. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Other adapters read reported cost from stdout, trajectory files or session databases where available. Session-log helpers may also derive estimates and need not match headless parsing. See [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) for details.
+
+### Streaming and bounded capture
+
+`run` and `runAsync` deliver decoded stdout/stderr chunks to `onOutput` and await
+returned Promises with backpressure. UTF-8 split across reads stays intact;
+JSONL records may span callbacks. Keep callback work cooperative: synchronous
+event-loop blocking cannot be preempted. The low-level blocking `runSubprocess`
+rejects callbacks; use `runSubprocessAsync` instead.
+
+Capture keeps the first 1 MiB of raw bytes per stream by default. Raise
+`maxOutputBytes` for larger terminal JSON envelopes, or consume callbacks.
+Zero keeps no text but still drains output and delivers callbacks. Check
+`stdoutTruncated` / `stderrTruncated` before treating output or metrics as complete;
+the flags are metadata, not text inserted into structured output.
+
+`stdin` is a finite string followed by EOF, not an interactive approval channel.
+Inactivity is opt-in and excludes callback backpressure; wall timeout and abort
+remain active while an async callback is pending. Callback delivery cannot extend
+the bounded teardown deadline: interrupted delivery is reported in `callbackError`.
+See the [shared streaming contract](../SPEC.md#streaming-stdin-and-output-limits)
+for byte counts, decoding, callback failure and migration.
 
 ---
 
@@ -191,11 +223,13 @@ registration, invalid options, unsupported backends/capabilities and adapter
 prerequisites. Re-registering the same adapter object is idempotent.
 See [SPEC errors](../SPEC.md#errors) for the exact codes.
 
-Non-zero exit, timeout, explicit cancellation and OS launch failure are surfaced
-in `RunResult`. `termination` distinguishes `exited`, `signaled`, `timed-out`,
-`cancelled` and `launch-failed`; `signal` and `launchError` retain signal names
-and OS error codes. See [ownership and execution](../SPEC.md#ownership-and-execution)
-for the macOS/Linux cleanup boundary and compatibility details.
+Non-zero exit, timeout, explicit cancellation, OS launch failure and callback
+failure are surfaced in `RunResult`. `termination` distinguishes `exited`,
+`signaled`, `timed-out`, `cancelled`, `launch-failed` and `callback-error`;
+`signal` and `launchError` retain signal names and OS error codes.
+Execution retains parser exceptions in `parseError` with null metrics/raw
+without losing the terminal output; standalone `parseOutput` still throws.
+See [ownership and execution](../SPEC.md#ownership-and-execution) for cleanup limits.
 
 ---
 

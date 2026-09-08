@@ -215,7 +215,7 @@ describe('getCapabilities', () => {
       nativeOptions: 'claude-code',
       configHomeEnv: 'CLAUDE_CONFIG_DIR',
       configFileFlag: '--settings',
-      streaming: false,
+      streaming: true,
       cancellation: true,
       sessions: false,
     })
@@ -243,7 +243,7 @@ describe('getCapabilities', () => {
       expect(caps.permissionPolicies[0]).toBe('upstream')
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS)
       if (name !== 'claude-code' && name !== 'codex') expect(caps.nativeOptions).toBeNull()
-      expect(caps.streaming).toBe(false)
+      expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)
       expect(caps.sessions).toBe(false)
     }

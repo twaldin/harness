@@ -29,6 +29,19 @@ export interface CodexOptions {
 /** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
 export type NativeOptions = ClaudeCodeOptions | CodexOptions
 
+export type OutputStream = 'stdout' | 'stderr'
+
+/**
+ * Receives decoded output as it arrives. Chunk boundaries are arbitrary (not
+ * line or JSONL framed); each chunk is complete UTF-8 text, never a split
+ * code point. Calls are serialized: a returned promise pauses reading until
+ * it settles (the process blocks on a full pipe meanwhile, wall timeout still
+ * applies). A throw or rejection ends the run with `termination:
+ * 'callback-error'`. A synchronous callback cannot be preempted; it must
+ * return promptly.
+ */
+export type OutputCallback = (chunk: string, stream: OutputStream) => void | Promise<void>
+
 export interface RunSpec {
   harness: string
   prompt: string
@@ -37,7 +50,15 @@ export interface RunSpec {
   model?: string
   /** Instruction text projected into the adapter's instructions file for the run. Empty string projects an empty file. */
   instructions?: string
-  timeoutSeconds?: number
+  /** Wall-clock limit; defaults to 1800. `0` times out immediately, `null` disables it. */
+  timeoutSeconds?: number | null
+  /** Ends the run with `timeoutKind: 'inactivity'` after this many seconds without stdout/stderr bytes. Off by default. Time spent awaiting `onOutput` does not count. */
+  inactivityTimeoutSeconds?: number | null
+  /** Per-stream capture cap in raw bytes (default 1 MiB). Output beyond it is drained and counted, not kept; the result flags `stdoutTruncated`/`stderrTruncated`. `0` captures nothing. */
+  maxOutputBytes?: number
+  /** Written to the child's stdin as UTF-8, then EOF. Omitted or empty: stdin is EOF from the start. */
+  stdin?: string | null
+  onOutput?: OutputCallback
   /** Caller env additions layered over the adapter's own; never mutated. */
   env?: Record<string, string>
   /**
@@ -82,11 +103,14 @@ export interface BuildCommand {
  * - exited: leader returned an exit code (`exitCode` is that code)
  * - signaled: leader was killed by a signal outside harness teardown
  *   (`signal` names it; `exitCode` is the negated signal number, e.g. -15)
- * - timed-out: `timeoutSeconds` elapsed; `exitCode: -1`, `timedOut: true`
+ * - timed-out: `timeoutSeconds` or `inactivityTimeoutSeconds` elapsed (`timeoutKind` says which); `exitCode: -1`, `timedOut: true`
  * - cancelled: the `cancel` signal aborted; `exitCode: -1`
+ * - callback-error: `onOutput` threw or rejected while the leader was alive; `callbackError` holds the message, `exitCode: -1`
  * - launch-failed: the leader never started; `launchError` is the OS code (`ENOENT`, `EACCES`, ...)
  */
-export type Termination = 'exited' | 'signaled' | 'timed-out' | 'cancelled' | 'launch-failed'
+export type Termination = 'exited' | 'signaled' | 'timed-out' | 'cancelled' | 'callback-error' | 'launch-failed'
+
+export type TimeoutKind = 'wall' | 'inactivity'
 
 export interface SubprocOutcome {
   exitCode: number
@@ -100,6 +124,21 @@ export interface SubprocOutcome {
   signal?: string | null
   /** OS error code when `termination === 'launch-failed'`, else null. */
   launchError?: string | null
+  /** Raw bytes read from each stream, including bytes beyond `maxOutputBytes`. */
+  stdoutBytes?: number
+  stderrBytes?: number
+  /** Captured text is a prefix of the stream: the cap was exceeded or teardown force-closed the pipe with output unread. */
+  stdoutTruncated?: boolean
+  stderrTruncated?: boolean
+  /**
+   * `onOutput` failure (`<ErrorName>: <message>`), also when it happened after
+   * the leader had already exited (termination then keeps the exit reason),
+   * or a notice that a pending callback was abandoned at the drain deadline.
+   * Null when every callback settled cleanly.
+   */
+  callbackError?: string | null
+  /** Which deadline expired when `termination === 'timed-out'`, else null. */
+  timeoutKind?: TimeoutKind | null
 }
 
 export interface RunResult {
@@ -113,6 +152,14 @@ export interface RunResult {
   termination?: Termination | null
   signal?: string | null
   launchError?: string | null
+  stdoutBytes?: number
+  stderrBytes?: number
+  stdoutTruncated?: boolean
+  stderrTruncated?: boolean
+  callbackError?: string | null
+  timeoutKind?: TimeoutKind | null
+  /** `parseOutput` failure (`<ErrorName>: <message>`); metrics and `raw` are null then. Null when parsing succeeded. */
+  parseError?: string | null
   costUsd: number | null
   tokensIn: number | null
   tokensOut: number | null

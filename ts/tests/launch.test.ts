@@ -287,7 +287,7 @@ describe('run lifecycle', () => {
     expect(b.record()['FILE AGENTS.md']).toEqual(['b'])
   })
 
-  test('a parser exception still restores the workdir and releases the lease', async () => {
+  test('a parser exception is reported on the result; the workdir is restored and the lease released', async () => {
     const throwing: Adapter = {
       name: 'throwing-parser',
       instructionsFilename: 'AGENTS.md',
@@ -304,14 +304,16 @@ describe('run lifecycle', () => {
     writeFileSync(join(workdir, 'AGENTS.md'), 'original\n', 'utf-8')
     const { spec, record } = recorded('throwing-parser', workdir, { instructions: 'projected' })
 
-    await expect(runAsync(spec)).rejects.toThrow('parser exploded')
-    expect(record()['FILE AGENTS.md']).toEqual(['projected'])
-    expect(readFileSync(join(workdir, 'AGENTS.md'), 'utf-8')).toBe('original\n')
-    expect(existsSync(join(workdir, LOCK))).toBe(false)
-
-    await expect(run(spec)).rejects.toThrow('parser exploded')
-    expect(readFileSync(join(workdir, 'AGENTS.md'), 'utf-8')).toBe('original\n')
-    expect(existsSync(join(workdir, LOCK))).toBe(false)
+    for (const entrypoint of [runAsync, run]) {
+      const result = await entrypoint(spec)
+      expect(result.parseError).toBe('Error: parser exploded')
+      expect([result.termination, result.exitCode, result.callbackError]).toEqual(['exited', 0, null])
+      expect(result.stdout).toBe('{}')
+      expect([result.costUsd, result.tokensIn, result.tokensOut, result.raw]).toEqual([null, null, null, null])
+      expect(record()['FILE AGENTS.md']).toEqual(['projected'])
+      expect(readFileSync(join(workdir, 'AGENTS.md'), 'utf-8')).toBe('original\n')
+      expect(existsSync(join(workdir, LOCK))).toBe(false)
+    }
   })
 
   test('public dispatch gives a minimal third-party adapter executable, cwd, env layering and projection', async () => {
@@ -419,9 +421,12 @@ test('failed process teardown retains instructions and recovery backup', () => {
       const workdir = ${JSON.stringify(workdir)};
       writeFileSync(workdir + '/AGENTS.md', 'original');
       const failure = Object.assign(new Error('synthetic process-group denial'), { code: 'EPERM' });
-      mock.module(${JSON.stringify(join(import.meta.dir, '../src/subproc.ts'))}, () => ({
-        runSubprocessAsync: async () => { throw failure; },
-        runSubprocess: () => { throw failure; },
+      mock.module(${JSON.stringify(join(import.meta.dir, '../src/lifecycle.ts'))}, () => ({
+        prepareLaunch: (cmd, opts) => ({ cmd, cwd: opts.cwd, env: {}, timeoutMs: null, inactivityMs: null, maxOutputBytes: 0, stdin: null }),
+        runLifecycle: async () => { throw failure; },
+        runLifecycleSync: () => { throw failure; },
+        cancelledBeforeLaunch: () => { throw failure; },
+        describeError: String,
       }));
       // Import after fault injection; static imports would bind before the mock.
       const harness = await import(${JSON.stringify(join(import.meta.dir, '../src/index.ts'))});
@@ -437,15 +442,31 @@ test('failed process teardown retains instructions and recovery backup', () => {
   }
 })
 
-test('prelaunch validation releases the instruction lease', async () => {
+test('prelaunch validation of run I/O options happens before the workdir is touched', async () => {
+  const cases: Partial<RunSpec>[] = [
+    { timeoutSeconds: -1 },
+    { inactivityTimeoutSeconds: 0 },
+    { maxOutputBytes: 1.5 },
+    { stdin: untypedValue(42) },
+    { onOutput: untypedValue('not a function') },
+  ]
   for (const entrypoint of [run, runAsync]) {
-    const workdir = tmpDir()
-    const file = join(workdir, 'AGENTS.md')
-    writeFileSync(file, 'original')
-    await expectRejectCode(entrypoint({
-      harness: 'codex', prompt: 'x', workdir, instructions: 'projected', timeoutSeconds: -1,
-    }), 'invalid-options')
-    expect(readFileSync(file, 'utf-8')).toBe('original')
-    expect(existsSync(join(workdir, LOCK))).toBe(false)
+    for (const invalidIO of cases) {
+      const workdir = tmpDir()
+      const file = join(workdir, 'AGENTS.md')
+      writeFileSync(file, 'original')
+      const identity = statSync(file).ino
+      await expectRejectCode(entrypoint({
+        harness: 'codex', prompt: 'x', workdir, instructions: 'projected', ...invalidIO,
+      }), 'invalid-options')
+      expect(readFileSync(file, 'utf-8')).toBe('original')
+      expect(statSync(file).ino).toBe(identity)
+      expect(existsSync(join(workdir, LOCK))).toBe(false)
+    }
   }
 })
+
+/** A value as a JS caller would hand it over: the type system never saw it. */
+function untypedValue<T>(value: unknown): T {
+  return value as T
+}

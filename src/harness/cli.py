@@ -97,6 +97,13 @@ def run_cmd(
             "termination": result.termination,
             "signal": result.signal,
             "launch_error": result.launch_error,
+            "timeout_kind": result.timeout_kind,
+            "callback_error": result.callback_error,
+            "parse_error": result.parse_error,
+            "stdout_bytes": result.stdout_bytes,
+            "stderr_bytes": result.stderr_bytes,
+            "stdout_truncated": result.stdout_truncated,
+            "stderr_truncated": result.stderr_truncated,
             "cost_usd": result.cost_usd,
             "tokens_in": result.tokens_in,
             "tokens_out": result.tokens_out,
@@ -113,6 +120,17 @@ def run_cmd(
         console.print(f"  tokens        in={result.tokens_in} out={result.tokens_out}")
     if result.cost_usd is not None:
         console.print(f"  cost          ${result.cost_usd:.4f}")
+    if result.timeout_kind is not None:
+        console.print(f"  timeout       {result.timeout_kind}")
+    for label, error in (("callback error", result.callback_error), ("parse error", result.parse_error)):
+        if error is not None:
+            console.print(f"  {label}: {error}", markup=False)
+    for stream, truncated, count in (
+        ("stdout", result.stdout_truncated, result.stdout_bytes),
+        ("stderr", result.stderr_truncated, result.stderr_bytes),
+    ):
+        if truncated:
+            console.print(f"  {stream} truncated ({count} bytes read; capture is incomplete)")
     if result.stdout.strip():
         console.print("[dim]--- stdout ---[/dim]")
         typer.echo(result.stdout)

@@ -273,23 +273,38 @@ async def test_run_async_snapshots_env_and_cleans_up(workdir: Path, fake_cli: Pa
 
 
 
-def test_parse_exception_still_restores_workdir(workdir: Path, monkeypatch: pytest.MonkeyPatch):
+def test_parse_exception_becomes_parse_error_and_restores_workdir(workdir: Path, monkeypatch: pytest.MonkeyPatch):
     from harness._subproc import SubprocOutcome
 
     (workdir / "AGENTS.md").write_text("mine")
     monkeypatch.setattr(
         "harness._subproc.run_subprocess",
-        lambda *a, **kw: SubprocOutcome(exit_code=0, duration_seconds=0.0, stdout="", stderr="", timed_out=False),
+        lambda *a, **kw: SubprocOutcome(0, 0.0, "kept out", "kept err", False, termination="exited"),
     )
 
     def boom(self, spec, outcome):
         raise RuntimeError("parse failed")
 
     monkeypatch.setattr("harness.adapters.pi.PiAdapter.parse_output", boom)
-    with pytest.raises(RuntimeError, match="parse failed"):
-        run(_spec("pi", workdir, instructions="tmp"))
+    result = run(_spec("pi", workdir, instructions="tmp"))
+    assert result.parse_error == "RuntimeError: parse failed"
+    assert (result.exit_code, result.termination, result.stdout, result.stderr) == (0, "exited", "kept out", "kept err")
+    assert (result.cost_usd, result.tokens_in, result.tokens_out, result.raw) == (None, None, None, None)
+    assert not result.ok
     assert (workdir / "AGENTS.md").read_text() == "mine"
     assert not (workdir / LOCK).exists()
+
+
+def test_direct_parse_output_stays_strict(workdir: Path, monkeypatch: pytest.MonkeyPatch):
+    from harness import parse_output
+    from harness._subproc import SubprocOutcome
+
+    def boom(self, spec, outcome):
+        raise RuntimeError("parse failed")
+
+    monkeypatch.setattr("harness.adapters.pi.PiAdapter.parse_output", boom)
+    with pytest.raises(RuntimeError, match="parse failed"):
+        parse_output(_spec("pi", workdir), SubprocOutcome(0, 0.0, "", "", False))
 
 
 @pytest.mark.parametrize("entrypoint", ["sync", "async"])
@@ -389,15 +404,75 @@ async def test_failed_process_teardown_retains_instruction_ownership(workdir: Pa
     assert (workdir / LOCK).exists()
 
 
+INVALID_IO = [
+    {"timeout_seconds": -1},
+    {"timeout_seconds": float("inf")},
+    {"inactivity_timeout_seconds": 0},
+    {"inactivity_timeout_seconds": float("nan")},
+    {"max_output_bytes": -1},
+    {"max_output_bytes": 1.5},
+    {"max_output_bytes": True},
+    {"max_output_bytes": 2 ** 53},
+    {"stdin": b"bytes"},
+    {"on_output": "not callable"},
+]
+
+
 @pytest.mark.parametrize("entrypoint", ["sync", "async"])
-async def test_prelaunch_validation_releases_instruction_lease(workdir: Path, entrypoint: str):
+@pytest.mark.parametrize("options", INVALID_IO, ids=lambda o: next(iter(o)))
+async def test_invalid_io_options_rejected_before_preparation(workdir: Path, entrypoint: str, options: dict):
     target = workdir / "AGENTS.md"
     target.write_text("original")
-    spec = _spec("codex", workdir, instructions="projected", timeout_seconds=-1)
-    with pytest.raises(ValueError):
+    identity = target.stat().st_ino
+    spec = _spec("codex", workdir, instructions="projected", **options)
+    with pytest.raises(HarnessError) as exc:
         if entrypoint == "sync":
             run(spec)
         else:
             await run_async(spec)
+    assert exc.value.code == "invalid-options"
     assert target.read_text() == "original"
+    assert target.stat().st_ino == identity
     assert not (workdir / LOCK).exists()
+    with pytest.raises(HarnessError) as exc:
+        build_command(spec)
+    assert exc.value.code == "invalid-options"
+
+
+async def test_sync_run_rejects_async_callback_before_preparation(workdir: Path):
+    async def cb(chunk: str, stream: str) -> None:
+        pass
+
+    (workdir / "AGENTS.md").write_text("original")
+    spec = _spec("codex", workdir, instructions="projected", on_output=cb)
+    with pytest.raises(HarnessError) as exc:
+        run(spec)
+    assert exc.value.code == "invalid-options"
+    assert (workdir / "AGENTS.md").read_text() == "original"
+    assert not (workdir / LOCK).exists()
+    # build_command cannot know the entry point; only the blocking runner refuses.
+    assert build_command(spec).cmd == "codex"
+
+
+def test_run_validates_io_even_when_a_custom_builder_skips_validation(workdir: Path, monkeypatch: pytest.MonkeyPatch):
+    import harness.registry as registry
+
+    monkeypatch.setattr(registry, "_REGISTRY", dict(registry._REGISTRY))
+
+    class Unchecked(Adapter):
+        name = "unchecked-test-adapter"
+        instructions_filename = "AGENTS.md"
+
+        def build_command(self, spec: RunSpec) -> BuildCommand:
+            return BuildCommand(cmd="true", args=[], cwd=spec.workdir, env={}, instructions_file=None)
+
+        def parse_output(self, spec, outcome):
+            return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
+
+    register(Unchecked.name, Unchecked)
+    spec = RunSpec(harness=Unchecked.name, prompt="p", workdir=workdir, instructions="projected", max_output_bytes=-5)
+    with pytest.raises(HarnessError) as exc:
+        Unchecked().run(spec)
+    assert exc.value.code == "invalid-options"
+    assert not (workdir / LOCK).exists()
+    assert list(workdir.iterdir()) == []

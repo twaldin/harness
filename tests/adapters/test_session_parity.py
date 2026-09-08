@@ -245,3 +245,23 @@ def test_native_telemetry_boundaries_in_both_runtimes(case: dict, tmp_path: Path
         for result in (py_result, ts_result):
             for key, expected in case["expected"].items():
                 assert result[key] == (pytest.approx(expected) if key == "costUsd" and expected is not None else expected)
+
+
+def test_telemetry_bridge_distinguishes_blank_from_missing_and_zero_cutoff(tmp_path: Path):
+    if shutil.which("bun") is None:
+        pytest.skip("bun not available")
+    artifact = tmp_path / ".harness" / "swe-traj.json"
+    artifact.parent.mkdir()
+    artifact.write_text("{}")
+    command = ["bun", "ts/scripts/session-telemetry.ts", "swe-agent", "sessionLogPath", str(tmp_path)]
+    for arguments, expected_status in (([], 0), (["0"], 0), ([""], 2), ([" \t "], 2)):
+        result = subprocess.run(
+            command + arguments, cwd=Path(__file__).resolve().parents[2],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == expected_status
+        if expected_status == 0:
+            assert json.loads(result.stdout) == str(artifact)
+        else:
+            assert result.stdout == ""
+            assert result.stderr

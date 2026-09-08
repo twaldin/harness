@@ -22,7 +22,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
-from harness.base import DEFAULT_MAX_OUTPUT_BYTES, OutputCallback, OutputStream, Termination, TimeoutKind
+from harness.base import (
+    DEFAULT_MAX_OUTPUT_BYTES,
+    GRACEFUL_SIGNALS,
+    GracefulSignal,
+    OutputCallback,
+    OutputStream,
+    Termination,
+    TimeoutKind,
+)
 
 _READ_SIZE = 65536
 _TICK = 0.02
@@ -70,6 +78,7 @@ def validate_io_options(
     max_output_bytes: int,
     stdin: str | None,
     on_output: OutputCallback | None,
+    graceful_signal: GracefulSignal = "SIGTERM",
 ) -> None:
     """Reject invalid run I/O options with ValueError / TypeError.
 
@@ -86,6 +95,8 @@ def validate_io_options(
         raise TypeError(f"stdin must be None or str, got {type(stdin).__name__}")
     if on_output is not None and not callable(on_output):
         raise TypeError(f"on_output must be callable, got {type(on_output).__name__}")
+    if graceful_signal not in GRACEFUL_SIGNALS:
+        raise ValueError(f"graceful_signal must be one of {', '.join(GRACEFUL_SIGNALS)}, got {graceful_signal!r}")
 
 
 def require_sync_callback(on_output: OutputCallback | None) -> None:
@@ -285,6 +296,7 @@ def run_subprocess(
     inactivity_timeout_seconds: float | None = None,
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
     cancel: Event | None = None,
+    graceful_signal: GracefulSignal = "SIGTERM",
 ) -> SubprocOutcome:
     """Run in an owned POSIX group; stop leftovers before returning.
 
@@ -297,17 +309,20 @@ def run_subprocess(
     `on_output` must be a synchronous callable returning None; it runs on
     this thread between reads, so a slow callback delays capture and
     lifecycle checks. Async callbacks are rejected before launch.
+
+    `graceful_signal` is sent to the group once when the run must stop;
+    the SIGKILL escalation and drain budget are the same either way.
     """
     validate_io_options(
         timeout_seconds=timeout_seconds, inactivity_timeout_seconds=inactivity_timeout_seconds,
-        max_output_bytes=max_output_bytes, stdin=stdin, on_output=on_output,
+        max_output_bytes=max_output_bytes, stdin=stdin, on_output=on_output, graceful_signal=graceful_signal,
     )
     require_sync_callback(on_output)
     return _run_subprocess(
         cmd, cwd, timeout_seconds=timeout_seconds, extra_env=extra_env, stdin=stdin, stdin_close=stdin_close,
         sink=_SyncSink(on_output) if on_output is not None else _Sink(),
         inactivity_timeout_seconds=inactivity_timeout_seconds, max_output_bytes=max_output_bytes,
-        cancel=cancel, interrupted=None,
+        cancel=cancel, interrupted=None, graceful_signal=signal.Signals[graceful_signal],
     )
 
 
@@ -322,6 +337,7 @@ async def run_subprocess_async(
     inactivity_timeout_seconds: float | None = None,
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
     cancel: Event | None = None,
+    graceful_signal: GracefulSignal = "SIGTERM",
 ) -> SubprocOutcome:
     """Use the same ownership engine without blocking the event loop.
 
@@ -332,7 +348,7 @@ async def run_subprocess_async(
     """
     validate_io_options(
         timeout_seconds=timeout_seconds, inactivity_timeout_seconds=inactivity_timeout_seconds,
-        max_output_bytes=max_output_bytes, stdin=stdin, on_output=on_output,
+        max_output_bytes=max_output_bytes, stdin=stdin, on_output=on_output, graceful_signal=graceful_signal,
     )
     sink: _Sink = _LoopSink(on_output, asyncio.get_running_loop()) if on_output is not None else _Sink()
     interrupted = Event()
@@ -340,6 +356,7 @@ async def run_subprocess_async(
         _run_subprocess, cmd, cwd, timeout_seconds=timeout_seconds, extra_env=extra_env, stdin=stdin,
         stdin_close=True, sink=sink, inactivity_timeout_seconds=inactivity_timeout_seconds,
         max_output_bytes=max_output_bytes, cancel=cancel, interrupted=interrupted,
+        graceful_signal=signal.Signals[graceful_signal],
     ))
     try:
         return await asyncio.shield(worker)
@@ -373,6 +390,7 @@ def _run_subprocess(
     max_output_bytes: int,
     cancel: Event | None,
     interrupted: Event | None,
+    graceful_signal: signal.Signals,
 ) -> SubprocOutcome:
     if sys.platform not in ("darwin", "linux"):
         raise NotImplementedError("Owned subprocess groups require macOS or Linux")
@@ -488,7 +506,7 @@ def _run_subprocess(
         except Exception as exc:
             # A local descriptor error must not bypass group escalation/reaping.
             stdin_error = exc
-        group_exists = signal_group(signal.SIGTERM)
+        group_exists = signal_group(graceful_signal)
         grace_end = time.monotonic() + 0.5
         drain_end = grace_end + 1.0
         escalated = False

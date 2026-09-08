@@ -1,0 +1,1144 @@
+{
+  "spec": {
+    "harness": "cline",
+    "prompt": "Say hello.",
+    "instructions": "Be terse.\n",
+    "timeoutSeconds": 30
+  },
+  "expectedCommand": {
+    "cmd": "cline",
+    "args": [
+      "--json",
+      "--cwd",
+      "<workdir>",
+      "--",
+      "Follow the instructions in @./CLINE.md\n\nSay hello."
+    ],
+    "cwd": "<workdir>",
+    "env": {
+      "CLINE_SESSION_BACKEND_MODE": "local",
+      "CLINE_NO_AUTO_UPDATE": "1",
+      "CLINE_RUN_AS_HUB_DAEMON": "0"
+    },
+    "instructionsFile": "<workdir>/CLINE.md",
+    "directories": [],
+    "model": null,
+    "gracefulSignal": "SIGINT"
+  },
+  "capabilities": {
+    "backend": "cli",
+    "permissionPolicies": [
+      "upstream",
+      "bypass"
+    ],
+    "nativeOptions": "cline",
+    "configHomeEnv": "CLINE_DIR",
+    "configFileFlag": null,
+    "streaming": true,
+    "cancellation": true,
+    "sessions": false
+  },
+  "sampleOutput": {
+    "exitCode": 0,
+    "durationSeconds": 0.2,
+    "timedOut": false,
+    "stdout": "{\"ts\":\"2026-09-08T10:54:40.496Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.497Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-08T10:54:40.550Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"content_start\",\"contentType\":\"text\",\"text\":\"Synthetic answer.\",\"accumulated\":\"Synthetic answer.\"}}\n{\"ts\":\"2026-09-08T10:54:40.553Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"usage\",\"inputTokens\":12,\"outputTokens\":5,\"totalInputTokens\":12,\"totalOutputTokens\":5,\"totalCost\":0.0125}}\n{\"ts\":\"2026-09-08T10:54:40.553Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"content_end\",\"contentType\":\"text\",\"text\":\"Synthetic answer.\"}}\n{\"ts\":\"2026-09-08T10:54:40.554Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_end\",\"iteration\":1,\"hadToolCalls\":false,\"toolCallCount\":0}}\n{\"ts\":\"2026-09-08T10:54:40.555Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_end\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.555Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"done\",\"reason\":\"completed\",\"text\":\"Synthetic answer.\",\"iterations\":1,\"usage\":{\"inputTokens\":12,\"outputTokens\":5,\"totalCost\":0.0125}}}\n{\"ts\":\"2026-09-08T10:54:40.594Z\",\"type\":\"run_result\",\"finishReason\":\"completed\",\"iterations\":1,\"usage\":{\"inputTokens\":12,\"outputTokens\":5,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0.0125},\"aggregateUsage\":{\"inputTokens\":12,\"outputTokens\":5,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0.0125},\"durationMs\":62,\"text\":\"Synthetic answer.\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n",
+    "stderr": ""
+  },
+  "expectedParsed": {
+    "costUsd": 0.0125,
+    "tokensIn": 12,
+    "tokensOut": 5,
+    "raw": [
+      {
+        "ts": "2026-09-08T10:54:40.496Z",
+        "type": "hook_event",
+        "hookEventName": "agent_start",
+        "agentId": "agent_synthetic_0001",
+        "taskId": "conv_synthetic_0001",
+        "parentAgentId": null
+      },
+      {
+        "ts": "2026-09-08T10:54:40.497Z",
+        "type": "agent_event",
+        "event": {
+          "type": "iteration_start",
+          "iteration": 1
+        }
+      },
+      {
+        "ts": "2026-09-08T10:54:40.550Z",
+        "type": "agent_event",
+        "event": {
+          "type": "content_start",
+          "contentType": "text",
+          "text": "Synthetic answer.",
+          "accumulated": "Synthetic answer."
+        }
+      },
+      {
+        "ts": "2026-09-08T10:54:40.553Z",
+        "type": "agent_event",
+        "event": {
+          "type": "usage",
+          "inputTokens": 12,
+          "outputTokens": 5,
+          "totalInputTokens": 12,
+          "totalOutputTokens": 5,
+          "totalCost": 0.0125
+        }
+      },
+      {
+        "ts": "2026-09-08T10:54:40.553Z",
+        "type": "agent_event",
+        "event": {
+          "type": "content_end",
+          "contentType": "text",
+          "text": "Synthetic answer."
+        }
+      },
+      {
+        "ts": "2026-09-08T10:54:40.554Z",
+        "type": "agent_event",
+        "event": {
+          "type": "iteration_end",
+          "iteration": 1,
+          "hadToolCalls": false,
+          "toolCallCount": 0
+        }
+      },
+      {
+        "ts": "2026-09-08T10:54:40.555Z",
+        "type": "hook_event",
+        "hookEventName": "agent_end",
+        "agentId": "agent_synthetic_0001",
+        "taskId": "conv_synthetic_0001",
+        "parentAgentId": null
+      },
+      {
+        "ts": "2026-09-08T10:54:40.555Z",
+        "type": "agent_event",
+        "event": {
+          "type": "done",
+          "reason": "completed",
+          "text": "Synthetic answer.",
+          "iterations": 1,
+          "usage": {
+            "inputTokens": 12,
+            "outputTokens": 5,
+            "totalCost": 0.0125
+          }
+        }
+      },
+      {
+        "ts": "2026-09-08T10:54:40.594Z",
+        "type": "run_result",
+        "finishReason": "completed",
+        "iterations": 1,
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 5,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalCost": 0.0125
+        },
+        "aggregateUsage": {
+          "inputTokens": 12,
+          "outputTokens": 5,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalCost": 0.0125
+        },
+        "durationMs": 62,
+        "text": "Synthetic answer.",
+        "model": {
+          "id": "synthetic-model",
+          "provider": "synthetic"
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "failure-reported-in-stream",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"ts\":\"2026-09-08T10:54:40.100Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.101Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-08T10:54:40.357Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_error\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.357Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"error\",\"error\":{\"name\":\"Error\",\"message\":\"Unauthorized: synthetic provider rejected the request.\"},\"errorClass\":\"auth\",\"recoverable\":false,\"iteration\":1}}\n{\"ts\":\"2026-09-08T10:54:40.759Z\",\"type\":\"run_result\",\"finishReason\":\"error\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"aggregateUsage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"durationMs\":62,\"text\":\"Unauthorized: synthetic provider rejected the request.\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n",
+        "stderr": "{\"ts\":\"2026-09-08T10:54:40.759Z\",\"type\":\"error\",\"message\":\"Unauthorized: synthetic provider rejected the request.\"}\n"
+      },
+      "expectedParsed": {
+        "costUsd": 0,
+        "tokensIn": 0,
+        "tokensOut": 0,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.100Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.101Z",
+            "type": "agent_event",
+            "event": {
+              "type": "iteration_start",
+              "iteration": 1
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.357Z",
+            "type": "hook_event",
+            "hookEventName": "agent_error",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.357Z",
+            "type": "agent_event",
+            "event": {
+              "type": "error",
+              "error": {
+                "name": "Error",
+                "message": "Unauthorized: synthetic provider rejected the request."
+              },
+              "errorClass": "auth",
+              "recoverable": false,
+              "iteration": 1
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.759Z",
+            "type": "run_result",
+            "finishReason": "error",
+            "iterations": 1,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": 0
+            },
+            "aggregateUsage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": 0
+            },
+            "durationMs": 62,
+            "text": "Unauthorized: synthetic provider rejected the request.",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "partial-stream-without-run-result",
+      "sampleOutput": {
+        "exitCode": 1,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"ts\":\"2026-09-08T10:54:40.725Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.726Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-08T10:54:40.730Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"usage\",\"inputTokens\":7,\"outputTokens\":2,\"totalInputTokens\":7,\"totalOutputTokens\":2,\"totalCost\":0.007}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.725Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.726Z",
+            "type": "agent_event",
+            "event": {
+              "type": "iteration_start",
+              "iteration": 1
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.730Z",
+            "type": "agent_event",
+            "event": {
+              "type": "usage",
+              "inputTokens": 7,
+              "outputTokens": 2,
+              "totalInputTokens": 7,
+              "totalOutputTokens": 2,
+              "totalCost": 0.007
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "usage-and-done-records-are-not-summed",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"ts\":\"2026-09-08T10:54:40.001Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.002Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-08T10:54:40.003Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"usage\",\"inputTokens\":10,\"outputTokens\":4,\"totalInputTokens\":10,\"totalOutputTokens\":4,\"totalCost\":0.01}}\n{\"ts\":\"2026-09-08T10:54:40.004Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_end\",\"iteration\":1,\"hadToolCalls\":true,\"toolCallCount\":1}}\n{\"ts\":\"2026-09-08T10:54:40.005Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":2}}\n{\"ts\":\"2026-09-08T10:54:40.006Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"usage\",\"inputTokens\":30,\"outputTokens\":6,\"totalInputTokens\":40,\"totalOutputTokens\":10,\"totalCost\":0.04}}\n{\"ts\":\"2026-09-08T10:54:40.007Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_end\",\"iteration\":2,\"hadToolCalls\":false,\"toolCallCount\":0}}\n{\"ts\":\"2026-09-08T10:54:40.008Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_end\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.008Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"done\",\"reason\":\"completed\",\"text\":\"Done.\",\"iterations\":2,\"usage\":{\"inputTokens\":40,\"outputTokens\":10,\"totalCost\":0.04}}}\n{\"ts\":\"2026-09-08T10:54:40.009Z\",\"type\":\"run_result\",\"finishReason\":\"completed\",\"iterations\":2,\"usage\":{\"inputTokens\":40,\"outputTokens\":10,\"cacheReadTokens\":5,\"cacheWriteTokens\":0,\"totalCost\":0.04},\"aggregateUsage\":{\"inputTokens\":40,\"outputTokens\":10,\"cacheReadTokens\":5,\"cacheWriteTokens\":0,\"totalCost\":0.04},\"durationMs\":62,\"text\":\"Done.\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.04,
+        "tokensIn": 40,
+        "tokensOut": 10,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.001Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.002Z",
+            "type": "agent_event",
+            "event": {
+              "type": "iteration_start",
+              "iteration": 1
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.003Z",
+            "type": "agent_event",
+            "event": {
+              "type": "usage",
+              "inputTokens": 10,
+              "outputTokens": 4,
+              "totalInputTokens": 10,
+              "totalOutputTokens": 4,
+              "totalCost": 0.01
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.004Z",
+            "type": "agent_event",
+            "event": {
+              "type": "iteration_end",
+              "iteration": 1,
+              "hadToolCalls": true,
+              "toolCallCount": 1
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.005Z",
+            "type": "agent_event",
+            "event": {
+              "type": "iteration_start",
+              "iteration": 2
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.006Z",
+            "type": "agent_event",
+            "event": {
+              "type": "usage",
+              "inputTokens": 30,
+              "outputTokens": 6,
+              "totalInputTokens": 40,
+              "totalOutputTokens": 10,
+              "totalCost": 0.04
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.007Z",
+            "type": "agent_event",
+            "event": {
+              "type": "iteration_end",
+              "iteration": 2,
+              "hadToolCalls": false,
+              "toolCallCount": 0
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.008Z",
+            "type": "hook_event",
+            "hookEventName": "agent_end",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.008Z",
+            "type": "agent_event",
+            "event": {
+              "type": "done",
+              "reason": "completed",
+              "text": "Done.",
+              "iterations": 2,
+              "usage": {
+                "inputTokens": 40,
+                "outputTokens": 10,
+                "totalCost": 0.04
+              }
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.009Z",
+            "type": "run_result",
+            "finishReason": "completed",
+            "iterations": 2,
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 10,
+              "cacheReadTokens": 5,
+              "cacheWriteTokens": 0,
+              "totalCost": 0.04
+            },
+            "aggregateUsage": {
+              "inputTokens": 40,
+              "outputTokens": 10,
+              "cacheReadTokens": 5,
+              "cacheWriteTokens": 0,
+              "totalCost": 0.04
+            },
+            "durationMs": 62,
+            "text": "Done.",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "last-run-result-wins",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"ts\":\"2026-09-08T10:54:40.001Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.002Z\",\"type\":\"run_result\",\"finishReason\":\"error\",\"iterations\":1,\"usage\":{\"inputTokens\":3,\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0.001},\"durationMs\":62,\"text\":\"transient\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n{\"ts\":\"2026-09-08T10:54:40.003Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.004Z\",\"type\":\"run_result\",\"finishReason\":\"completed\",\"iterations\":1,\"usage\":{\"inputTokens\":8,\"outputTokens\":2,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0.002},\"aggregateUsage\":{\"inputTokens\":8,\"outputTokens\":2,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0.002},\"durationMs\":62,\"text\":\"Recovered.\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": 0.002,
+        "tokensIn": 8,
+        "tokensOut": 2,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.001Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.002Z",
+            "type": "run_result",
+            "finishReason": "error",
+            "iterations": 1,
+            "usage": {
+              "inputTokens": 3,
+              "outputTokens": 1,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": 0.001
+            },
+            "durationMs": 62,
+            "text": "transient",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.003Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.004Z",
+            "type": "run_result",
+            "finishReason": "completed",
+            "iterations": 1,
+            "usage": {
+              "inputTokens": 8,
+              "outputTokens": 2,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": 0.002
+            },
+            "aggregateUsage": {
+              "inputTokens": 8,
+              "outputTokens": 2,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": 0.002
+            },
+            "durationMs": 62,
+            "text": "Recovered.",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-metrics-null-independently",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"ts\":\"2026-09-08T10:54:40.001Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.002Z\",\"type\":\"run_result\",\"finishReason\":\"completed\",\"iterations\":1,\"usage\":{\"inputTokens\":\"12\",\"outputTokens\":5.0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":-0.5},\"aggregateUsage\":{\"inputTokens\":\"12\",\"outputTokens\":5.0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":-0.5},\"durationMs\":62,\"text\":\"Odd usage.\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": 5,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.001Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.002Z",
+            "type": "run_result",
+            "finishReason": "completed",
+            "iterations": 1,
+            "usage": {
+              "inputTokens": "12",
+              "outputTokens": 5.0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": -0.5
+            },
+            "aggregateUsage": {
+              "inputTokens": "12",
+              "outputTokens": 5.0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": -0.5
+            },
+            "durationMs": 62,
+            "text": "Odd usage.",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsafe-fractional-and-boolean-numbers-are-null",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"ts\":\"2026-09-08T10:54:40.002Z\",\"type\":\"run_result\",\"finishReason\":\"completed\",\"iterations\":1,\"usage\":{\"inputTokens\":9007199254740993,\"outputTokens\":2.5,\"totalCost\":true},\"aggregateUsage\":{\"inputTokens\":9007199254740993,\"outputTokens\":2.5,\"totalCost\":true},\"durationMs\":62,\"text\":\"Odd usage.\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.002Z",
+            "type": "run_result",
+            "finishReason": "completed",
+            "iterations": 1,
+            "usage": {
+              "inputTokens": 9007199254740993,
+              "outputTokens": 2.5,
+              "totalCost": true
+            },
+            "aggregateUsage": {
+              "inputTokens": 9007199254740993,
+              "outputTokens": 2.5,
+              "totalCost": true
+            },
+            "durationMs": 62,
+            "text": "Odd usage.",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "malformed-usage-nulls-all-metrics",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "{\"ts\":\"2026-09-08T10:54:40.001Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-08T10:54:40.002Z\",\"type\":\"run_result\",\"finishReason\":\"completed\",\"iterations\":1,\"usage\":\"n/a\",\"durationMs\":62,\"text\":\"No usage object.\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.001Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "ts": "2026-09-08T10:54:40.002Z",
+            "type": "run_result",
+            "finishReason": "completed",
+            "iterations": 1,
+            "usage": "n/a",
+            "durationMs": 62,
+            "text": "No usage object.",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "malformed-lines-ignored-unknown-objects-retained",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "Warning: synthetic non-JSON line\n{\"ts\":\"2026-09-08T10:54:40.001Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_synthetic_0001\",\"taskId\":\"conv_synthetic_0001\",\"parentAgentId\":null}\n[1,2,3]\n42\n\"string\"\n{\"type\":\"agent_event\",\"event\":{\"type\":\"text\"}\n{\"type\":\"future_event\",\"payload\":{\"nested\":[1,2,3]}}\n  {\"ts\":\"2026-09-08T10:54:40.002Z\",\"type\":\"run_result\",\"finishReason\":\"completed\",\"iterations\":1,\"usage\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0.5},\"aggregateUsage\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0.5},\"durationMs\":62,\"text\":\"ok\",\"model\":{\"id\":\"synthetic-model\",\"provider\":\"synthetic\"}}  \r\ntrailing garbage without newline",
+        "stderr": "noise\n"
+      },
+      "expectedParsed": {
+        "costUsd": 0.5,
+        "tokensIn": 1,
+        "tokensOut": 1,
+        "raw": [
+          {
+            "ts": "2026-09-08T10:54:40.001Z",
+            "type": "hook_event",
+            "hookEventName": "agent_start",
+            "agentId": "agent_synthetic_0001",
+            "taskId": "conv_synthetic_0001",
+            "parentAgentId": null
+          },
+          {
+            "type": "future_event",
+            "payload": {
+              "nested": [
+                1,
+                2,
+                3
+              ]
+            }
+          },
+          {
+            "ts": "2026-09-08T10:54:40.002Z",
+            "type": "run_result",
+            "finishReason": "completed",
+            "iterations": 1,
+            "usage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": 0.5
+            },
+            "aggregateUsage": {
+              "inputTokens": 1,
+              "outputTokens": 1,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "totalCost": 0.5
+            },
+            "durationMs": 62,
+            "text": "ok",
+            "model": {
+              "id": "synthetic-model",
+              "provider": "synthetic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-json-objects",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 0.2,
+        "timedOut": false,
+        "stdout": "plain text only\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "costUsd": null,
+        "tokensIn": null,
+        "tokensOut": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "native-provider-and-auto-approve-false",
+      "spec": {
+        "model": "claude-sonnet-4-6",
+        "nativeOptions": {
+          "kind": "cline",
+          "provider": "anthropic",
+          "autoApprove": false
+        }
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--model",
+          "claude-sonnet-4-6",
+          "--provider",
+          "anthropic",
+          "--auto-approve",
+          "false",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": "claude-sonnet-4-6",
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "native-provider-only",
+      "spec": {
+        "nativeOptions": {
+          "kind": "cline",
+          "provider": "openai-compatible"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--provider",
+          "openai-compatible",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "native-auto-approve-true",
+      "spec": {
+        "nativeOptions": {
+          "kind": "cline",
+          "autoApprove": true
+        }
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--auto-approve",
+          "true",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "bypass",
+      "spec": {
+        "permissionPolicy": "bypass"
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--auto-approve",
+          "true",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "bypass-with-native-provider",
+      "spec": {
+        "permissionPolicy": "bypass",
+        "nativeOptions": {
+          "kind": "cline",
+          "provider": "anthropic"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--provider",
+          "anthropic",
+          "--auto-approve",
+          "true",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "bypass-conflicts-with-explicit-auto-approve-true",
+      "spec": {
+        "permissionPolicy": "bypass",
+        "nativeOptions": {
+          "kind": "cline",
+          "autoApprove": true
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "bypass-conflicts-with-explicit-auto-approve-false",
+      "spec": {
+        "permissionPolicy": "bypass",
+        "nativeOptions": {
+          "kind": "cline",
+          "autoApprove": false
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "native-empty-provider-rejected",
+      "spec": {
+        "nativeOptions": {
+          "kind": "cline",
+          "provider": ""
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "env-nonlocal-backend-mode-rejected",
+      "spec": {
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "hub"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "env-auto-update-conflict-rejected",
+      "spec": {
+        "env": {
+          "CLINE_NO_AUTO_UPDATE": "0"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "env-hub-daemon-conflict-rejected",
+      "spec": {
+        "env": {
+          "CLINE_RUN_AS_HUB_DAEMON": "1"
+        }
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "env-desktop-approval-mode-rejected",
+      "spec": {
+        "env": {
+          "CLINE_TOOL_APPROVAL_MODE": " Desktop "
+        }
+      },
+      "expectedError": "unsupported-capability"
+    },
+    {
+      "name": "env-matching-required-values-accepted",
+      "spec": {
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "env-other-variables-preserved",
+      "spec": {
+        "env": {
+          "CLINE_TOOL_APPROVAL_MODE": "terminal",
+          "ANTHROPIC_API_KEY": "synthetic-key"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0",
+          "CLINE_TOOL_APPROVAL_MODE": "terminal",
+          "ANTHROPIC_API_KEY": "synthetic-key"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "leading-dash-multiline-prompt-verbatim-without-instructions",
+      "spec": {
+        "prompt": "--help me\nsecond line\n",
+        "instructions": null
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--",
+          "--help me\nsecond line\n"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": null,
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "empty-instructions-still-projected-and-mentioned",
+      "spec": {
+        "instructions": ""
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "empty-prompt-rejected",
+      "spec": {
+        "prompt": ""
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "whitespace-prompt-rejected",
+      "spec": {
+        "prompt": " \n\t"
+      },
+      "expectedError": "invalid-options"
+    },
+    {
+      "name": "whitespace-model-omitted",
+      "spec": {
+        "model": "   "
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": "   ",
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "provider-prefixed-model-passed-through",
+      "spec": {
+        "model": "anthropic/claude-sonnet-4-6"
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--model",
+          "anthropic/claude-sonnet-4-6",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": "anthropic/claude-sonnet-4-6",
+        "gracefulSignal": "SIGINT"
+      }
+    },
+    {
+      "name": "config-home",
+      "spec": {
+        "configHome": "<root>/cline-home"
+      },
+      "expectedCommand": {
+        "cmd": "cline",
+        "args": [
+          "--json",
+          "--cwd",
+          "<workdir>",
+          "--",
+          "Follow the instructions in @./CLINE.md\n\nSay hello."
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "CLINE_SESSION_BACKEND_MODE": "local",
+          "CLINE_NO_AUTO_UPDATE": "1",
+          "CLINE_RUN_AS_HUB_DAEMON": "0",
+          "CLINE_DIR": "<root>/cline-home"
+        },
+        "instructionsFile": "<workdir>/CLINE.md",
+        "directories": [],
+        "model": null,
+        "gracefulSignal": "SIGINT"
+      }
+    }
+  ]
+}

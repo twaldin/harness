@@ -7,7 +7,7 @@ export type { RunSubprocessOptions } from './lifecycle.js'
 
 /**
  * Blocking execution with the full lifecycle contract (fresh process group,
- * bounded TERM→KILL teardown of leftovers, bounded pipe drain, bounded
+ * bounded graceful-signal→KILL teardown of leftovers, bounded pipe drain, bounded
  * capture, stdin payload, wall and inactivity deadlines). Runs the async
  * engine in a per-invocation supervisor process so the calling thread can
  * block. `cancel` is only honored when already aborted at call time, and

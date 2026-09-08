@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (17 adapters)
+│   ├── adapters/*.py       (18 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "goose" | "copilot"
+  harness: string                  // "claude-code" | "cline" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "copilot" | "goose"
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -67,6 +67,7 @@ interface BuildCommand {
   instructionContent?: string      // exact bytes to encode as UTF-8 during preparation; empty is valid
   directories?: string[]           // planned artifact directories created during preparation
   model?: string | null            // requested/default reporting label; null when selected by config
+  gracefulSignal?: 'SIGTERM' | 'SIGINT' // first teardown signal; omitted means SIGTERM
 }
 
 // RunResult — after execution + output parsing
@@ -112,16 +113,21 @@ interface CodexOptions {
   kind: 'codex'
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'
 }
+interface ClineOptions {
+  kind: 'cline'
+  provider?: string                // upstream provider ID, independent of model
+  autoApprove?: boolean            // explicit per-run tool approval override
+}
 interface CopilotOptions {
   kind: 'copilot'
   allowTools?: readonly string[]
   denyTools?: readonly string[]
 }
-type NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions
+type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions
 interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
-  nativeOptions: 'claude-code' | 'codex' | 'copilot' | null
+  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -131,9 +137,10 @@ interface Capabilities {
 ```
 
 Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
-`ClaudeCodeOptions`, `CodexOptions` and `CopilotOptions` with equivalent values.
+`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions` and `CopilotOptions` with equivalent values.
 Construct native options as `ClaudeCodeOptions(effort="high")`,
-`CodexOptions(sandbox="read-only")` or
+`CodexOptions(sandbox="read-only")`,
+`ClineOptions(provider="openai-compatible", auto_approve=False)` or
 `CopilotOptions(allow_tools=("shell(git status)",), deny_tools=("write",))`;
 their `kind` is fixed by the dataclass. Copilot rule collections accept tuples
 or lists in Python and arrays in TypeScript. Empty collections emit no flags.
@@ -235,7 +242,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All seventeen CLI adapters share these lifecycle capabilities.
+for sessions. All eighteen CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -244,7 +251,8 @@ installation/authentication/version checks; see the adapter matrix for evidence.
 
 ### Permission policy and migration
 
-Omitted policy and `"upstream"` mean Harness adds no approval/bypass flag or mode environment override.
+Omitted policy and `"upstream"` mean Harness adds no approval/bypass flag or mode environment override unless
+the caller explicitly supplies a native override such as `ClineOptions.autoApprove`.
 Upstream policy still depends on the selected tool, its headless mode, caller
 environment and existing configuration. This does **not** promise a sandbox,
 an interactive approval channel, or denial of every tool call. An upstream
@@ -263,6 +271,7 @@ approval request by silently escalating.
 | kilo, continue-cli | `--auto` |
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
+| cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
 
@@ -272,6 +281,9 @@ silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 `--sandbox`, and cannot be combined with `"bypass"` because that would override
 the selected sandbox. Claude Code `effort` emits `--effort`; it is not a common
 model/effort policy for every tool.
+Cline `provider` emits `--provider`; `autoApprove` emits `--auto-approve true|false`.
+An explicit `autoApprove` and `"bypass"` conflict, even when both request approval.
+Cline's upstream CLI defaults to auto-approval; `"upstream"` is not a denial policy.
 Copilot `allowTools` / `denyTools` emit repeated `--allow-tool=<rule>` /
 `--deny-tool=<rule>` arguments, respectively; upstream denial takes precedence
 over grants, including explicit bypass. These rules do not enable bypass.
@@ -627,7 +639,7 @@ the registry; adding an adapter or fixture alone fails conformance.
 | fixture field | shared assertion |
 |---|---|
 | `spec` | synthetic caller input; `<root>` and `<workdir>` resolve to fresh temporary directories |
-| `expectedCommand` | exact executable, argv, cwd, env additions, instruction path, planned directories and resolved model; building writes nothing |
+| `expectedCommand` | exact executable, argv, cwd, env additions, instruction path, planned directories, resolved model and optional graceful signal; building writes nothing |
 | `capabilities` | complete capability record; unsupported backend, permission, native-option and config requests reject before preparation |
 | `sampleOutput` / `expectedParsed` | identical parsed metrics and structured `raw` payload |
 | `artifacts` | optional synthetic SQLite statements or trajectory JSON, created before direct parsing and by the substitute CLI during execution |
@@ -687,6 +699,7 @@ Configuration files are passed by path, never read or copied by the builder.
 | claude-code | `CLAUDE_CONFIG_DIR` | `--settings` |
 | codex | `CODEX_HOME` | unsupported |
 | hermes | `HERMES_HOME` | unsupported |
+| cline | `CLINE_DIR` | unsupported |
 | goose | `GOOSE_PATH_ROOT` | unsupported |
 | copilot | `COPILOT_HOME` | unsupported |
 | aider | unsupported | `--config` |
@@ -709,7 +722,7 @@ Raw `HOME`, `XDG_*` and native env overrides remain caller-controlled; passing
 an env variable does not claim the upstream supports it or separates credentials.
 Harness does not rewrite a user's settings to make a model selection stick.
 An omitted/empty model retains the existing adapter default contract; for Hermes,
-Goose and Copilot that contract is no `--model` flag and a null reported model.
+Cline, Goose and Copilot that contract is no `--model` flag and a null reported model.
 
 OMP preserves the requested model string, including unknown provider prefixes;
 it does not apply Pi's `openai-codex/` inference. An explicit OMP `configHome`
@@ -719,6 +732,14 @@ remains upstream-controlled. This selects agent state, not all global/project
 discovery or a sandbox. OMP config files are additional overlays, not replacements.
 See the [OMP adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for setup,
 event semantics, native errors and qualification limits.
+
+Cline's CLI backend selects local runtime execution, disables its detached
+auto-updater and clears daemon entry through per-run environment additions.
+Conflicting caller-supplied values reject, rather than changing backend silently.
+Native provider and approval choices are independent of the model. `configHome`
+selects existing Cline configuration; upstream writes still occur in that home.
+See the [Cline adapter reference](ADAPTER-MATRIX.md#cline) for the exact env
+contract, instruction attachment, event parsing, cancellation and coverage limits.
 
 Goose preserves explicit model IDs without provider inference. `GOOSE_PROVIDER`
 and extensions remain caller-configured. `GOOSE_PATH_ROOT` relocates config,
@@ -782,7 +803,7 @@ Current execution behavior and limits:
 | output | stdout/stderr separate; optional `onOutput(chunk, stream)` with serialized callback backpressure |
 | timeout | finite non-negative seconds, default 1800; null/None disables; zero expires immediately after launch; `exitCode=-1`, `timedOut=true`, `timeoutKind="wall"` |
 | inactivity | disabled by default; positive finite seconds since the last raw byte on either output stream; expiry sets `timeoutKind="inactivity"` |
-| process cleanup | fresh owned POSIX process group; SIGTERM, then SIGKILL after 0.5 seconds if still present; drain/close within a further 1 second |
+| process cleanup | fresh owned POSIX process group; one graceful signal (SIGTERM by default, SIGINT for Cline), then SIGKILL after 0.5 seconds if still present; drain/close within a further 1 second |
 | cancellation | optional `cancel`: Python `threading.Event`, TS `AbortSignal`; explicit cancellation returns `termination="cancelled"`, `exitCode=-1`, `timedOut=false` |
 | launch failure | `termination="launch-failed"`, `exitCode=-1`, `launchError` / `launch_error` carries the OS code |
 | signal reporting | `termination="signaled"`, negative signal number as exit code and a separate signal name; SIGTERM alone is not a timeout |
@@ -790,11 +811,20 @@ Current execution behavior and limits:
 | callback failure | `callbackError` retains the exception; while the leader runs, `termination="callback-error"`, `exitCode=-1`, `timedOut=false`; same owned teardown |
 
 `termination="exited"` covers both zero and non-zero ordinary exits. Timeout
-and cancellation retain their cause even if the leader handles SIGTERM and
+and cancellation retain their cause even if the leader handles the graceful signal and
 exits zero. `signal` records the leader's actual terminating signal, if any.
 The first terminal condition observed by the runner wins. After ordinary
 leader exit, cleanup stops leftover group members without changing the leader's
 result; inherited pipes must not turn a completed leader into a timeout.
+
+`BuildCommand.gracefulSignal` (`graceful_signal` in Python) tells external
+drivers which first teardown signal the adapter needs. The low-level subprocess
+helpers accept the same option, restricted to `SIGTERM` or `SIGINT`; omission
+retains SIGTERM. Execution forwards the planned value through the shared engine.
+Cline needs SIGINT: its qualified one-shot SIGTERM handler cannot reach the
+active session, while SIGINT disposes that session and stops its shell tools.
+This does not expand ownership beyond the process-group boundary below or
+guarantee cleanup after a crash or forced kill.
 
 ### Streaming, stdin and output limits
 
@@ -1268,7 +1298,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "claude-code", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)
@@ -1312,7 +1342,7 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.8` and TypeScript `0.2.12`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.9` and TypeScript `0.2.13`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

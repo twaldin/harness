@@ -2,7 +2,7 @@
   "notes": [
     "Shared offline subprocess conformance cases consumed by tests/test_subproc_lifecycle.py, ts/tests/subproc-lifecycle.test.ts (against ts/src) and ts/tests/node-lifecycle.mjs (against ts/dist).",
     "Each case runs in a fresh temporary directory. argv/cwd tokens: {python} = interpreter, {tests} = this directory, {dir} = the case directory. `files` are written into {dir} before launch (mode is a decimal POSIX mode).",
-    "`options` use the TypeScript option names; Python maps them to snake_case. `stdin` may be a string, null, absent, or {repeat, times}. `onOutput: true` attaches a chunk collector, so runners that cannot stream (TypeScript sync) must be excluded. `cancel` is `beforeLaunch` (already cancelled) or `afterReady` (triggered once {dir}/ready exists).",
+    "`options` use the TypeScript option names; Python maps them to snake_case. `stdin` may be a string, null, absent, or {repeat, times}. `onOutput: true` attaches a chunk collector, so runners that cannot stream (TypeScript sync) must be excluded. `cancel` is `beforeLaunch` (already cancelled) or `afterReady` (triggered once {dir}/ready exists). `gracefulSignal` selects the one signal sent to the group before SIGKILL escalation (default SIGTERM).",
     "`runners` lists the entry points per language; a case missing from a language, or listing an entry point that cannot honor its options, fails that language's coverage guard. Sync/async differences are stated in `note`.",
     "Duration bounds derive from the engine's cleanup budget (0.5s TERM grace + 1s drain = 1.5s) plus 1.5s of scheduling slack; `maxDurationSeconds` includes the run's own deadline and fixture startup. `stdoutLength`/`stderrLength` count decoded characters and are only used with ASCII content."
   ],
@@ -278,6 +278,48 @@
         "timedOut": false,
         "treeStopped": true,
         "filesExist": ["leader.term", "child.term", "grandchild.term"],
+        "maxCancelLatencySeconds": 3
+      }
+    },
+    {
+      "id": "cancel-delivers-selected-sigint-to-interrupt-tree",
+      "category": "cancellation",
+      "argv": ["{python}", "{tests}/process_tree.py", "interrupt", "{dir}"],
+      "options": {"timeoutSeconds": 20, "gracefulSignal": "SIGINT"},
+      "cancel": "afterReady",
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "The leader ignores SIGTERM and stops only on SIGINT, forwarding it to a child it started in its own session (outside the runner's group) and reaping it before exiting 0. Same sync restriction as cancel-after-ready-stops-tree.",
+      "expect": {
+        "termination": "cancelled",
+        "exitCode": -1,
+        "timedOut": false,
+        "timeoutKind": null,
+        "signal": null,
+        "launchError": null,
+        "leaderReaped": true,
+        "childRunning": false,
+        "filesExist": ["leader.int", "child.int"],
+        "stdout": "tree stdout ✓ 日本語 𝄞\n",
+        "stderrContains": "PROCESS_TREE_STDERR_MARKER\n",
+        "maxCancelLatencySeconds": 3
+      }
+    },
+    {
+      "id": "cancel-with-default-sigterm-force-kills-interrupt-tree",
+      "category": "cancellation",
+      "argv": ["{python}", "{tests}/process_tree.py", "interrupt", "{dir}"],
+      "options": {"timeoutSeconds": 20},
+      "cancel": "afterReady",
+      "runners": {"python": ["sync", "async"], "typescript": ["async"]},
+      "note": "Same tree without selecting SIGINT: the default SIGTERM is ignored, the leader is SIGKILLed after the grace period without ever writing leader.int, and the detached child (not ours to stop) keeps running. The tester owns it through child.pid.",
+      "expect": {
+        "termination": "cancelled",
+        "exitCode": -1,
+        "timedOut": false,
+        "signal": "SIGKILL",
+        "leaderReaped": true,
+        "childRunning": true,
+        "filesAbsent": ["leader.int", "child.int"],
         "maxCancelLatencySeconds": 3
       }
     },

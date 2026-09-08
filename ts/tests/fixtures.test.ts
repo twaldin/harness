@@ -23,7 +23,7 @@ import { tmpdir } from 'os'
 import { basename, dirname, join, relative } from 'path'
 import { Database } from 'bun:sqlite'
 import { HarnessError } from '../src/base.js'
-import type { Backend, BuildCommand, Capabilities, ErrorCode, NativeOptions, ParsedOutput, RunSpec, SubprocOutcome } from '../src/base.js'
+import type { Backend, BuildCommand, Capabilities, ErrorCode, GracefulSignal, NativeOptions, ParsedOutput, RunSpec, SubprocOutcome } from '../src/base.js'
 import { buildCommand, getCapabilities, listAdapters, parseOutput, run, runAsync } from '../src/registry.js'
 import '../src/adapters/index.js'
 
@@ -34,7 +34,9 @@ const FIXTURE_KEYS = ['spec', 'expectedCommand', 'capabilities', 'sampleOutput',
 const ARTIFACT_KEYS = [...FIXTURE_KEYS, 'artifacts', 'expectedParsedWithoutArtifacts']
 const LOCK = '.harness-run.lock'
 /** Ambient state that would change a command plan or a parser result. */
-const AMBIENT_ENV = ['HOME', 'OPENCODE_DB', 'OPENCODE_DISABLE_CHANNEL_DB', 'KILO_DB', 'KILO_DISABLE_CHANNEL_DB', 'KILO_CONFIG_CONTENT', 'CRUSH_DATA_DIR', 'SWE_WRAPPER', 'XDG_DATA_HOME']
+const AMBIENT_ENV = ['HOME', 'OPENCODE_DB', 'OPENCODE_DISABLE_CHANNEL_DB', 'KILO_DB', 'KILO_DISABLE_CHANNEL_DB', 'KILO_CONFIG_CONTENT', 'CRUSH_DATA_DIR', 'SWE_WRAPPER', 'XDG_DATA_HOME', 'CLINE_TOOL_APPROVAL_MODE']
+/** Spec fields where JSON `null` is a real value rather than "not provided". */
+const NULLABLE_SPEC_FIELDS = ['timeoutSeconds', 'inactivityTimeoutSeconds', 'stdin']
 
 type FixtureSpec = Omit<RunSpec, 'workdir' | 'cancel' | 'onOutput'>
 
@@ -46,6 +48,7 @@ interface FixtureExpectedCommand {
   instructionsFile: string | null
   directories: string[]
   model: string | null
+  gracefulSignal?: GracefulSignal
 }
 
 interface FixtureCapabilities {
@@ -139,7 +142,12 @@ function loadFixture(caseId: string, root: string, workdir: string): Fixture {
     }
     expect(Object.keys(variant).every((key) => Object.hasOwn(allowed, key))).toBe(true)
     const { name: _name, spec = {}, ...overrides } = variant
-    fixture = { ...base, ...overrides, spec: { ...base.spec, ...spec } }
+    // A variant can only override base keys, so `null` stands in for "not
+    // provided" except where the contract gives null a meaning of its own.
+    const merged = Object.fromEntries(
+      Object.entries({ ...base.spec, ...spec }).filter(([key, value]) => value !== null || NULLABLE_SPEC_FIELDS.includes(key)),
+    ) as FixtureSpec
+    fixture = { ...base, ...overrides, spec: merged }
   }
   return substitute(fixture, { '<workdir>': workdir, '<root>': root })
 }
@@ -180,6 +188,7 @@ function expectedCommand(raw: FixtureExpectedCommand, instructions: string | und
     model: raw.model,
   }
   if (raw.instructionsFile !== null) built.instructionContent = instructions
+  if (raw.gracefulSignal !== undefined) built.gracefulSignal = raw.gracefulSignal
   return built
 }
 
@@ -310,7 +319,7 @@ for (const name of FIXTURE_NAMES) {
         rejects('unsupported-capability', { configFile })
       }
 
-      const kinds: NativeOptions[] = [{ kind: 'claude-code' }, { kind: 'codex' }, { kind: 'copilot' }]
+      const kinds: NativeOptions[] = [{ kind: 'claude-code' }, { kind: 'codex' }, { kind: 'cline' }, { kind: 'copilot' }]
       for (const nativeOptions of kinds) {
         if (nativeOptions.kind !== caps.nativeOptions) {
           rejects('invalid-options', { nativeOptions })

@@ -32,6 +32,7 @@ from harness import (
     BuildCommand,
     ClaudeCodeOptions,
     CodexOptions,
+    CopilotOptions,
     HarnessError,
     RunSpec,
     SubprocOutcome,
@@ -91,6 +92,24 @@ def _load_fixture(case_id: str, root: Path, workdir: Path) -> dict:
     return _substitute(fixture, {"<workdir>": str(workdir), "<root>": str(root)})
 
 
+NATIVE_OPTIONS = {"claude-code": ClaudeCodeOptions, "codex": CodexOptions, "copilot": CopilotOptions}
+NATIVE_FIELDS = {"allowTools": "allow_tools", "denyTools": "deny_tools"}
+
+
+def _native_options(raw: object):
+    """Fixture `nativeOptions` → the typed dataclass for its `kind`. Values pass
+    through untouched so the adapter's validator sees exactly the fixture's
+    collection and member types; an unknown key is `invalid-options`, as a
+    caller constructing the dataclass would find out."""
+    if not isinstance(raw, dict) or raw.get("kind") not in NATIVE_OPTIONS:
+        return raw
+    fields = {NATIVE_FIELDS.get(key, key): value for key, value in raw.items() if key != "kind"}
+    try:
+        return NATIVE_OPTIONS[raw["kind"]](**fields)
+    except TypeError as exc:
+        raise HarnessError(f"nativeOptions {raw!r}: {exc}", code="invalid-options") from None
+
+
 def _make_spec(raw: dict, workdir: Path, **overrides) -> RunSpec:
     names = {
         "timeoutSeconds": "timeout_seconds", "modelNoResolve": "model_no_resolve",
@@ -98,6 +117,8 @@ def _make_spec(raw: dict, workdir: Path, **overrides) -> RunSpec:
         "configHome": "config_home", "configFile": "config_file",
     }
     fields = {names.get(key, key): value for key, value in raw.items()}
+    if "native_options" in fields:
+        fields["native_options"] = _native_options(fields["native_options"])
     fields["workdir"] = workdir
     fields["env"] = dict(raw.get("env", {}))
     fields.update(overrides)
@@ -236,7 +257,7 @@ def test_capabilities_match_fixture(case: dict, tmp_path: Path):
     else:
         rejects("unsupported-capability", config_file=config_file)
 
-    for options in (ClaudeCodeOptions(), CodexOptions()):
+    for options in (ClaudeCodeOptions(), CodexOptions(), CopilotOptions()):
         if options.kind != caps["nativeOptions"]:
             rejects("invalid-options", native_options=options)
 

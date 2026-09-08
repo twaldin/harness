@@ -2,6 +2,11 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added `copilot` in Python and TypeScript for the current official GitHub Copilot
+  CLI, with JSONL native events, explicit `CopilotOptions` tool allow/deny rules,
+  opt-in bypass and `COPILOT_HOME` selection through the shared subprocess lifecycle.
+  Token/USD totals stay null; premium requests and AI credits remain native data.
+  See [setup and dated provider/cancellation coverage](ADAPTER-MATRIX.md#copilot).
 - **Instruction lifecycle migration:** command builders are now side-effect-free.
   `run` / `runAsync` prepare and restore instructions automatically. External
   drivers must pair `prepare_command` / `prepareCommand` with

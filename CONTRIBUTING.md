@@ -1,6 +1,6 @@
 # Contributing to harness
 
-Harness is a small library for uniform coding-agent integration. CLI execution ships today; optional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
+Harness is a small library for uniform coding-agent integration. CLI execution and controlled Pi RPC sessions ship today; additional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
 
 ## Before you open a PR
 
@@ -35,9 +35,11 @@ out of public fixtures.
 
 The `subprocess lifecycle` workflow gates macOS and Linux (GitHub
 `macos-latest` / `ubuntu-latest`) with Python 3.10, Bun 1.3.14 and Node 22.
-After `bun run build`, run `node tests/node-lifecycle.mjs` from `ts/` to check
-the packaged subprocess engine under Node as well as the source under Bun.
-No Windows lifecycle coverage or support is claimed.
+After `bun run build`, run `node tests/node-lifecycle.mjs` and
+`node tests/node-sessions.mjs` from `ts/` to check packaged subprocess and RPC
+behavior under Node as well as source under Bun. The session suites consume
+`tests/session_cases.json` and the synthetic RPC peer; no installed provider
+is used. No Windows lifecycle coverage or support is claimed.
 
 Type-check source and tests from `ts/` with
 `bun x tsc --noEmit --rootDir . --allowJs`; the build checks source declarations.
@@ -188,6 +190,7 @@ Add a row to [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) covering: CLI binary name, i
 
 Streaming, controlled sessions and optional agent SDK integrations are eligible
 when they implement the [SPEC gates](SPEC.md#backend-and-session-implementation-gates)
-in both languages. This supersedes the historical blanket SDK exclusion; it
-does not claim those backends currently ship. Keep optional SDK loading isolated
-from ordinary CLI imports and preserve existing caller-selected configuration.
+in both languages. This supersedes the historical blanket SDK exclusion.
+Pi RPC is implemented; other protocols and SDKs need their own qualification.
+Keep optional SDK loading isolated from ordinary CLI imports and preserve
+existing caller-selected configuration.

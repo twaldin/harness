@@ -17,6 +17,7 @@ from harness import (
     BuildCommand,
     HarnessError,
     RunSpec,
+    VibeOptions,
     build_command,
     list_adapters,
     register,
@@ -83,7 +84,7 @@ def test_executable_overrides_cmd(workdir: Path, executable: str):
     assert build_command(_spec("claude-code", workdir, executable=executable)).cmd == executable
 
 
-@pytest.mark.parametrize("name", [n for n in list_adapters() if n not in ("claude-code", "codex", "copilot", "hermes", "omp", "cline", "goose")])
+@pytest.mark.parametrize("name", [n for n in list_adapters() if n not in ("claude-code", "codex", "copilot", "hermes", "omp", "cline", "goose", "mistral-vibe")])
 def test_config_home_unsupported_where_unmapped(name: str, workdir: Path, tmp_path: Path):
     env = {"SWE_WRAPPER": str(_wrapper(tmp_path))} if name == "swe-agent" else {}
     with pytest.raises(HarnessError) as exc:
@@ -139,8 +140,10 @@ def test_config_file_is_passed_verbatim_without_touching_it(workdir: Path, tmp_p
 def test_builders_write_nothing_and_plan_absolute_paths(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     env = {"SWE_WRAPPER": str(_wrapper(tmp_path))} if name == "swe-agent" else {}
+    # vibe reads a projected AGENTS.md only from a trusted workspace.
+    native_options = VibeOptions(trust=True) if name == "mistral-vibe" else None
     before = sorted(tmp_path.iterdir())
-    bc = build_command(RunSpec(harness=name, prompt="p", workdir=Path("missing-repo"), instructions="i", env=env))
+    bc = build_command(RunSpec(harness=name, prompt="p", workdir=Path("missing-repo"), instructions="i", env=env, native_options=native_options))
     assert sorted(tmp_path.iterdir()) == before
     assert bc.cwd == tmp_path / "missing-repo"
     assert Path.cwd() == tmp_path

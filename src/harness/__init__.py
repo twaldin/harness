@@ -31,6 +31,7 @@ from harness.base import (
     SessionTelemetry,
     Termination,
     TimeoutKind,
+    VibeOptions,
 )
 from harness.pricing import ModelPricing, derive_cost, lookup_pricing
 from harness.registry import (
@@ -107,6 +108,7 @@ __all__ = [
     "SubprocOutcome",
     "Termination",
     "TimeoutKind",
+    "VibeOptions",
     "build_command",
     "cleanup_command",
     "derive_cost",

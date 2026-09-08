@@ -25,9 +25,9 @@ authenticated or run against a provider for this catalog refresh.
 
 ## Shipped, not wanted work
 
-After adapter initialization, both registries contain eighteen adapters, with shared fixture files:
+After adapter initialization, both registries contain nineteen adapters, with shared fixture files:
 `aider`, `claude-code`, `cline`, `codex`, `continue-cli`, `copilot`, `crush`, `factory-droid`,
-`gemini`, `goose`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
+`gemini`, `goose`, `hermes`, `kilo`, `mistral-vibe`, `omp`, `openclaude`, `opencode`, `pi`, `qwen`, `swe-agent`.
 See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actual
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
@@ -115,17 +115,13 @@ specific checks supplement the [common validation scope](#validation-and-mainten
   avoid double-counting assistant plus terminal usage. Tokens are documented,
   billed USD is not. Remote orbs (`-ox`) and SDKs are distinct backends.
 
-### Mistral Vibe — [TWA-79](https://linear.app/twaldin/issue/TWA-79)
+### Mistral Vibe — shipped — [TWA-79](https://linear.app/twaldin/issue/TWA-79)
 
-- **Identity / maintenance:** [mistralai/mistral-vibe](https://github.com/mistralai/mistral-vibe),
-  Apache-2.0, maintained source/docs; release version not pinned here.
-  [Installation](https://docs.mistral.ai/vibe/code/cli/install-setup):
-  `uv tool install mistral-vibe` supplies `vibe` (Python 3.12+).
-- **Path:** [`vibe --prompt "PROMPT" --max-turns 5 --output json`](https://docs.mistral.ai/vibe/code/cli/work-with-cli).
-- **Gate / validation:** selected provider/model configuration, Mistral account/key
-  or compatible/local provider. Print mode defaults to auto-approve; folder trust
-  still matters. Verify permission/trust rejection and JSON/streaming schemas.
-  Config-derived price limits are indicative, not a reliable billing ceiling.
+`mistral-vibe` now ships in both registries, qualified against official Vibe 2.25.0
+with a bounded local synthetic provider. Programmatic mode uses the configured
+agent and denies approval callbacks; bypass and workspace trust are separate
+explicit choices. Credentialed provider success remains unqualified.
+See [setup, capabilities and evidence](ADAPTER-MATRIX.md#mistral-vibe).
 
 ### Kiro CLI — [TWA-80](https://linear.app/twaldin/issue/TWA-80)
 

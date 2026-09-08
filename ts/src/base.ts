@@ -26,8 +26,19 @@ export interface CodexOptions {
   sandbox?: CodexSandbox
 }
 
+export interface CopilotOptions {
+  kind: 'copilot'
+  /**
+   * Each entry is one upstream tool rule passed verbatim as `--allow-tool=<rule>`
+   * (Copilot's own comma grammar applies inside a rule). Emitted before deny rules.
+   */
+  allowTools?: readonly string[]
+  /** Each entry is one upstream tool rule passed verbatim as `--deny-tool=<rule>`. Coexists with bypass; upstream decides precedence. */
+  denyTools?: readonly string[]
+}
+
 /** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
-export type NativeOptions = ClaudeCodeOptions | CodexOptions
+export type NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions
 
 export type OutputStream = 'stdout' | 'stderr'
 
@@ -342,6 +353,8 @@ export interface ValidatedRunSpec {
   /** argv to splice in at the adapter's bypass slot; empty under `upstream`. */
   permissionArgs: readonly string[]
   nativeOptions: NativeOptions | null
+  /** argv the native options render to, to splice in at the adapter's native slot; empty when none apply. */
+  nativeArgs: readonly string[]
   /** Absolute working directory; relative input resolved against the process cwd without changing it. */
   workdir: string
   executable: string | null
@@ -353,10 +366,39 @@ export interface ValidatedRunSpec {
 
 const KNOWN_BACKENDS: Readonly<Record<Backend, true>> = { cli: true, rpc: true, sdk: true }
 const KNOWN_PERMISSION_POLICIES: Readonly<Record<PermissionPolicy, true>> = { upstream: true, bypass: true }
-/** Per native-options kind: field name → allowed enum values. */
-const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Record<string, readonly string[]>>>> = {
-  'claude-code': { effort: ['low', 'medium', 'high', 'xhigh', 'max'] satisfies readonly ClaudeCodeEffort[] },
-  codex: { sandbox: ['read-only', 'workspace-write', 'danger-full-access'] satisfies readonly CodexSandbox[] },
+/** How one native-options field is validated and rendered into argv. */
+type NativeField =
+  /** Closed enum emitted as `flag value`. */
+  | { readonly shape: 'enum'; readonly flag: string; readonly values: readonly string[] }
+  /** Verbatim upstream rules, each emitted as `flag=rule` in caller order. */
+  | { readonly shape: 'rules'; readonly flag: string }
+/** Per native-options kind: field name → schema. Field order is argv order. */
+const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Record<string, NativeField>>>> = {
+  'claude-code': {
+    effort: { shape: 'enum', flag: '--effort', values: ['low', 'medium', 'high', 'xhigh', 'max'] satisfies readonly ClaudeCodeEffort[] },
+  },
+  codex: {
+    sandbox: { shape: 'enum', flag: '--sandbox', values: ['read-only', 'workspace-write', 'danger-full-access'] satisfies readonly CodexSandbox[] },
+  },
+  copilot: {
+    allowTools: { shape: 'rules', flag: '--allow-tool' },
+    denyTools: { shape: 'rules', flag: '--deny-tool' },
+  },
+}
+const NATIVE_OPTION_KINDS = Object.keys(NATIVE_OPTION_FIELDS).map((kind) => JSON.stringify(kind)).join(', ')
+
+/** Upstream tool rules: non-blank strings the CLI can take as arguments, in caller order. */
+function isToolRuleList(value: unknown): value is readonly string[] {
+  if (!Array.isArray(value)) return false
+  for (const rule of value) {
+    if (typeof rule !== 'string' || rule.trim() === '' || rule.includes('\0')) return false
+  }
+  return true
+}
+
+interface ResolvedNativeOptions {
+  options: NativeOptions | null
+  args: readonly string[]
 }
 
 /** Rejects every backend except the shipped `cli`. Shared by the validator and `getCapabilities`. */
@@ -371,12 +413,12 @@ export function resolveBackend(backend: unknown): Backend {
   return 'cli'
 }
 
-function resolveNativeOptions(adapter: Adapter, spec: RunSpec): NativeOptions | null {
+function resolveNativeOptions(adapter: Adapter, spec: RunSpec): ResolvedNativeOptions {
   // Runtime shape check: specs routinely arrive from JSON/JS callers.
   const raw: unknown = spec.nativeOptions
-  if (raw === undefined) return null
+  if (raw === undefined) return { options: null, args: [] }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw) || !('kind' in raw) || typeof raw.kind !== 'string' || !Object.hasOwn(NATIVE_OPTION_FIELDS, raw.kind)) {
-    throw new HarnessError('nativeOptions must be an object with kind "claude-code" or "codex"', 'invalid-options')
+    throw new HarnessError(`nativeOptions must be an object with kind ${NATIVE_OPTION_KINDS}`, 'invalid-options')
   }
   const kind = raw.kind as NativeOptions['kind']
   if (kind !== spec.harness || adapter.nativeOptionsKind !== kind) {
@@ -388,17 +430,29 @@ function resolveNativeOptions(adapter: Adapter, spec: RunSpec): NativeOptions | 
       throw new HarnessError(`Unknown nativeOptions field "${key}" for kind "${kind}"`, 'invalid-options')
     }
   }
-  for (const [key, allowed] of Object.entries(fields)) {
+  const args: string[] = []
+  for (const [key, field] of Object.entries(fields)) {
     const value: unknown = Reflect.get(raw, key)
     if (value === undefined) continue
-    if (typeof value !== 'string' || !allowed.includes(value)) {
-      throw new HarnessError(
-        `Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected one of: ${allowed.join(', ')}`,
-        'invalid-options',
-      )
+    if (field.shape === 'enum') {
+      if (typeof value !== 'string' || !field.values.includes(value)) {
+        throw new HarnessError(
+          `Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected one of: ${field.values.join(', ')}`,
+          'invalid-options',
+        )
+      }
+      args.push(field.flag, value)
+    } else {
+      if (!isToolRuleList(value)) {
+        throw new HarnessError(
+          `Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected an array of non-blank tool rules`,
+          'invalid-options',
+        )
+      }
+      for (const rule of value) args.push(`${field.flag}=${rule}`)
     }
   }
-  return raw as NativeOptions
+  return { options: raw as NativeOptions, args }
 }
 
 function resolveExecutable(raw: unknown): string | null {
@@ -456,7 +510,7 @@ export function validateRunSpec(adapter: Adapter, spec: RunSpec): ValidatedRunSp
     permissionArgs = adapter.permissionBypassArgs
   }
 
-  const nativeOptions = resolveNativeOptions(adapter, spec)
+  const { options: nativeOptions, args: nativeArgs } = resolveNativeOptions(adapter, spec)
   if (nativeOptions?.kind === 'codex' && nativeOptions.sandbox !== undefined && permissionPolicy === 'bypass') {
     throw new HarnessError(
       'nativeOptions.sandbox conflicts with permissionPolicy "bypass" (codex bypass disables the sandbox); choose one',
@@ -484,7 +538,7 @@ export function validateRunSpec(adapter: Adapter, spec: RunSpec): ValidatedRunSp
   const configFile = resolveConfigPath('configFile', spec.configFile, adapter.configFileFlag, adapter)
   const configArgs: readonly string[] = configFile === null ? [] : [adapter.configFileFlag!, configFile]
 
-  return { backend, model, permissionPolicy, permissionArgs, nativeOptions, workdir, executable, configHome, configFile, configArgs }
+  return { backend, model, permissionPolicy, permissionArgs, nativeOptions, nativeArgs, workdir, executable, configHome, configFile, configArgs }
 }
 
 /** What an adapter plans before the shared finalizer applies the spec-level overrides. */

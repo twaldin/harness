@@ -34,6 +34,7 @@ BYPASS_FLAGS = {
     "factory-droid": "--skip-permissions-unsafe",
     "gemini": "-y",
     "hermes": "--yolo",
+    "copilot": "--allow-all",
     "qwen": "-y",
     "kilo": "--auto",
     "omp": "--auto-approve",
@@ -250,6 +251,7 @@ CONFIG_MAPPINGS = {
     "claude-code": ("CLAUDE_CONFIG_DIR", "--settings"),
     "codex": ("CODEX_HOME", None),
     "hermes": ("HERMES_HOME", None),
+    "copilot": ("COPILOT_HOME", None),
     "aider": (None, "--config"),
     "continue-cli": (None, "--config"),
     "omp": ("PI_CODING_AGENT_DIR", "--config"),
@@ -260,7 +262,7 @@ CONFIG_MAPPINGS = {
 def test_capabilities_reflect_shipped_support(name: str):
     caps = get_capabilities(name)
     expected_policies = ("upstream", "bypass") if name in BYPASS_FLAGS else ("upstream",)
-    expected_native = name if name in ("claude-code", "codex") else None
+    expected_native = name if name in ("claude-code", "codex", "copilot") else None
     home_env, file_flag = CONFIG_MAPPINGS.get(name, (None, None))
     assert caps == Capabilities(
         backend="cli",

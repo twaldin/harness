@@ -16,12 +16,8 @@ const codexAdapter: Adapter = {
 
   buildCommand(spec: RunSpec): BuildCommand {
     const validated = validateRunSpec(this, spec)
-    const { model, permissionArgs, nativeOptions, workdir } = validated
-    const args = ['exec', '-m', model]
-    if (nativeOptions?.kind === 'codex' && nativeOptions.sandbox) {
-      args.push('--sandbox', nativeOptions.sandbox)
-    }
-    args.push(...permissionArgs, '--json', '-C', workdir, spec.prompt)
+    const { model, permissionArgs, nativeArgs, workdir } = validated
+    const args = ['exec', '-m', model, ...nativeArgs, ...permissionArgs, '--json', '-C', workdir, spec.prompt]
     return finalizeCommand(this, spec, validated, { cmd: 'codex', args })
   },
 

@@ -11,9 +11,9 @@ installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
 ## Shipped versus planned
 
-The fifteen adapters below are registered in **both** implementations and have
-shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `crush`,
-`factory-droid`, `gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
+The sixteen adapters below are registered in **both** implementations and have
+shared fixture files: `aider`, `claude-code`, `codex`, `continue-cli`, `copilot`,
+`crush`, `factory-droid`, `gemini`, `hermes`, `kilo`, `omp`, `openclaude`, `opencode`, `pi`,
 `qwen`, `swe-agent`. Registration and fixtures are not proof of current upstream
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
@@ -49,6 +49,7 @@ versions below are dated observations, not a supported version range.
 | claude-code | [`@anthropic-ai/claude-code`; CLI reference](https://code.claude.com/docs/en/cli-reference) (registry 2.1.263) | 2.1.220 | Help-checked; JSON usage/cost source documented. Current pane/cutoff/config-root qualification remains TWA-96. |
 | codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | Help-checked; provider smoke **failed**: configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. |
 | continue-cli | [`@continuedev/cli`; headless mode](https://docs.continue.dev/cli/headless-mode) (1.5.47) | not on PATH | Source-checked after command/rule/model repair. Headless JSON is model output, not usage telemetry. Default ask-tier tools are excluded; explicit bypass adds `--auto`. |
+| copilot | [`@github/copilot`; programmatic reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference) | 1.0.83, isolated npm install | Help-checked; bounded no-tool provider success and cancellation on macOS arm64. JSONL records retained; token/USD totals unavailable. See [coverage limits](#copilot). |
 | crush | [`charmbracelet/tap/crush`; source](https://github.com/charmbracelet/crush) (v0.92.0) | v0.62.0 | Help-checked; upstream-shaped schema reproduction repairs nonexistent `sessions.model`. No provider/actual-run DB qualification. `--yolo` is not a `run` flag. |
 | factory-droid | [`droid`; official headless guide](https://docs.factory.ai/droid-exec/overview) (0.213.0) | 0.132.1, off PATH | Help-checked with explicit executable. Replaces nonexistent `@factory-ai/droid`. Managed/custom model IDs now remain caller-selected. Default is read-only; documented JSON has no usage/cost. |
 | gemini | [`@google/gemini-cli`; headless reference](https://geminicli.com/docs/cli/headless/) (0.58.0) | 0.37.0 | Help-checked; stats schema source-checked. Current docs deprecate `-y` in favor of `--approval-mode yolo`; installed `-y` still exists. Legacy session layout unqualified. |
@@ -67,7 +68,7 @@ selected account; fixture success cannot qualify it.
 ## Session telemetry coverage
 
 Both languages expose session-path and parsing hooks for the same 12 adapters
-(every adapter except `aider`, `hermes` and `omp`). "Wired" means the hooks exist,
+(every adapter except `aider`, `hermes`, `omp` and `copilot`). "Wired" means the hooks exist,
 not that the current upstream layout is recognized or discovery identifies a
 unique live session. Several legacy layouts below are contradicted by current
 upstreams and tracked in TWA-96. These remain caller-driven artifact helpers,
@@ -90,10 +91,11 @@ separate from [controlled Pi RPC sessions](SPEC.md#controlled-rpc-sessions).
 | aider | unwired | unwired | no session-log hooks |
 | hermes | unwired | unwired | no session-log hooks; the headless `raw.session_id` comes from stderr, not a log file |
 | omp | unwired | unwired | ephemeral headless JSONL; no latest-session discovery |
+| copilot | unwired | unwired | native JSONL events only; no latest-session discovery |
 
 ## Backend and permission capabilities
 
-All fifteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
+All sixteen support one-shot `backend="cli"`; `RunSpec` rejects RPC/SDK without
 fallback. `get_capabilities` / `getCapabilities` reports one-shot support:
 streaming (raw subprocess chunks, not structured events) and cancellation true,
 controlled sessions false. The separate `get_session_capabilities("pi")` /
@@ -102,8 +104,9 @@ Its current official package is `@earendil-works/pi-coding-agent`; older Pi and
 OMP protocols are not assumed compatible. See
 [session qualification and limits](SPEC.md#controlled-rpc-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
-hooks; `aider` and `hermes` ship none. OMP adds install metadata but no Pi-derived
-pane or session-log heuristics. These helpers remain separate from native control.
+hooks; `aider` and `hermes` ship none.
+OMP and Copilot add install metadata but no pane or session-log heuristics.
+These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
 flags. This preserves the selected upstream's policy, not a guarantee of
@@ -122,19 +125,24 @@ auto-approval behavior, use `permission_policy="bypass"` /
 | hermes | `--yolo` |
 | omp | `--auto-approve` |
 | continue-cli | `--auto` |
+| copilot | `--allow-all` |
 | crush, opencode, pi, swe-agent | unsupported; request fails before writes/spawn |
 
-Only Claude Code and Codex currently have typed native options:
+Claude Code, Codex and Copilot currently have typed native options:
 `ClaudeCodeOptions.effort` / `{kind: 'claude-code', effort}` adds `--effort`;
 `CodexOptions.sandbox` / `{kind: 'codex', sandbox}` adds `--sandbox`.
 Sandbox plus bypass is a conflict, not a precedence rule. See
 [SPEC permission migration](SPEC.md#permission-policy-and-migration).
+`CopilotOptions.allow_tools` / `deny_tools` (TS `allowTools` / `denyTools`)
+emit explicit repeated `--allow-tool=<rule>` / `--deny-tool=<rule>` flags.
+Native denial takes precedence over grants and bypass.
 
 Configuration selection is also explicit: `executable` selects the binary;
 `configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
-Codex, `HERMES_HOME` for Hermes, and `PI_CODING_AGENT_DIR` plus `--profile default`
-for OMP. `configFile` maps to Claude Code `--settings`, or `--config` for Aider,
-Continue and OMP. Other adapters reject these typed overrides. Existing
+Codex, `HERMES_HOME` for Hermes, `COPILOT_HOME` for Copilot, and
+`PI_CODING_AGENT_DIR` plus `--profile default` for OMP. `configFile` maps to
+Claude Code `--settings`, or `--config` for Aider, Continue and OMP.
+Other adapters reject these typed overrides. Existing
 caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current
 official sources, and limits.
@@ -163,6 +171,7 @@ helpers. "Populated" requires the expected output or database to be available.
 | crush        | populated         | populated                     | sqlite `sessions` totals post-exit |
 | kilo         | populated         | populated                     | sqlite `message/session` totals post-exit |
 | hermes       | **null**          | **null**                      | not parsed; stdout is preserved verbatim, only `session_id:` stderr lines are read |
+| copilot      | **null**          | **null**                      | JSONL native events retained; premium requests/AI credits are not USD or token totals |
 
 Headless cost is null for codex, aider and qwen; hermes reports null cost and tokens because its `--quiet` output has no machine-readable usage contract. Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Selected session-log parsers also derive estimates, so their cost behavior can differ from headless parsing.
 
@@ -179,6 +188,7 @@ Headless cost is null for codex, aider and qwen; hermes reports null cost and to
   - **factory-droid** preserves managed model IDs and explicitly supplied `custom:` IDs; it never invents BYOK configuration.
   - **crush** preserves explicit provider prefixes and passes bare names through.
   - **hermes** has no library default and no rewriting: an explicit model is trimmed and passed to `--model` as given; an omitted model leaves the upstream `config.yaml` selection in charge and reports `model` as null.
+  - **copilot** preserves explicit model IDs after trimming; omitted model delegates to upstream selection and reports null.
   - **omp** preserves bare names and all explicit provider prefixes; OMP resolves its own fuzzy aliases.
   - `modelNoResolve` / `model_no_resolve` bypasses these rules; surrounding whitespace is still trimmed.
 - Fairness default for frontier adapters is strict single-model:
@@ -532,6 +542,35 @@ WHERE session_id IN (
 )
 AND json_extract(data, '$.role') = 'assistant'
 ```
+
+---
+
+## copilot
+
+- **Distribution / executable**: official [`@github/copilot`](https://github.com/github/copilot-cli), binary `copilot`; this is not the old `gh copilot` shell helper. [Setup](https://docs.github.com/en/copilot/get-started/cli-quickstart) documents `npm install -g @github/copilot` with Node.js 22+, or `brew install --cask copilot-cli`. Harness never installs or updates it automatically; install metadata is caller-driven.
+- **Command**: `copilot --no-auto-update --no-remote-export --no-ask-user --output-format json [--model MODEL] [permission flags] --prompt=PROMPT`. Disables update downloads, remote session export/control and interactive questions for this local subprocess invocation. It does not disable the caller's configured tools, MCP servers or custom instructions.
+- **Prompt / instructions**: nonempty prompt passed verbatim with equals syntax, including leading dashes and newlines; empty rejects before preparation. The shared lifecycle temporarily projects `AGENTS.md` and restores it after owned teardown.
+- **Model / configuration**: no Harness default model and no provider rewriting. A trimmed explicit ID is sent as `--model`; omission delegates to upstream selection and reports null. `configHome` maps to `COPILOT_HOME` (configuration and session state); it does not copy credentials or isolate all upstream discovery. `configFile` is unsupported. Existing provider/config environment remains caller-selected.
+- **Permissions**: `upstream` injects no grant; noninteractive tools may be denied rather than prompting. `CopilotOptions(allow_tools=(...), deny_tools=(...))` / `{kind: 'copilot', allowTools: [...], denyTools: [...]}` maps each rule to `--allow-tool=<rule>` / `--deny-tool=<rule>`. Empty arrays add nothing; invalid member types, empty/whitespace-only rules and NULs reject. Native rules are preserved verbatim. Denial takes precedence over grants. `bypass` explicitly adds `--allow-all`, which allows tools, paths and URLs; it is never inferred from headless mode.
+- **Authentication / billing**: GitHub-hosted models require the selected account's Copilot entitlement, available quota and applicable organization policy. Keep native host-local login; [documented token precedence](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference) is `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, then stored credentials. No account, subscription or billing changes occur in Harness. [BYOK](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models) uses caller-selected provider environment, including optional offline mode; it is not an automatic fallback.
+- **Output**: `--output-format json` emits JSONL. All complete JSON objects are retained in order in `raw`, including assistant deltas/messages, `session.error`, `abort` and terminal `result`. Nonobjects, noise and malformed/partial lines are ignored by parsing but retained in stdout. The result event's `sessionId` is available to the caller without any latest-session search. Native errors never overwrite the actual process exit/termination.
+- **Metrics**: token and USD totals are null. Qualified JSONL `result.usage` reports premium requests, durations and code changes; cache checkpoints/AI credits are not aggregate token or USD totals. Those native values remain in `raw`. The separate upstream `--usage-output-file` and OpenTelemetry paths are not consumed.
+- **Capabilities**: CLI, raw chunk streaming and cancellation; explicit bypass and Copilot native permission rules; npm install metadata. No RPC/SDK, controlled/resumable sessions, pane or session-log helpers. Other upstream CLI choices (agents, effort, tool availability, attachments, URL/path grants, resume, ACP) have no typed Harness mapping; unknown native option fields reject rather than disappearing.
+
+### Qualification
+
+Checked September 8, 2026: official [programmatic reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference), [command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference), npm registry `@github/copilot` 1.0.83 and isolated installed `copilot --version`, `--help`, `help environment`. Host: macOS arm64, Node 26.6.0. No global installation, account switching or configuration edits.
+
+A bounded no-tool GitHub-hosted request completed with exit 0 and the requested synthetic response; default upstream routing selected the model. A separate cooperative cancellation probe returned `cancelled` and retained native abort/partial output. Process sampling saw the npm Node launcher and native binary in the same owned process group, with neither remaining after normal completion or cancellation. The probe disabled built-in MCP servers and remote export; this establishes that local path, not arbitrary configured extensions.
+
+Public-adapter smoke also passed in Python 3.11.15 and the built TypeScript
+package under Node 26.6.0: deliberately omitted model, explicit deny rules,
+synthetic no-tool response, streaming callbacks and restored instruction/lease
+files. Node `runAsync` cancellation restored the same files. Separate explicit
+`gpt-5.4` runs in both languages exited 1 because the selected account reported
+that model unavailable; Harness did not substitute another model.
+
+Shared fixtures are synthetic and exercise both public run paths, exact argv, permissions, validation, native success/failure and interrupted output. Full coding tasks, MCP/subagent/extension descendants, BYOK/offline providers, remote sessions, Linux/Windows provider execution and every subscription/model combination remain untested. Deliberately detached or remote work is outside the shared POSIX process-group cleanup guarantee.
 
 ---
 

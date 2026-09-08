@@ -1,6 +1,6 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, or hermes as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript SDK for [harness](../) — invoke claude-code, openclaude, opencode, codex, gemini, aider, swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, or copilot as a subprocess with a uniform RunSpec → RunResult contract.
 
 ## Install
 
@@ -140,7 +140,7 @@ Parses adapter output after execution. Call standalone when you've already execu
 
 ### `listAdapters(): string[]`
 
-Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
+Returns registered adapter names, sorted: `['aider', 'claude-code', 'codex', 'continue-cli', 'copilot', 'crush', 'factory-droid', 'gemini', 'hermes', 'kilo', 'omp', 'openclaude', 'opencode', 'pi', 'qwen', 'swe-agent']`.
 
 ### `getCapabilities(name: string, backend?: Backend): Capabilities`
 
@@ -166,7 +166,7 @@ a mismatched native option kind is an error, not a dropped option.
 
 ```typescript
 interface RunSpec {
-  harness: string            // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes"
+  harness: string            // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "copilot"
   prompt: string
   workdir: string            // normalized absolute cwd; must exist when prepared
   model?: string             // canonical or adapter-specific (normalized per harness; see ADAPTER-MATRIX.md)
@@ -176,7 +176,7 @@ interface RunSpec {
   modelNoResolve?: boolean   // skip harness-specific normalization (input is still trimmed)
   backend?: 'cli' | 'rpc' | 'sdk' // default cli; rpc/sdk unsupported today
   permissionPolicy?: 'upstream' | 'bypass' // default upstream
-  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions
+  nativeOptions?: NativeOptions // ClaudeCodeOptions | CodexOptions | CopilotOptions
   executable?: string       // bare name or absolute path
   configHome?: string       // caller-selected absolute upstream state home
   configFile?: string       // caller-selected absolute upstream config file
@@ -213,6 +213,11 @@ interface RunResult {
 ```
 
 Headless `parseOutput` returns null cost for codex, aider and qwen, and null cost and tokens for hermes (its stdout is preserved verbatim and never parsed; `raw` only carries a `session_id` read from stderr). Gemini estimates cost from token totals and the first model in `stats.models` when pricing is known. Other adapters read reported cost from stdout, trajectory files or session databases where available. Session-log helpers may also derive estimates and need not match headless parsing. See [ADAPTER-MATRIX.md](../ADAPTER-MATRIX.md) for details.
+
+Copilot also reports null token/USD totals, retaining its native JSONL events in
+`raw`. It uses `@github/copilot`, not `gh copilot`, and exposes explicit
+`{kind: 'copilot', allowTools: ['shell(git status)'], denyTools: ['write']}`.
+See [setup and coverage](../ADAPTER-MATRIX.md#copilot).
 
 ### Streaming and bounded capture
 

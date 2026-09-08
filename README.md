@@ -253,7 +253,7 @@ The opt-in `--worktree` features in some CLIs (e.g. `claude --worktree`) are int
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for code conventions and the "add an adapter" guide (~20 minutes).
 
-Looking for a pre-scoped first PR? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md). Each entry lists the CLI, adapter-to-copy-from, effort estimate, and the research already done.
+Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md) for source-qualified candidates, installation identities, headless paths, validation gaps and existing implementation tickets. Reuse the linked ticket rather than starting duplicate work; deferred candidates need fresh qualification first.
 
 ---
 

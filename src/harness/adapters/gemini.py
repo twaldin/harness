@@ -215,6 +215,8 @@ def _parse_gemini_stats_blob(blob: str) -> dict:
             return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": parsed}
         tokens_in += count_in
         tokens_out += count_out
+        if tokens_in > 9007199254740991 or tokens_out > 9007199254740991:
+            return {"tokens_in": None, "tokens_out": None, "cost_usd": None, "model": None, "raw": parsed}
 
     return {
         "tokens_in": tokens_in,

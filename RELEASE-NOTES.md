@@ -17,6 +17,8 @@
   TypeScript. Removed duplicated Python one-shot execution methods.
 - Malformed Gemini usage now returns unavailable telemetry in both languages,
   rather than raising, producing `NaN`, or fabricating a zero count.
+  Token totals that exceed the safe-integer limit also return unavailable
+  telemetry, even when every per-model count is individually valid.
 - Corrected Kilo install/update metadata to the official `@kilocode/cli`
   package. The bringup runner records unsupported requests per adapter and
   continues the batch without executing an unsupported request.

@@ -78,6 +78,21 @@ ownership, errors, telemetry and future SDK/session requirements. These APIs
 describe the source tree; published packages are not updated by a documentation
 or implementation merge.
 
+### Subprocess lifecycle
+
+Python `run()` blocks; Python `run_async()` and TypeScript `run()` / `runAsync()`
+allow concurrent calls. On macOS/Linux, each invocation owns a fresh process
+group, terminates leftover children on exit, and escalates SIGTERM to SIGKILL
+after a bounded grace period.
+
+Pass `cancel=threading.Event()` in Python or `cancel: controller.signal` from
+an `AbortController` in TypeScript. Explicit cancellation returns a result;
+Python task cancellation propagates `CancelledError` after process cleanup.
+Check `termination` for `exited`, `signaled`, `timed-out`, `cancelled` or
+`launch-failed`; existing exit codes, timeout flag and metrics remain available.
+See [ownership and execution](SPEC.md#ownership-and-execution) for deadlines,
+launch-error migration, synchronous cancellation limits and tested OS support.
+
 ---
 
 ## Who should use this

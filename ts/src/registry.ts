@@ -1,6 +1,6 @@
 import type { Adapter, Backend, BuildCommand, Capabilities, ParsedOutput, RunResult, RunSpec, SubprocOutcome } from './base.js'
 import { HarnessError, resolveBackend, validateRunSpec } from './base.js'
-import { runSubprocess, runSubprocessAsync } from './subproc.js'
+import { runSubprocessAsync } from './subproc.js'
 
 const registry = new Map<string, Adapter>()
 
@@ -39,7 +39,7 @@ export function getCapabilities(name: string, backend: Backend = 'cli'): Capabil
     permissionPolicies: adapter.permissionBypassArgs ? ['upstream', 'bypass'] : ['upstream'],
     nativeOptions: adapter.nativeOptionsKind ?? null,
     streaming: false,
-    cancellation: false,
+    cancellation: true,
     sessions: false,
   }
 }
@@ -57,32 +57,7 @@ export function parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutpu
   return adapter.parseOutput(spec, outcome)
 }
 
-export async function run(spec: RunSpec): Promise<RunResult> {
-  const adapter = getAdapter(spec.harness)
-  validateRunSpec(adapter, spec)
-  const built = adapter.buildCommand(spec)
-  const outcome = runSubprocess([built.cmd, ...built.args], {
-    cwd: built.cwd,
-    timeoutSeconds: spec.timeoutSeconds,
-    extraEnv: { ...built.env, ...(spec.env ?? {}) },
-  })
-  const parsed = adapter.parseOutput(spec, outcome)
-  return {
-    harness: spec.harness,
-    model: spec.model || adapter.defaultModel,
-    exitCode: outcome.exitCode,
-    durationSeconds: outcome.durationSeconds,
-    stdout: outcome.stdout,
-    stderr: outcome.stderr,
-    timedOut: outcome.timedOut,
-    costUsd: parsed.costUsd,
-    tokensIn: parsed.tokensIn,
-    tokensOut: parsed.tokensOut,
-    raw: parsed.raw,
-  }
-}
-
-export async function runAsync(spec: RunSpec): Promise<RunResult> {
+async function execute(spec: RunSpec): Promise<RunResult> {
   const adapter = getAdapter(spec.harness)
   validateRunSpec(adapter, spec)
   const built = adapter.buildCommand(spec)
@@ -90,6 +65,7 @@ export async function runAsync(spec: RunSpec): Promise<RunResult> {
     cwd: built.cwd,
     timeoutSeconds: spec.timeoutSeconds,
     extraEnv: { ...built.env, ...(spec.env ?? {}) },
+    cancel: spec.cancel,
   })
   const parsed = adapter.parseOutput(spec, outcome)
   return {
@@ -100,9 +76,24 @@ export async function runAsync(spec: RunSpec): Promise<RunResult> {
     stdout: outcome.stdout,
     stderr: outcome.stderr,
     timedOut: outcome.timedOut,
+    termination: outcome.termination,
+    signal: outcome.signal,
+    launchError: outcome.launchError,
     costUsd: parsed.costUsd,
     tokensIn: parsed.tokensIn,
     tokensOut: parsed.tokensOut,
     raw: parsed.raw,
   }
+}
+
+/**
+ * Full headless invocation. Both entry points execute in-process on the
+ * async engine (no event-loop blocking), so `spec.cancel` can abort either.
+ */
+export function run(spec: RunSpec): Promise<RunResult> {
+  return execute(spec)
+}
+
+export function runAsync(spec: RunSpec): Promise<RunResult> {
+  return execute(spec)
 }

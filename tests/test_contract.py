@@ -253,7 +253,7 @@ def test_capabilities_reflect_shipped_support(name: str):
         permission_policies=expected_policies,
         native_options=expected_native,
         streaming=False,
-        cancellation=False,
+        cancellation=True,
         sessions=False,
     )
 

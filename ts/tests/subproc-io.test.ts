@@ -47,17 +47,15 @@ function py(code: string): string[] {
 interface Chunk {
   stream: OutputStream
   text: string
-  at: number
 }
 
-/** Collects callback chunks with arrival times relative to the collector's creation. */
+/** Collects callback chunks separately, preserving each stream's order. */
 function collector(): { chunks: Chunk[]; onOutput: (chunk: string, stream: OutputStream) => void; joined: (stream: OutputStream) => string } {
-  const started = performance.now()
   const chunks: Chunk[] = []
   return {
     chunks,
     onOutput: (text, stream) => {
-      chunks.push({ stream, text, at: (performance.now() - started) / 1000 })
+      chunks.push({ stream, text })
     },
     joined: (stream) => chunks.filter((c) => c.stream === stream).map((c) => c.text).join(''),
   }
@@ -215,18 +213,31 @@ describe('capture', () => {
 describe('onOutput', () => {
   test('chunks arrive live, on separate streams, in per-stream order', async () => {
     const seen = collector()
+    const cwd = workdir()
     const outcome = await runSubprocessAsync(
-      py('import sys,time; sys.stdout.write("one "); sys.stderr.write("err1 "); time.sleep(0.5); sys.stdout.write("two"); sys.stderr.write("err2")'),
-      { cwd: workdir(), onOutput: seen.onOutput },
+      py(
+        'import os,sys,time\n'
+        + 'sys.stdout.write("one "); sys.stderr.write("err1 ")\n'
+        + 'while not os.path.exists("delivered"): time.sleep(0.01)\n'
+        + 'sys.stdout.write("two"); sys.stderr.write("err2")',
+      ),
+      {
+        cwd, timeoutSeconds: 5,
+        onOutput: (text, stream) => {
+          seen.onOutput(text, stream)
+          // Exit requires live delivery on both streams, not a startup-time guess.
+          if (seen.joined('stdout') === 'one ' && seen.joined('stderr') === 'err1 ') {
+            writeFileSync(join(cwd, 'delivered'), '')
+          }
+        },
+      },
     )
     expect(outcome.exitCode).toBe(0)
     expect(seen.joined('stdout')).toBe('one two')
     expect(seen.joined('stderr')).toBe('err1 err2')
-    const first = seen.chunks.find((c) => c.stream === 'stdout')!
-    expect(first.at).toBeLessThan(0.4) // before the child's sleep ended, i.e. before exit
     expect(outcome.callbackError).toBeNull()
     expect(outcome.stdout).toBe('one two')
-  })
+  }, 10_000)
 
   test('an async callback is awaited one at a time; reading pauses meanwhile and nothing is lost', async () => {
     let inFlight = 0

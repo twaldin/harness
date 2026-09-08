@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -100,20 +99,18 @@ async def test_run_subprocess_async_extra_env(tmp_path):
 
 @pytest.mark.asyncio
 async def test_two_parallel_runs_non_blocking(tmp_path):
-    """Two concurrent run_subprocess_async() calls finish in ~max(A,B), not A+B."""
-    delay = 0.3
-
-    async def job() -> SubprocOutcome:
+    """Both children must start before either can complete."""
+    async def job(own: str, peer: str) -> SubprocOutcome:
         return await run_subprocess_async(
-            ["sh", "-c", f"sleep {delay} && echo done"],
+            [
+                "sh", "-c",
+                'touch "$1"; while [ ! -f "$2" ]; do sleep 0.01; done; echo done',
+                "rendezvous", own, peer,
+            ],
             cwd=tmp_path,
             timeout_seconds=10,
         )
 
-    start = time.monotonic()
-    results = await asyncio.gather(job(), job())
-    elapsed = time.monotonic() - start
-
-    # Sequential would take ~0.6s; parallel should finish in ~0.3s (allow 2x slack)
-    assert elapsed < delay * 2 + 0.1, f"expected parallel finish ~{delay}s, took {elapsed:.2f}s"
-    assert all("done" in r.stdout for r in results)
+    results = await asyncio.gather(job("started-a", "started-b"), job("started-b", "started-a"))
+    assert [result.exit_code for result in results] == [0, 0]
+    assert [result.stdout.strip() for result in results] == ["done", "done"]

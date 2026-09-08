@@ -65,7 +65,7 @@ async def test_stdin_larger_than_pipe_with_concurrent_output(tmp_path: Path, run
     noise = "e" * 200_000
     cmd = _py(
         "import sys, threading\n"
-        f"t = threading.Thread(target=lambda: (sys.stderr.write({noise!r}), sys.stderr.flush())); t.start()\n"
+        "t = threading.Thread(target=lambda: (sys.stderr.write('e' * 200_000), sys.stderr.flush())); t.start()\n"
         "sys.stdout.write(sys.stdin.read()); sys.stdout.flush(); t.join()"
     )
     kwargs = dict(cwd=tmp_path, timeout_seconds=20, stdin=payload, max_output_bytes=4 * MIB)
@@ -236,7 +236,7 @@ async def test_async_backpressure_serializes_callbacks_and_pauses_inactivity(tmp
 
     lines = "".join(f"{i:06d}\n" for i in range(20000))  # 140 KB, dwarfs the pipe buffer
     outcome = await run_subprocess_async(
-        _py(f"import sys; sys.stdout.write({lines!r})"), cwd=tmp_path, timeout_seconds=20,
+        _py("import sys; sys.stdout.write(''.join(f'{i:06d}\\n' for i in range(20000)))"), cwd=tmp_path, timeout_seconds=20,
         inactivity_timeout_seconds=0.1, on_output=slow,
     )
     assert (outcome.termination, outcome.exit_code, outcome.callback_error) == ("exited", 0, None)

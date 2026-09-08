@@ -152,7 +152,7 @@ class OpenClaudeAdapter(Adapter):
     def detect_ready(self, pane: str) -> ReadyState:
         last20 = last_non_empty_join(pane, 20)
         # openclaude shows "Ready — type /help to begin" + ❯ prompt
-        if _READY_RE.search(last20) or any(_PROMPT_LINE_RE.match(l.strip()) for l in strip_ansi(pane).split("\n")):
+        if _READY_RE.search(last20) or any(_PROMPT_LINE_RE.match(line.strip()) for line in strip_ansi(pane).split("\n")):
             return "ready"
         if _UPDATE_RE.search(last20):
             return "dialog"

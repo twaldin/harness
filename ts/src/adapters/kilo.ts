@@ -211,8 +211,8 @@ kiloAdapter.detectStatus = function (pane: string): AgentStatus {
 }
 kiloAdapter.installMeta = {
   packageManager: 'npm',
-  installCommand: ['npm', 'install', '-g', 'kilo'],
-  updateCommand: ['npm', 'install', '-g', 'kilo@latest'],
+  installCommand: ['npm', 'install', '-g', '@kilocode/cli'],
+  updateCommand: ['npm', 'install', '-g', '@kilocode/cli@latest'],
   versionCommand: ['kilo', '--version'],
 }
 

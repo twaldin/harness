@@ -9,7 +9,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from harness import PermissionPolicy, RunSpec, run
+from harness import HarnessError, PermissionPolicy, RunSpec, run
 
 
 def _augment_path_with_nvm() -> None:
@@ -146,6 +146,15 @@ def _run_once(harness: str, model: str, timeout: int, keep_workdirs: bool, model
             "workdir": str(workdir),
             "hi_txt": hi_text,
             "stderr_tail": "\n".join((result.stderr or "").splitlines()[-20:]),
+        }
+    except HarnessError as error:
+        payload = {
+            "harness": harness,
+            "ok": False,
+            "reason": f"{error.code}: {error}",
+            "exit_code": None,
+            "model": model,
+            "workdir": str(workdir),
         }
     finally:
         if keep_workdirs:

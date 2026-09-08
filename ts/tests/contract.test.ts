@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'path'
 import { HarnessError, validateRunSpec } from '../src/base.js'
@@ -274,4 +274,16 @@ describe('model selection', () => {
     expect(validateRunSpec(getAdapter('codex'), specFor('codex', { model: '  gpt-5.4  ' })).model).toBe('gpt-5.4')
     expect(validateRunSpec(getAdapter('pi'), specFor('pi', { model: ' gpt-5.4 ', modelNoResolve: true })).model).toBe('gpt-5.4')
   })
+})
+
+test.each(['malformed', { input: {}, candidates: 7 }])('Gemini malformed usage is unknown (%j)', tokens => {
+  const spec = specFor('gemini')
+  const blob = JSON.stringify({ stats: { models: { 'gemini-2.5-pro': { tokens } } } })
+  const parsed = parseOutput(spec, { stdout: blob, stderr: '', exitCode: 0, durationSeconds: 0, timedOut: false })
+  expect([parsed.tokensIn, parsed.tokensOut, parsed.costUsd]).toEqual([null, null, null])
+  mkdirSync(spec.workdir, { recursive: true })
+  const log = join(spec.workdir, 'session.json')
+  writeFileSync(log, blob)
+  const telemetry = getAdapter('gemini').parseSessionLog!(log)
+  expect([telemetry.tokensIn, telemetry.tokensOut, telemetry.costUsd]).toEqual([null, null, null])
 })

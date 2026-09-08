@@ -82,6 +82,18 @@ def test_gemini_no_stats_means_no_tokens(tmp_path, monkeypatch):
     assert result.tokens_out is None
 
 
+@pytest.mark.parametrize("tokens", ["malformed", {"input": {}, "candidates": 7}])
+def test_gemini_malformed_usage_is_unknown(tmp_path, tokens):
+    blob = json.dumps({"stats": {"models": {"gemini-2.5-pro": {"tokens": tokens}}}})
+    adapter = GeminiAdapter()
+    parsed = adapter.parse_output(RunSpec(harness="gemini", prompt="x", workdir=tmp_path), _stub(stdout=blob))
+    assert (parsed["tokens_in"], parsed["tokens_out"], parsed["cost_usd"]) == (None, None, None)
+    log = tmp_path / "session.json"
+    log.write_text(blob)
+    telemetry = adapter.parse_session_log(str(log))
+    assert (telemetry.tokens_in, telemetry.tokens_out, telemetry.cost_usd) == (None, None, None)
+
+
 # --- aider ----------------------------------------------------------------
 
 

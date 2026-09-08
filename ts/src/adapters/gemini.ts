@@ -7,6 +7,15 @@ import { deriveCost } from '../pricing.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+function geminiTokenCount(value: unknown): number | null {
+  if (value == null) return 0
+  if (typeof value === 'string') {
+    if (!/^\s*\+?[0-9]+\s*$/.test(value)) return null
+    value = Number(value)
+  }
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
 function parseGeminiStatsBlob(blob: string): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null; raw: unknown | null } {
   let parsed: unknown
   try {
@@ -18,16 +27,21 @@ function parseGeminiStatsBlob(blob: string): { tokensIn: number | null; tokensOu
   const obj = parsed as Record<string, unknown>
   const stats = obj['stats'] as Record<string, unknown> | undefined
   const models = stats?.['models']
-  if (!models || typeof models !== 'object') return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
   let tokensIn = 0
   let tokensOut = 0
   let modelName: string | null = null
   for (const [name, modelStats] of Object.entries(models as Record<string, unknown>)) {
-    if (!modelStats || typeof modelStats !== 'object') continue
+    if (!modelStats || typeof modelStats !== 'object' || Array.isArray(modelStats)) continue
     if (!modelName) modelName = name
-    const t = (modelStats as Record<string, unknown>)['tokens'] as Record<string, unknown> | undefined
-    tokensIn += Number(t?.['input'] ?? 0)
-    tokensOut += Number(t?.['candidates'] ?? 0)
+    const tokens = (modelStats as Record<string, unknown>)['tokens'] ?? {}
+    if (typeof tokens !== 'object' || Array.isArray(tokens)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+    const t = tokens as Record<string, unknown>
+    const countIn = geminiTokenCount(t['input'])
+    const countOut = geminiTokenCount(t['candidates'])
+    if (countIn === null || countOut === null) return { tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: parsed }
+    tokensIn += countIn
+    tokensOut += countOut
   }
   return {
     tokensIn,

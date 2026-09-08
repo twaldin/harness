@@ -369,7 +369,10 @@ async function supervise(): Promise<void> {
     process.stdout.write(`${LAUNCHED_PREFIX}${pgid}\n`)
   })
   clearInterval(watch)
-  process.stdout.write(`${announced ? '' : `${LAUNCHED_PREFIX}-\n`}${JSON.stringify(outcome)}`, () => process.exit(0))
+  await new Promise<void>((resolve) => {
+    process.stdout.write(`${announced ? '' : `${LAUNCHED_PREFIX}-\n`}${JSON.stringify(outcome)}`, () => resolve())
+  })
+  process.exit(0)
 }
 
 /** Blocks the calling thread by running the async engine inside a supervisor process. */
@@ -412,7 +415,9 @@ export function runLifecycleSync(request: LaunchRequest): Required<SubprocOutcom
 
 const supervisorNonce = process.env[SUPERVISOR_ENV]
 if (typeof supervisorNonce === 'string' && supervisorNonce !== '' && process.argv[2] === SUPERVISOR_FLAG && process.argv[3] === supervisorNonce) {
-  supervise().catch((err: unknown) => {
+  // A consumer may bundle this module into its entry script. Finish and exit
+  // supervisor mode before that consumer's top-level code can run again.
+  await supervise().catch((err: unknown) => {
     process.stderr.write(`${err instanceof Error ? err.stack ?? err.message : String(err)}\n`)
     process.exit(70)
   })

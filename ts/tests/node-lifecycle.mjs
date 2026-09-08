@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
+import { fileURLToPath } from 'node:url'
 import { runSubprocess, runSubprocessAsync } from '../dist/index.js'
 
 async function waitUntil(predicate) {
@@ -98,6 +99,25 @@ try {
       }
     }
   }
+
+  // A bundled consumer's entry module is also import.meta.url inside the
+  // library. Supervisor mode must finish before evaluating that consumer.
+  const app = join(cwd, 'consumer.mjs')
+  const bundle = join(cwd, 'consumer-bundle.mjs')
+  const marker = join(cwd, 'consumer-ran')
+  writeFileSync(app, `
+    import assert from 'node:assert/strict'
+    import { existsSync, writeFileSync } from 'node:fs'
+    import { runSubprocess } from ${JSON.stringify(fileURLToPath(new URL('../dist/index.js', import.meta.url)))}
+    assert.equal(existsSync(${JSON.stringify(marker)}), false, 'consumer evaluated inside supervisor')
+    writeFileSync(${JSON.stringify(marker)}, '')
+    const result = runSubprocess(['sh', '-c', 'printf bundled'], { cwd: ${JSON.stringify(cwd)} })
+    assert.equal(result.stdout, 'bundled')
+  `)
+  const built = spawnSync('bun', ['build', app, '--outfile', bundle, '--target=node', '--packages=external'], { encoding: 'utf8' })
+  assert.equal(built.status, 0, built.stderr)
+  const bundled = spawnSync(process.execPath, [bundle], { encoding: 'utf8', timeout: 10_000, killSignal: 'SIGKILL' })
+  assert.equal(bundled.status, 0, bundled.stderr)
   console.log('PASS: bundled Node sync/async outcomes, startup cancellation and supervisor parent-death ownership')
 } finally {
   rmSync(cwd, { recursive: true, force: true })

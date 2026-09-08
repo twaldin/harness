@@ -1,6 +1,8 @@
-// Live sessions: one owned child process per session, strict JSONL framing on
-// stdout, correlated requests on stdin, and single-consumer bounded event
-// iterators. Two backends share the transport and lifecycle:
+// Live sessions: single-consumer bounded event iterators, serial turns and an
+// owned transport per session. `LiveSession` is the public abstract handle;
+// the process implementation below owns one child per session with strict
+// JSONL framing on stdout and correlated requests on stdin, shared by two
+// backends:
 //
 // - `pi` on `rpc`: `pi --mode rpc` (protocol of @earendil-works/pi-coding-agent
 //   0.85.1: a turn is complete on `agent_settled`, never on `agent_end`, which
@@ -18,6 +20,11 @@
 // DRAIN_MS reap/drain, and the workdir lease (with any projected AGENTS.md)
 // is held until the tree is gone. Any transport or protocol violation
 // invalidates the handle and triggers that same bounded teardown.
+//
+// `opencode` on `rpc` is the third backend: direct HTTP + SSE against a
+// caller-owned server, implemented in opencode.ts and loaded lazily. It
+// shares the spec validation, `EventQueue`, `TurnCore` and result shapes
+// declared here, never a child process.
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { closeSync, existsSync, openSync, readSync, realpathSync } from 'node:fs'
@@ -32,11 +39,11 @@ import type { PreparedCommand } from './instructions.js'
 import { DRAIN_MS, GRACE_MS, assertSupportedPlatform, describeError } from './lifecycle.js'
 import { getAdapter } from './registry.js'
 
-/** `rpc` drives `pi`; `sdk` drives `omp` through the owned Bun bridge. Any other pairing (and `cli`) is `unsupported-backend`. */
+/** `rpc` drives `pi` (and `opencode` over HTTP); `sdk` drives `omp` through the owned Bun bridge. Any other pairing (and `cli`) is `unsupported-backend`. */
 export type SessionBackend = 'rpc' | 'sdk'
 
 /** The harnesses with a live session backend. */
-type SessionHarness = 'pi' | 'omp'
+type SessionHarness = 'pi' | 'omp' | 'opencode'
 
 /**
  * Selection of the caller-installed OMP SDK. Nothing here is guessed: the
@@ -51,35 +58,57 @@ export interface OmpSdkOptions {
   auth: 'local' | 'environment'
 }
 
+export type OpenCodeAuth = 'none' | 'basic'
+
+/**
+ * Selection of a caller-owned OpenCode server (pinned v1.18.29). Nothing is
+ * discovered: endpoint and credentials are explicit and the server is never
+ * started, configured or disposed by the session.
+ */
+export interface OpenCodeOptions {
+  /** Absolute `http(s)://host[:port]` origin, optional trailing slash; credentials, path, query and fragment are rejected. */
+  endpoint: string
+  /** `none` sends no credentials; `basic` sends `Authorization: Basic` from `username`/`password`, which must both be non-empty. */
+  auth: OpenCodeAuth
+  username?: string
+  password?: string
+}
+
+/** Native OpenCode permission replies this session forwards. `always` is refused: upstream stores it as an instance-wide rule shared by every client. */
+export type OpenCodeApprovalResponse = 'once' | 'reject'
+
 /** A parsed JSON object frame; array and scalar frames are protocol errors. */
 export type JsonObject = Record<string, unknown>
 
-/** Identity of a native session: the full native ID plus the file it persists to. */
+/** Identity of a native session: the full native ID plus the file it persists to (or the server it lives on). */
 export interface SessionReference {
   /** Full native session ID; never a prefix. */
   sessionId: string
-  /** Absolute session file, or null while the native session has not been persisted yet. */
+  /** Absolute session file, or null while the native session has not been persisted yet (always null on `opencode`). */
   sessionFile: string | null
-  /** Absolute working directory the session was opened in. */
+  /** Absolute working directory the session was opened in; the literal server-side directory on `opencode`. */
   workdir: string
+  /** Normalized server origin on `opencode`; absent for process sessions, which reject a reference that carries one. */
+  endpoint?: string
 }
 
 export interface SessionSpec {
   harness: string
+  /** Local absolute directory for `pi`/`omp`; for `opencode` the literal absolute POSIX directory on the server (never resolved or created locally). */
   workdir: string
-  /** Required; `rpc` for `pi`, `sdk` for `omp`. */
+  /** Required; `rpc` for `pi` and `opencode`, `sdk` for `omp`. */
   backend: SessionBackend
-  /** Passed through as `--model <trimmed>` (rpc) or to the SDK worker (sdk); absent leaves the model to the harness's own defaults. */
+  /** Passed through as `--model <trimmed>` (rpc), to the SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. */
   model?: string
-  /** Layered over the inherited process env; never mutated. On `sdk`, entries conflicting with the owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected. */
+  /** Layered over the inherited process env; never mutated. On `sdk`, entries conflicting with the owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected. Must be empty on `opencode`. */
   env?: Record<string, string>
-  /** Replaces the `pi` binary (rpc) or the `bun` binary running the bridge worker (sdk): a bare name resolved on PATH or an absolute path. */
+  /** Replaces the `pi` binary (rpc) or the `bun` binary running the bridge worker (sdk): a bare name resolved on PATH or an absolute path. Rejected on `opencode`. */
   executable?: string
   /** Only `upstream` is supported; `bypass` is rejected. */
   permissionPolicy?: PermissionPolicy
-  /** Projected into `AGENTS.md` for the session's lifetime. */
+  /** Projected into `AGENTS.md` for the session's lifetime. Rejected on `opencode` (no local workdir). */
   instructions?: string
-  /** Resume an existing native session; needs `sessionFile` and the full `sessionId`. */
+  /** Resume an existing native session; needs `sessionFile` and the full `sessionId` (on `opencode`: a null `sessionFile`, the matching `endpoint` and the full `ses_` ID). */
   resume?: SessionReference
   /** Wall-clock limit per turn; defaults to 1800. `null` disables it. */
   timeoutSeconds?: number | null
@@ -89,24 +118,29 @@ export interface SessionSpec {
   maxBufferBytes?: number
   /** Required on `sdk`, rejected on `rpc`. */
   ompSdk?: OmpSdkOptions
+  /** Required for harness `opencode`, rejected otherwise. */
+  opencode?: OpenCodeOptions
 }
 
 /** `SessionSpec` after defaults and validation; the read-only snapshot a `LiveSession` exposes. */
-interface ResolvedSessionSpec {
+export interface ResolvedSessionSpec {
   readonly harness: SessionHarness
   readonly workdir: string
   readonly backend: SessionBackend
   readonly model: string | null
   readonly env: Readonly<Record<string, string>>
-  readonly executable: string
+  /** Leader binary for process sessions; null on `opencode`. */
+  readonly executable: string | null
   readonly permissionPolicy: PermissionPolicy
   readonly instructions: string | null
   readonly resume: SessionReference | null
   readonly timeoutSeconds: number | null
   readonly requestTimeoutSeconds: number
   readonly maxBufferBytes: number
-  /** Frozen copy of the caller's selection on `sdk`; null on `rpc`. */
+  /** Frozen copy of the caller's selection on `sdk`; null otherwise. */
   readonly ompSdk: Readonly<OmpSdkOptions> | null
+  /** Frozen, endpoint-normalized copy of the caller's selection for `opencode`; null otherwise. */
+  readonly opencode: Readonly<OpenCodeOptions> | null
 }
 
 /** What a harness supports as a live session on a backend. Static; never probes installs or credentials. */
@@ -131,14 +165,14 @@ export type SessionTurnStatus =
   | 'exited'
   | 'signaled'
 
-/** One native frame, response frames included. Unknown native event types pass through untouched in `raw`; on `sdk`, `raw` is the exact native SDK event, never the bridge wrapper. */
+/** One native frame, response frames included. Unknown native event types pass through untouched in `raw`; on `sdk`, `raw` is the exact native SDK event, never the bridge wrapper; on `opencode`, `raw` is the decoded SSE `{id, type, properties}` object. */
 export interface SessionEvent {
   backend: SessionBackend
   harness: SessionHarness
   sessionId: string
-  /** Null for frames that arrived while no turn was active. */
+  /** Null for frames that arrived while no turn was active, and on `opencode` for message frames of the selected session that do not belong to the active turn's lineage. */
   turnId: string | null
-  /** The native `id` correlation field when the frame carries one. */
+  /** The native `id` correlation field when the frame carries one; on `opencode` the native message or permission request ID. */
   requestId: string | null
   /** Native `type` string. */
   type: string
@@ -149,13 +183,13 @@ export interface SessionTurnResult {
   sessionId: string
   turnId: string
   status: SessionTurnStatus
-  /** Last `agent_end` payload, the failed `prompt` response when the prompt was rejected, or the failing `sdk_settled` bridge frame. */
+  /** Last `agent_end` payload, the failed `prompt` response, the failing `sdk_settled` bridge frame, or on `opencode` the native prompt response (`{info, parts}`) / failing HTTP JSON body. */
   raw: JsonObject | null
   error: string | null
-  /** Leader exit code once reaped, else null. Signaled exits report `-signum`. */
+  /** Leader exit code once reaped, else null. Signaled exits report `-signum`. Always null on `opencode` (no process is observed). */
   exitCode: number | null
   signal: string | null
-  /** Bounded prefix of the session's stderr so far. */
+  /** Bounded prefix of the session's stderr so far; empty with `stderrBytes` 0 on `opencode`. */
   stderr: string
   stderrBytes: number
   stderrTruncated: boolean
@@ -177,20 +211,37 @@ const BUN_ARGS: readonly string[] = ['--no-env-file']
 const DEFAULT_TIMEOUT_SECONDS = 1800
 const DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
 const DEFAULT_MAX_BUFFER_BYTES = 1_048_576
-/** Largest stdout frame accepted (bytes, excluding the delimiter). */
-const MAX_FRAME_BYTES = 1_048_576
+/** Largest stdout frame (and, on `opencode`, SSE event / HTTP JSON body) accepted in bytes. */
+export const MAX_FRAME_BYTES = 1_048_576
 const PROBE_MS = 20
 /** Characters of stderr quoted in handshake failure messages. */
 const STDERR_EXCERPT = 512
 const LF = 0x0a
 const CR = 0x0d
+/** Native OpenCode session IDs: the server validates the prefix only, so the rest is merely required to be safe alphanumerics. */
+const OPENCODE_SESSION_ID = /^ses_[0-9A-Za-z]+$/
+/** Any ASCII control character (including DEL); rejected in every OpenCode option that ends up on the wire. */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 
-function invalid(message: string): HarnessError {
+export function invalid(message: string): HarnessError {
   return new HarnessError(message, 'invalid-options')
 }
 
-function isJsonObject(value: unknown): value is JsonObject {
+export function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Bounded `setTimeout` for second-valued deadlines (clamped to the platform maximum). */
+export function deadline(seconds: number, fn: () => void): NodeJS.Timeout {
+  return setTimeout(fn, Math.min(seconds * 1000, 2_147_483_647))
+}
+
+/** The shared prompt contract of `startTurn`. */
+export function requirePrompt(prompt: unknown): string {
+  if (typeof prompt !== 'string' || prompt.trim() === '' || prompt.includes('\0')) {
+    throw invalid('prompt must be a non-empty string without NUL bytes')
+  }
+  return prompt
 }
 
 function sleep(ms: number): Promise<void> {
@@ -229,10 +280,10 @@ function ompSdkEnv(options: Readonly<OmpSdkOptions>): Readonly<Record<string, st
 }
 
 /** Which backend each session harness is qualified on; anything else is `unsupported-backend`. */
-const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk' }
+const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc' }
 
 function isSessionHarness(name: string): name is SessionHarness {
-  return name === 'pi' || name === 'omp'
+  return name === 'pi' || name === 'omp' || name === 'opencode'
 }
 
 /** Resolve the harness first, then validate the backend before rejecting an unsupported pairing. */
@@ -243,7 +294,7 @@ function requireSessionHarness(name: unknown, backend: unknown): { harness: Sess
     throw invalid(`Unknown backend: ${JSON.stringify(backend)}. Expected one of: cli, rpc, sdk`)
   }
   if (!isSessionHarness(adapter.name)) {
-    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc) and "omp" (sdk) are supported`, 'unsupported-backend')
+    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc) and "omp" (sdk) are supported`, 'unsupported-backend')
   }
   const qualified = SESSION_BACKENDS[adapter.name]
   if (backend !== qualified) {
@@ -265,7 +316,7 @@ export function getSessionCapabilities(name: string, backend: Backend = 'rpc'): 
     followUp: true,
     resume: true,
     concurrentTurns: false,
-    approval: false,
+    approval: resolved.harness === 'opencode',
   }
 }
 
@@ -288,10 +339,80 @@ function resolveOmpSdk(raw: unknown): Readonly<OmpSdkOptions> {
   return Object.freeze({ packageRoot, agentDir, auth })
 }
 
+/**
+ * Normalize an OpenCode endpoint to its origin (`scheme://host[:port]`, lower
+ * case, default port dropped). Only an absolute http(s) origin with at most a
+ * trailing slash is accepted: no credentials, path, query, fragment,
+ * whitespace or control characters.
+ */
+function normalizeEndpoint(raw: unknown, field: string): string {
+  if (typeof raw !== 'string' || raw === '') throw invalid(`${field} must be a non-empty http(s) origin`)
+  if (CONTROL_CHARS.test(raw) || /\s/.test(raw)) throw invalid(`${field} must not contain whitespace or control characters`)
+  if (raw.includes('?') || raw.includes('#')) throw invalid(`${field} must be a bare origin without query or fragment`)
+  if (!/^https?:\/\//i.test(raw) || raw.includes('\\')) throw invalid(`${field} must be an absolute http(s) origin without backslashes`)
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw invalid(`${field} is not an absolute URL`)
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw invalid(`${field} must use http or https, got ${JSON.stringify(url.protocol)}`)
+  if (url.username !== '' || url.password !== '') throw invalid(`${field} must not embed credentials; use auth "basic" with username/password`)
+  const authority = raw.slice(raw.indexOf('://') + 3)
+  if (authority.endsWith(':') || authority.endsWith(':/')) throw invalid(`${field} must not have an empty port`)
+  const slash = authority.indexOf('/')
+  if (url.pathname !== '/' || (slash !== -1 && slash !== authority.length - 1)) {
+    throw invalid(`${field} must be a bare origin without a path (an optional trailing slash is allowed)`)
+  }
+  return url.origin
+}
+
+/** Validate the caller's OpenCode server selection; the endpoint is normalized, credentials are kept verbatim and never echoed. */
+function resolveOpenCode(raw: unknown): Readonly<OpenCodeOptions> {
+  if (!isJsonObject(raw)) throw invalid('opencode must be an OpenCodeOptions object')
+  if (Object.keys(raw).some((key) => !['endpoint', 'auth', 'username', 'password'].includes(key))) {
+    throw invalid('opencode contains an unsupported option')
+  }
+  const { auth, username, password } = raw
+  const endpoint = normalizeEndpoint(raw.endpoint, 'opencode.endpoint')
+  if (auth !== 'none' && auth !== 'basic') throw invalid(`opencode.auth must be "none" or "basic", got ${JSON.stringify(auth)}`)
+  if (auth === 'none') {
+    if (username !== undefined || password !== undefined) throw invalid('opencode.username/password are only accepted with auth "basic"')
+    return Object.freeze({ endpoint, auth })
+  }
+  if (typeof username !== 'string' || username === '' || username.includes(':') || CONTROL_CHARS.test(username)) {
+    throw invalid('opencode.username must be a non-empty string without ":" or control characters')
+  }
+  if (typeof password !== 'string' || password === '' || CONTROL_CHARS.test(password)) {
+    throw invalid('opencode.password must be a non-empty string without control characters')
+  }
+  return Object.freeze({ endpoint, auth, username, password })
+}
+
+/**
+ * The literal server-side directory an OpenCode session runs in: absolute
+ * POSIX, canonical (no empty, `.` or `..` segments, no trailing slash except
+ * for the root itself). Nothing is resolved or checked locally.
+ */
+function requireServerWorkdir(raw: string): string {
+  if (!raw.startsWith('/')) throw invalid(`workdir ${JSON.stringify(raw)} must be an absolute POSIX path on the OpenCode server`)
+  if (CONTROL_CHARS.test(raw)) throw invalid('workdir must not contain control characters')
+  if (raw === '/') return raw
+  if (raw.endsWith('/')) throw invalid(`workdir ${JSON.stringify(raw)} must not end with a slash`)
+  for (const segment of raw.slice(1).split('/')) {
+    if (segment === '' || segment === '.' || segment === '..') {
+      throw invalid(`workdir ${JSON.stringify(raw)} must be canonical: no empty, "." or ".." segments`)
+    }
+  }
+  return raw
+}
+
+/** Resume target for process sessions: a persisted file plus the full ID, matching the local workdir. A server reference (`endpoint`) is rejected, never discarded. */
 function resolveReference(raw: unknown, workdir: string): SessionReference {
   if (!isJsonObject(raw)) throw invalid('resume must be a SessionReference object')
-  const { sessionId, sessionFile, workdir: refWorkdir } = raw
+  const { sessionId, sessionFile, workdir: refWorkdir, endpoint } = raw
   if (typeof sessionId !== 'string' || sessionId === '') throw invalid('resume.sessionId must be the full non-empty native session ID')
+  if (endpoint !== undefined) throw invalid('resume.endpoint is only meaningful for harness "opencode"; this reference belongs to a server session')
   if (sessionFile === null || sessionFile === undefined) {
     throw invalid('resume needs sessionFile: a session that was never persisted cannot be resumed')
   }
@@ -307,7 +428,26 @@ function resolveReference(raw: unknown, workdir: string): SessionReference {
   return { sessionId, sessionFile, workdir: refWorkdir }
 }
 
-/** Apply defaults and validate. Pure: nothing is touched on disk. */
+/** Resume target for OpenCode: the full `ses_` ID on the same normalized endpoint and literal workdir, with no session file. Verified against the server in `open`. */
+function resolveServerReference(raw: unknown, workdir: string, endpoint: string): SessionReference {
+  if (!isJsonObject(raw)) throw invalid('resume must be a SessionReference object')
+  const { sessionId, sessionFile, workdir: refWorkdir, endpoint: refEndpoint } = raw
+  if (typeof sessionId !== 'string' || !OPENCODE_SESSION_ID.test(sessionId)) {
+    throw invalid('resume.sessionId must be the full native OpenCode session ID (ses_ followed by alphanumerics)')
+  }
+  if (sessionFile !== null) throw invalid('resume.sessionFile must be null for OpenCode sessions; they live on the server, not in a local file')
+  if (refWorkdir !== workdir) {
+    throw invalid(`resume.workdir ${JSON.stringify(refWorkdir)} does not match the session workdir ${JSON.stringify(workdir)}`)
+  }
+  if (refEndpoint === undefined) throw invalid('resume.endpoint is required for OpenCode sessions')
+  const normalized = normalizeEndpoint(refEndpoint, 'resume.endpoint')
+  if (normalized !== endpoint) {
+    throw invalid(`resume.endpoint ${JSON.stringify(normalized)} does not match opencode.endpoint ${JSON.stringify(endpoint)}`)
+  }
+  return { sessionId, sessionFile: null, workdir, endpoint }
+}
+
+/** Apply defaults and validate. Pure: nothing is touched on disk or on the network. */
 function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   if (!isJsonObject(spec)) throw invalid('spec must be a SessionSpec object')
   const { harness, backend } = requireSessionHarness(spec.harness, spec.backend)
@@ -319,11 +459,19 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   } else if (rawOmpSdk !== undefined) {
     throw invalid('ompSdk is only accepted for harness "omp" on backend "sdk"')
   }
+  const rawOpenCode: unknown = spec.opencode
+  let opencode: Readonly<OpenCodeOptions> | null = null
+  if (harness === 'opencode') {
+    if (rawOpenCode === undefined) throw invalid('opencode is required for harness "opencode": endpoint and auth are never guessed')
+    opencode = resolveOpenCode(rawOpenCode)
+  } else if (rawOpenCode !== undefined) {
+    throw invalid('opencode is only accepted for harness "opencode"')
+  }
   const rawWorkdir: unknown = spec.workdir
   if (typeof rawWorkdir !== 'string' || rawWorkdir === '' || rawWorkdir.includes('\0')) {
     throw invalid('workdir must be a non-empty string without NUL bytes')
   }
-  const workdir = resolve(rawWorkdir)
+  const workdir = opencode === null ? resolve(rawWorkdir) : requireServerWorkdir(rawWorkdir)
 
   let model: string | null = null
   const rawModel: unknown = spec.model
@@ -331,6 +479,10 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     if (typeof rawModel !== 'string' || rawModel.includes('\0')) throw invalid('model must be a string without NUL bytes')
     model = rawModel.trim()
     if (model === '') throw invalid('model must not be empty')
+    if (opencode !== null) {
+      const slash = model.indexOf('/')
+      if (slash <= 0 || slash === model.length - 1) throw invalid(`model ${JSON.stringify(model)} must be "provider/model" for opencode`)
+    }
   }
 
   const env: Record<string, string> = {}
@@ -343,6 +495,9 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
       }
       env[key] = value
     }
+  }
+  if (opencode !== null && Object.keys(env).length > 0) {
+    throw invalid('env is not supported for opencode: the server process is caller-owned and its environment cannot be changed per session')
   }
   if (ompSdk !== null) {
     for (const [key, owned] of Object.entries(ompSdkEnv(ompSdk))) {
@@ -358,9 +513,12 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     }
   }
 
-  let executable = backend === 'sdk' ? 'bun' : 'pi'
+  let executable: string | null = backend === 'sdk' ? 'bun' : 'pi'
   const rawExecutable: unknown = spec.executable
-  if (rawExecutable !== undefined) {
+  if (opencode !== null) {
+    if (rawExecutable !== undefined) throw invalid('executable is not supported for opencode: no local process is launched')
+    executable = null
+  } else if (rawExecutable !== undefined) {
     if (typeof rawExecutable !== 'string' || rawExecutable === '' || rawExecutable.includes('\0')) {
       throw invalid('executable must be a non-empty string without NUL bytes')
     }
@@ -380,8 +538,14 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
 
   const rawInstructions: unknown = spec.instructions
   if (rawInstructions !== undefined && typeof rawInstructions !== 'string') throw invalid('instructions must be a string')
+  if (rawInstructions !== undefined && opencode !== null) {
+    throw invalid('instructions are not supported for opencode: the session has no local workdir to project AGENTS.md into')
+  }
 
-  const resume = spec.resume === undefined ? null : resolveReference(spec.resume, workdir)
+  let resume: SessionReference | null = null
+  if (spec.resume !== undefined) {
+    resume = opencode === null ? resolveReference(spec.resume, workdir) : resolveServerReference(spec.resume, workdir, opencode.endpoint)
+  }
 
   let timeoutSeconds: number | null = DEFAULT_TIMEOUT_SECONDS
   const rawTimeout: unknown = spec.timeoutSeconds
@@ -421,6 +585,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     requestTimeoutSeconds,
     maxBufferBytes,
     ompSdk,
+    opencode,
   })
 }
 
@@ -532,7 +697,7 @@ class BoundedCapture {
  * queue, and crossing the bound reports overflow (the session then fails)
  * while everything already queued stays readable.
  */
-class EventQueue implements AsyncIterable<SessionEvent> {
+export class EventQueue implements AsyncIterable<SessionEvent> {
   readonly #limit: number
   readonly #onOverflow: () => void
   #items: { event: SessionEvent; bytes: number }[] = []
@@ -610,20 +775,13 @@ interface AbortState {
   confirmed: boolean
 }
 
-class TurnState {
+/** The backend-independent turn: ID, bounded event queue, deadline timer and the single settlement. */
+export class TurnCore {
   readonly id: string
   readonly queue: EventQueue
   readonly promise: Promise<SessionTurnResult>
   readonly settle: (result: SessionTurnResult) => void
   timer: NodeJS.Timeout | undefined
-  promptAcked = false
-  /** Failed `prompt` response or failing `sdk_settled` frame; the turn ends as `agent-error` once every outstanding ack is in. */
-  failure: JsonObject | null = null
-  settled = false
-  lastAgentEnd: JsonObject | null = null
-  /** Last assistant message from the last `agent_end`; earlier retries do not determine the result. */
-  lastAssistant: JsonObject | null = null
-  abort: AbortState | null = null
   eventsTruncated = false
   done = false
 
@@ -642,6 +800,17 @@ class TurnState {
   }
 }
 
+class ProcessTurn extends TurnCore {
+  promptAcked = false
+  /** Failed `prompt` response or failing `sdk_settled` frame; the turn ends as `agent-error` once every outstanding ack is in. */
+  failure: JsonObject | null = null
+  settled = false
+  lastAgentEnd: JsonObject | null = null
+  /** Last assistant message from the last `agent_end`; earlier retries do not determine the result. */
+  lastAssistant: JsonObject | null = null
+  abort: AbortState | null = null
+}
+
 function lastAssistantMessage(messages: unknown): JsonObject | null {
   if (!Array.isArray(messages)) return null
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -652,15 +821,68 @@ function lastAssistantMessage(messages: unknown): JsonObject | null {
 }
 
 /**
- * An open live session (Pi RPC or the OMP SDK bridge). Obtain one through
- * `openSession`; the process group, workdir lease and projected instructions
- * are owned until `close()` (or an internal failure) tears them down. Turns
- * are sequential: the next `startTurn` after a settled result is a follow-up
- * in the same native session. There is no callback API; consume
- * `turn.events` / `events`.
+ * An open live session. Obtain one through `openSession`; the native
+ * resources (process group, workdir lease and projected instructions for
+ * `pi`/`omp`; HTTP connections and the event stream for `opencode`) are owned
+ * until `close()` (or an internal failure) tears them down. Turns are
+ * sequential: the next `startTurn` after a settled result is a follow-up in
+ * the same native session. There is no callback API; consume `turn.events` /
+ * `events`.
  */
-export class LiveSession {
+export abstract class LiveSession {
   readonly spec: ResolvedSessionSpec
+
+  protected constructor(spec: ResolvedSessionSpec) {
+    this.spec = spec
+  }
+
+  /** Open through the same validated contract as `openSession`. */
+  static async open(input: SessionSpec): Promise<LiveSession> {
+    const spec = resolveSessionSpec(input)
+    if (spec.opencode !== null) {
+      // Lazy by contract: the HTTP/SSE transport is only loaded when an OpenCode session is selected.
+      const { OpenCodeSession } = await import('./opencode.js')
+      return OpenCodeSession.connect(spec)
+    }
+    return ProcessSession.launch(spec)
+  }
+
+  /** Native identity; available once `openSession` resolved. */
+  abstract get reference(): SessionReference
+
+  /** Frames that arrive while no turn is active (single-consumer; ends when the session closes). */
+  abstract get events(): AsyncIterable<SessionEvent>
+
+  abstract get active(): SessionTurn | null
+
+  /** True once teardown has begun, whether by `close()` or by a failure. */
+  abstract get closed(): boolean
+
+  /**
+   * Reserve the single turn slot and send the prompt. Synchronous: the turn is
+   * accepted locally before anything is sent; a native rejection settles it as
+   * `agent-error`, and a prompt that is acknowledged but never settled is
+   * reported by the turn deadline as `timed-out` rather than fabricated.
+   */
+  abstract startTurn(prompt: string): SessionTurn
+
+  /** Abort the active turn; resolves once the turn settled. */
+  abstract interrupt(): Promise<void>
+
+  /**
+   * Answer an outstanding native permission request of this session. Only
+   * `opencode` supports it (`getSessionCapabilities(...).approval`); the
+   * request must have been observed as a `permission.asked` event of the
+   * selected session and still be unanswered.
+   */
+  abstract respondApproval(requestId: string, response: OpenCodeApprovalResponse): Promise<void>
+
+  /** Idempotent, concurrent-safe teardown of everything this handle owns. Cleanup failures are rethrown. */
+  abstract close(): Promise<void>
+}
+
+/** Pi RPC and the OMP SDK bridge: one owned child process per session. Constructed only through `LiveSession.open`. */
+class ProcessSession extends LiveSession {
   readonly #prepared: PreparedCommand
   readonly #child: ChildProcess
   readonly #pid: number | null
@@ -674,7 +896,7 @@ export class LiveSession {
   #reference: SessionReference | null = null
   #requestSeq = 0
   #turnSeq = 0
-  #active: TurnState | null = null
+  #active: ProcessTurn | null = null
   #writes: Promise<void> = Promise.resolve()
   #leader: LeaderExit | null = null
   #stdoutClosed = false
@@ -687,7 +909,7 @@ export class LiveSession {
   #onStdioClosed: (() => void)[] = []
 
   private constructor(spec: ResolvedSessionSpec, prepared: PreparedCommand, child: ChildProcess) {
-    this.spec = spec
+    super(spec)
     this.#prepared = prepared
     this.#child = child
     this.#pid = child.pid ?? null
@@ -715,9 +937,10 @@ export class LiveSession {
     })
   }
 
-  /** Open through the same validated contract as `openSession`. */
-  static async open(input: SessionSpec): Promise<LiveSession> {
-    const spec = resolveSessionSpec(input)
+  /** Verify any resume target, take the workdir lease, spawn the leader and complete the `get_state` handshake. */
+  static async launch(spec: ResolvedSessionSpec): Promise<LiveSession> {
+    const executable = spec.executable
+    if (executable === null) throw invalid(`harness "${spec.harness}" resolved without a leader executable`)
     assertSupportedPlatform()
     const resume = spec.resume
     if (resume !== null && resume.sessionFile !== null) verifySessionHeader(resume, resume.sessionFile, spec.backend)
@@ -737,7 +960,7 @@ export class LiveSession {
     }
     const adapter = getAdapter(spec.harness)
     const prepared = prepareCommand({
-      cmd: spec.executable,
+      cmd: executable,
       args,
       cwd: spec.workdir,
       env: layered,
@@ -751,7 +974,7 @@ export class LiveSession {
     Object.assign(env, layered)
     let child: ChildProcess
     try {
-      child = spawn(spec.executable, args, {
+      child = spawn(executable, args, {
         cwd: spec.workdir,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -761,7 +984,7 @@ export class LiveSession {
       cleanupCommand(prepared)
       throw new HarnessError(`${leaderName(spec)} could not be launched: ${describeError(err)}`, 'launch-failed')
     }
-    const session = new LiveSession(spec, prepared, child)
+    const session = new ProcessSession(spec, prepared, child)
     try {
       await session.#request('get_state', {})
     } catch (err) {
@@ -822,31 +1045,27 @@ export class LiveSession {
   }
 
   /**
-   * Reserve the single turn slot and send the prompt. Synchronous: the turn is
-   * accepted locally before the write; a native rejection settles it as
-   * `agent-error`. Prompts handled entirely by a local Pi extension or input
-   * hook may acknowledge without ever settling; the turn deadline reports
-   * those as `timed-out` rather than fabricating a completion.
+   * Prompts handled entirely by a local Pi extension or input hook may
+   * acknowledge without ever settling; the turn deadline reports those as
+   * `timed-out` rather than fabricating a completion.
    */
   startTurn(prompt: string): SessionTurn {
-    if (typeof prompt !== 'string' || prompt.trim() === '' || prompt.includes('\0')) {
-      throw invalid('prompt must be a non-empty string without NUL bytes')
-    }
+    requirePrompt(prompt)
     if (this.#dead) throw new HarnessError('session is closed', 'session-closed')
     if (this.#active !== null) {
       throw new HarnessError('a turn is still active; concurrent turns are unsupported', 'unsupported-capability')
     }
     const id = `turn-${++this.#turnSeq}`
-    const turn = new TurnState(id, new EventQueue(this.spec.maxBufferBytes, () => {
+    const turn = new ProcessTurn(id, new EventQueue(this.spec.maxBufferBytes, () => {
       turn.eventsTruncated = true
       void this.#invalidate('protocol-error', `unconsumed events of ${id} exceeded maxBufferBytes (${this.spec.maxBufferBytes})`)
     }))
     this.#active = turn
     if (this.spec.timeoutSeconds !== null) {
       const seconds = this.spec.timeoutSeconds
-      turn.timer = setTimeout(() => {
+      turn.timer = deadline(seconds, () => {
         void this.#invalidate('timed-out', `${id} exceeded timeoutSeconds (${seconds})`)
-      }, Math.min(seconds * 1000, 2_147_483_647))
+      })
     }
     this.#request('prompt', { message: prompt }).then(
       (frame) => {
@@ -884,6 +1103,11 @@ export class LiveSession {
     await turn.promise
   }
 
+  /** Neither Pi RPC nor the OMP SDK bridge exposes native permission replies; approvals stay inside the harness. */
+  respondApproval(): Promise<void> {
+    return Promise.reject(new HarnessError(`${this.spec.harness} live sessions cannot answer permission requests; only "opencode" supports respondApproval`, 'unsupported-capability'))
+  }
+
   /** Idempotent, concurrent-safe teardown: stdin EOF, TERM → KILL the group, bounded drain, then release the lease. Cleanup failures are rethrown. */
   async close(): Promise<void> {
     await this.#invalidate('closed', null)
@@ -899,9 +1123,9 @@ export class LiveSession {
     const id = `req-${++this.#requestSeq}`
     const seconds = this.spec.requestTimeoutSeconds
     return new Promise<JsonObject>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = deadline(seconds, () => {
         void this.#invalidate('protocol-error', `request ${id} (${command}) was not answered within requestTimeoutSeconds (${seconds})`)
-      }, Math.min(seconds * 1000, 2_147_483_647))
+      })
       this.#pending.set(id, { command, timer, resolve, reject })
       this.#write(`${JSON.stringify({ id, type: command, ...payload })}\n`)
     })
@@ -1097,7 +1321,7 @@ export class LiveSession {
 
   // ---- turn completion ----
 
-  #maybeComplete(turn: TurnState): void {
+  #maybeComplete(turn: ProcessTurn): void {
     if (this.#dead || turn.done || !turn.promptAcked) return
     if (turn.abort !== null && !turn.abort.acked) return
     if (turn.failure !== null) {
@@ -1120,7 +1344,7 @@ export class LiveSession {
     }
   }
 
-  #finishTurn(turn: TurnState, status: SessionTurnStatus, raw: JsonObject | null, error: string | null): void {
+  #finishTurn(turn: ProcessTurn, status: SessionTurnStatus, raw: JsonObject | null, error: string | null): void {
     if (turn.done) return
     turn.done = true
     clearTimeout(turn.timer)
@@ -1290,11 +1514,14 @@ export class LiveSession {
 }
 
 /**
- * Validate the spec, verify any resume target, take the workdir lease
- * (projecting `instructions` into AGENTS.md), spawn the leader (`pi --mode rpc`,
- * or `bun` running the OMP SDK bridge worker) and complete the `get_state`
- * handshake. Rejects with the lease released and the process group stopped
- * when any step fails.
+ * Validate the spec and open the native session. For `pi`/`omp`: verify any
+ * resume target, take the workdir lease (projecting `instructions` into
+ * AGENTS.md), spawn the leader (`pi --mode rpc`, or `bun` running the OMP SDK
+ * bridge worker) and complete the `get_state` handshake; rejects with the
+ * lease released and the process group stopped when any step fails. For
+ * `opencode`: qualify the caller-owned server (health/version, directory,
+ * session identity) and subscribe to its event stream; rejects with every
+ * owned connection closed, never touching the server itself.
  */
 export async function openSession(spec: SessionSpec): Promise<LiveSession> {
   return LiveSession.open(spec)

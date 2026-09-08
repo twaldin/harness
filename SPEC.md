@@ -1327,8 +1327,9 @@ The qualified protocol is **Pi 0.85.1**, distributed as
 explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
-Other registered adapters reject session selection with `unsupported-backend`.
-Unknown names still produce `unknown-harness`.
+Other pairings reject with `unsupported-backend`, except the separately
+documented OMP SDK and caller-owned OpenCode HTTP sessions below. Unknown
+names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
 
@@ -1351,8 +1352,9 @@ Optional fields:
 `backend: "rpc"`, `events`, `interrupt`, `followUp`, `resume` true;
 `concurrentTurns` and `approval` false. It performs no local availability/auth
 probe. Existing `getCapabilities` describes one-shot execution and retains
-its CLI behavior. There is no generic raw-command, steering, queued follow-up,
-approval-response or arbitrary native-options channel.
+its CLI behavior. There is no generic raw-command, steering, queued follow-up
+or arbitrary native-options channel. Pi's `respondApproval` /
+`respond_approval` rejects with `unsupported-capability`.
 
 ### Identity, turns and events
 
@@ -1560,10 +1562,187 @@ Sources refreshed September 8:
 [native environment](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/utils/src/env.ts),
 [SDK session lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/coding-agent/src/session/agent-session.ts).
 
+## Caller-owned OpenCode HTTP sessions
+
+`open_session` / `openSession` accept `harness: "opencode", backend: "rpc"`.
+Here RPC means direct documented HTTP routes with an SSE event subscription,
+not the OpenCode CLI, TUI automation, an owned server, or a Python SDK.
+One-shot `run` remains CLI-only. There is no dependency/backend fallback.
+
+### Explicit endpoint, authentication and remote identity
+
+The source-qualified release is **OpenCode 1.18.29**, tag commit
+`16747470f976aca3d362ad730bcd3fe82ecc2c9a`. Startup requires authenticated
+`GET /global/health` to return `healthy: true, version: "1.18.29"`.
+Other versions, including source builds reporting `"local"`, reject with
+`unsupported-backend`. The pinned OpenAPI document is 3.1.0 with a constant
+`info.version: "1.0.0"`; that field is not a release-compatibility guarantee.
+
+`SessionSpec.opencode` is required for this pairing and rejected elsewhere.
+Both roots export `OpenCodeOptions`, `OpenCodeAuth` (`"none" | "basic"`) and
+`OpenCodeApprovalResponse` (`"once" | "reject"`):
+
+| field | semantics |
+|---|---|
+| `endpoint` | required HTTP(S) origin; optional trailing slash; no embedded credentials, path prefix, query, fragment or discovery |
+| `auth` | required `"none"` or `"basic"`; never inferred from environment or local auth stores |
+| `username`, `password` | required nonempty strings for `"basic"`, forbidden with `"none"`; username cannot contain a colon; control characters reject |
+
+Basic credentials travel only in `Authorization`, never a URL. Redirects are
+not followed. The caller must trust the selected endpoint; HTTP provides no
+transport encryption. `"none"` explicitly selects an unsecured endpoint, not
+an authentication fallback. Successful Basic requests do not prove the server
+requires authentication: upstream disables its check when no password is set.
+No `workspace` routing query is sent; upstream could otherwise proxy the
+request and its credentials to a different server.
+
+Python requires the optional `harness-cli[opencode]` extra (`httpx` 0.28.x),
+loaded only when this backend opens. Missing `httpx` fails explicitly, without
+launching a CLI. Its client disables ambient proxy/netrc configuration.
+TypeScript uses the runtime's standard `fetch` API under Bun and packaged Node, without
+an OpenCode SDK dependency. Ordinary imports and capability queries do not
+connect to an endpoint or initialize upstream settings.
+
+`workdir` is a literal absolute POSIX **server-side** directory. Relative paths,
+dot segments and noncanonical separators reject; Harness does not resolve
+remote paths against its own cwd or filesystem. `GET /path?directory=...`
+must echo the selected directory. If the server resolves a symlink differently,
+opening fails with the returned canonical directory in the diagnostic; the
+caller must explicitly select that spelling. The created/resumed session's
+`directory` must also match: upstream session routes use the stored directory
+even when a different query was supplied.
+
+An OpenCode `SessionReference` contains the full native `sessionId`, null
+`sessionFile`, canonical `workdir`, and normalized `endpoint`. Python adds an
+optional `endpoint=None` field; TS adds optional `endpoint`. Pi/OMP references
+do not use it and reject endpoint-bearing resume references. OpenCode resume
+requires exact endpoint/workdir association and null `sessionFile`, verifies
+`GET /session/{id}`, and never creates a replacement when that lookup fails.
+No local session file, sqlite discovery, newest-session selection or history
+deletion is involved.
+
+Nonempty `env`, any `executable`, `instructions`, `ompSdk` / `omp_sdk`, and
+permission bypass are unsupported for this backend. No local instruction
+lease or projection is acquired. Optional `model` is a trimmed native
+`provider/model` selector; omission leaves the server's selection unchanged.
+No server config/provider/auth mutation, installation or server startup occurs.
+
+### Turns, correlation and bounded events
+
+The common serial `startTurn` / `start_turn`, events, result, interrupt and
+close operations remain. `getSessionCapabilities("opencode", "rpc")` reports
+events, interrupt, follow-up, resume and approval true; concurrent turns false.
+The caller must have exclusive write access to the selected native session.
+Upstream supplies no atomic cross-client lease; an idle status check is not a
+lock and an externally busy session is not silently joined.
+
+Opening subscribes to scoped `GET /event` and awaits `server.connected`, which
+the pinned server sends after registering its listener. A turn supplies a
+fresh `msg_...` ID to `POST /session/{id}/message`, with text parts and optional
+model. The synchronous route waits for the native run loop. The asynchronous
+`/prompt_async` route is not used: its 204 is only acceptance, not persistence
+or completion.
+
+Completion requires **both** the correlated synchronous HTTP response and an
+SSE `session.status` idle observed after this turn's user-message echo.
+Assistant `info.parentID` must equal the submitted message ID, and its
+`sessionID` must match. Busy/retry statuses, intermediate assistant/tool steps,
+an old idle event and an HTTP acknowledgement cannot settle the turn. Native
+`MessageAbortedError` means interrupted; other native assistant errors mean
+agent-error. Success requires completed assistant metadata and a nonempty
+`finish` other than `"tool-calls"` or `"unknown"`.
+
+This is deliberately strict correlation, not inferred ancestry. OpenCode's
+automatic context-overflow compaction, replay/continue prompts, or subtask
+paths can create another user message internally and return an assistant
+parented to it. Such a result is **unsupported** and fails with a correlation
+`protocol-error`, retaining its native payload. The same mismatch can arise
+from an external writer; Harness does not invent lineage or report success.
+Automatic compaction is therefore not qualified for long-context sessions.
+
+Events retain the complete native `{id?, type, properties}` payload and stream
+order, with `backend: "rpc", harness: "opencode"`. Native message/permission
+IDs provide `requestId` where available. Known current-turn messages feed the
+turn stream; historical/unassociated message updates feed `session.events`
+with null `turnId`. Explicitly foreign-session events are filtered. Unknown
+selected-session event types stay visible. Server connection/heartbeat events
+are idle events; `server.instance.disposed` is visible before disconnect.
+The caller must drain both bounded streams when retaining a long-lived handle.
+
+SSE accepts UTF-8, LF/CRLF framing, comments and multiline `data:` fields.
+Frames/partial input and HTTP JSON bodies are bounded to 1 MiB; identity and
+permission tracking are bounded too. Invalid UTF-8/JSON, invalid shapes,
+oversized frames/bodies and a partial final SSE frame fail as protocol-error.
+Clean EOF is disconnected. Queue overflow retains prior events and exposes
+`eventsTruncated`; no transparent reconnect, replay or silent loss occurs.
+Upstream emits no SSE replay cursor. Resume opens a fresh subscription and
+continues persisted session history, not missed event delivery.
+
+`result.raw` retains the authoritative native HTTP response when available;
+partial progress remains in queued events on failure. Usage/cost fields stay
+native: repeated cumulative snapshots must not be summed, zero is preserved,
+and no billing/price estimate is fabricated. There is no owned process, so
+`exitCode` and `signal` are null and stderr is empty with byte count zero.
+HTTP status failure during startup is `launch-failed`; successful responses
+with malformed/wrong identity are `protocol-error`. Native prompt HTTP errors
+are `agent-error`; redirects and unexpected 204 are protocol violations.
+
+### Approval, interruption and disposal
+
+`await session.respondApproval(requestId, response)` /
+`await session.respond_approval(request_id, response)` answers an observed
+outstanding `permission.asked` for this session through
+`POST /permission/{id}/reply?directory=...`, body `{reply: response}`.
+Only `"once"` and `"reject"` are supported; no automatic answer is sent.
+Upstream rejection can reject **all** outstanding permissions in the same
+session, and a model may recover from a rejected tool and finish successfully.
+The native `"always"` reply raises `unsupported-capability` before HTTP because
+it changes instance-wide allow rules shared with other clients.
+Stale/unknown IDs reject explicitly. Pi/OMP expose the same method but reject
+it as unsupported. Native question dialogs, arbitrary tools/commands, forks
+and broader approval/config controls have no Harness mapping.
+
+`interrupt()` explicitly sends `POST /session/{id}/abort`, requires true plus
+the turn's native settlement, and preserves follow-up. A normal completion
+racing abort remains completed. Request/interrupt deadlines are bounded;
+long-running prompt completion uses the turn deadline, not the short request
+deadline. An unanswered permission/question can reach that turn deadline.
+
+`close()` is idempotent and safe for concurrent callers. It settles an active
+turn as closed and cancels/closes only client requests, tasks and the SSE
+subscription. It **never** calls abort, instance/global dispose, history
+deletion or server shutdown. Timeout and protocol/transport failure likewise
+close local transport without claiming the server-side work stopped.
+Server-side work may continue; explicitly interrupt before closing when a
+confirmed stop is required. Python cancellation waits for shielded local
+cleanup. Neither language takes ownership of the caller's server or tools.
+
+### Qualification evidence
+
+`tests/opencode_cases.json`, the bounded synthetic HTTP/SSE peer, Python tests,
+Bun source tests and `node tests/node-opencode.mjs` exercise shared protocol
+and ownership scenarios. This is **mock-server conformance**, not an installed
+OpenCode run. No real credentials or conversations are in fixtures.
+
+- **Native-runtime synthetic-provider evidence: not run/unqualified.** OpenCode
+  1.18.29 is the source pin, not an installed-runtime result; no caller-supplied
+  real endpoint was available.
+- **Authenticated-provider evidence: not run/unqualified.** No real endpoint,
+  provider, model or credentials were selected. Generation, tool execution and
+  native cleanup have not been exercised. Fixture success does not fill this gap.
+
+Pinned sources:
+[OpenAPI schema](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/sdk/openapi.json),
+[session routes](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts),
+[SSE](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts),
+[runner](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/effect/runner.ts),
+[permission scope](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/permission/index.ts),
+[compaction](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/session/compaction.ts).
+
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC and OMP SDK session implementations
-above and future backends. They keep the common library small; they do not
+These requirements govern the shipped Pi RPC, OMP SDK and caller-owned OpenCode
+HTTP session implementations above and future backends. They keep the common library small; they do not
 enable additional SDKs or native protocols by themselves.
 
 - Backend selection is explicit and stable for a run/session. SDK dependencies

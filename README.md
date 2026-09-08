@@ -244,6 +244,66 @@ No package/binary/backend fallback occurs. See the
 [full SDK contract](SPEC.md#optional-omp-sdk-sessions) for configuration
 precedence, disposal bounds, native event semantics and qualification limits.
 
+### Caller-owned OpenCode HTTP sessions
+
+Select `harness="opencode", backend="rpc"` with an explicit `OpenCodeOptions`
+endpoint and auth choice. The caller supplies an already-running **OpenCode
+1.18.29** server and its canonical absolute workdir; Harness does not start,
+configure or stop it. Python needs the optional `harness-cli[opencode]` extra
+(`httpx` 0.28.x); TypeScript uses runtime `fetch`, with no OpenCode SDK dependency.
+
+```python
+from harness import OpenCodeOptions, SessionSpec, open_session
+
+async def review(endpoint: str, server_workdir: str):
+    session = await open_session(SessionSpec(
+        harness="opencode", backend="rpc", workdir=server_workdir,
+        opencode=OpenCodeOptions(endpoint=endpoint, auth="none"),
+    ))
+    try:
+        turn = session.start_turn("Review the repository without editing files.")
+        async for event in turn.events:
+            print(event.type)
+        print((await turn.result).status)
+        return session.reference
+    finally:
+        await session.close()
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+async function review(endpoint: string, serverWorkdir: string) {
+  const session = await openSession({
+    harness: 'opencode', backend: 'rpc', workdir: serverWorkdir,
+    opencode: { endpoint, auth: 'none' },
+  })
+  try {
+    const turn = session.startTurn('Review the repository without editing files.')
+    for await (const event of turn.events) console.log(event.type)
+    console.log((await turn.result).status)
+    return session.reference
+  } finally {
+    await session.close()
+  }
+}
+```
+
+`auth: "none"` deliberately selects an unsecured server. For Basic auth,
+explicitly supply `auth: "basic"`, `username` and `password`; no credentials or
+endpoint are discovered. Resume passes the exact returned reference, same
+endpoint and server workdir. Only one writer may drive that native session.
+
+Observed permission requests can be answered with `respond_approval` /
+`respondApproval`, using `"once"` or `"reject"`; `"always"` is unsupported
+because it changes rules shared by other clients. `interrupt()` explicitly
+aborts the native turn. **Closing or timing out closes only local transport;
+server work can continue.** Long-context auto-compaction and other native
+synthetic follow-ups that change message ancestry are explicitly unsupported.
+Mock-server conformance is not native-runtime or authenticated-provider
+qualification; those checks have not run. See the
+[HTTP session contract and evidence limits](SPEC.md#caller-owned-opencode-http-sessions).
+
 ---
 
 ## Who should use this

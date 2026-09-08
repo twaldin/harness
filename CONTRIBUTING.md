@@ -1,6 +1,6 @@
 # Contributing to harness
 
-Harness is a small library for uniform coding-agent integration. CLI execution, controlled Pi RPC sessions and an optional OMP SDK bridge ship today; additional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
+Harness is a small library for uniform coding-agent integration. CLI execution, controlled Pi RPC sessions, an optional OMP SDK bridge and caller-owned OpenCode HTTP/SSE sessions ship today; additional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
 
 ## Before you open a PR
 
@@ -26,8 +26,8 @@ All tests must pass in both. If you add a fixture, both impls must parse it.
 
 ### Offline conformance versus live smoke
 
-Ordinary `pytest` and `bun test` runs use synthetic fixtures and local child
-executables, not installed coding-agent CLIs, provider accounts or network calls.
+Ordinary `pytest` and `bun test` runs use synthetic fixtures, local child
+executables and bounded owned loopback HTTP peers, not installed coding-agent CLIs, provider accounts or external network calls.
 Dependency installation may use the network; CI runs Python tests with
 `uv run --offline` after installing dependencies. Fixture logs contain only
 synthetic prompts, usage and identifiers; keep real credentials and conversations
@@ -36,11 +36,15 @@ out of public fixtures.
 The `subprocess lifecycle` workflow gates macOS and Linux (GitHub
 `macos-latest` / `ubuntu-latest`) with Python 3.10, Bun 1.3.14 and Node 22.
 After `bun run build`, run `node tests/node-lifecycle.mjs` and
-`node tests/node-sessions.mjs` and `node tests/node-omp-sdk.mjs` from `ts/` to
-check packaged subprocess, RPC and optional SDK-bridge behavior under Node as
-well as source under Bun. The SDK cases use a synthetic package through the
+`node tests/node-sessions.mjs`, `node tests/node-omp-sdk.mjs` and
+`node tests/node-opencode.mjs` from `ts/` to check packaged subprocess, RPC,
+optional SDK-bridge and HTTP/SSE behavior under Node as well as source under Bun.
+The SDK cases use a synthetic package through the
 real Bun worker, not an installed OMP/provider. No Windows lifecycle support
 is claimed.
+The HTTP cases share `tests/opencode_cases.json` and an isolated synthetic peer
+with a finite lifetime and handle-owned cleanup. They are not native OpenCode
+or authenticated-provider qualification; keep those evidence categories separate.
 
 Type-check source and tests from `ts/` with
 `bun x tsc --noEmit --rootDir . --allowJs`; the build checks source declarations.
@@ -196,6 +200,7 @@ Add a row to [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) covering: CLI binary name, i
 Streaming, controlled sessions and optional agent SDK integrations are eligible
 when they implement the [SPEC gates](SPEC.md#backend-and-session-implementation-gates)
 in both languages. This supersedes the historical blanket SDK exclusion.
-Pi RPC and the OMP SDK bridge are implemented; other protocols/SDKs need qualification.
+Pi RPC, the OMP SDK bridge and caller-owned OpenCode HTTP/SSE are implemented;
+other protocols/SDKs need qualification.
 Keep optional SDK loading isolated from ordinary CLI imports and preserve
 existing caller-selected configuration.

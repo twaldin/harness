@@ -116,6 +116,11 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
+function tokenCount(value: unknown): number | null {
+  if (value == null) return 0
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
 /**
  * Sum assistant usage once per API message id; derive cost when no cost field
  * exists. Claude Code writes one transcript line per assistant content block,
@@ -144,11 +149,17 @@ export function parseClaudeTranscript(path: string): SessionTelemetry {
       const duplicate = typeof messageId === 'string' && seenMessageIds.has(messageId)
       if (typeof messageId === 'string') seenMessageIds.add(messageId)
       if (usage) {
-        const input = Number(usage['input_tokens'] ?? 0)
-        const output = Number(usage['output_tokens'] ?? 0)
+        const input = tokenCount(usage['input_tokens'])
+        const output = tokenCount(usage['output_tokens'])
+        if (input === null || output === null) {
+          return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+        }
         const prior = typeof messageId === 'string' ? previousUsage.get(messageId) : undefined
         tokensIn += input - (prior?.input ?? 0)
         tokensOut += output - (prior?.output ?? 0)
+        if (!Number.isSafeInteger(tokensIn) || !Number.isSafeInteger(tokensOut)) {
+          return { sessionLogPath: path, tokensIn: null, tokensOut: null, costUsd: null, model: null, raw: null }
+        }
         if (typeof messageId === 'string') previousUsage.set(messageId, { input, output })
         sawUsage = true
       }

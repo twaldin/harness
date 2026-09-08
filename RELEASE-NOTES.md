@@ -9,6 +9,8 @@
   uses only its own config root and preserves provider model namespaces.
   Native session metrics replace guessed schemas; Continue headless output
   remains non-telemetry. See [sources and runtime limits](ADAPTER-MATRIX.md#artifact-qualification--2026-09-08).
+  Malformed or unsafe Claude token totals and non-finite Continue metrics remain
+  unknown rather than throwing or reporting invalid numeric telemetry.
   Pane precedence and controlled-session ownership are unchanged.
 - Added the standalone `cline` CLI adapter in Python and TypeScript, with native
   provider/approval options, `CLINE_DIR`, explicit instruction attachment and

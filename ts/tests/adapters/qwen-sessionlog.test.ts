@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeEach } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, realpathSync, utimesSync } from 'node:fs'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, realpathSync, utimesSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import '../../src/adapters/index.js'
@@ -53,10 +53,17 @@ function expectTelemetry(actual: Telemetry, expected: Telemetry): void {
 describe('qwen session log', () => {
   let home: string
   let workdir: string
+  let base: string
+  let originalEnv: Record<string, string | undefined>
   const adapter = getAdapter('qwen')
 
   beforeEach(() => {
-    const base = mkdtempSync(join(tmpdir(), 'harness-ts-qwen-'))
+    originalEnv = {
+      HOME: process.env.HOME,
+      [FX.sourceQualification.homeEnv]: process.env[FX.sourceQualification.homeEnv],
+      [FX.sourceQualification.runtimeDirEnv]: process.env[FX.sourceQualification.runtimeDirEnv],
+    }
+    base = mkdtempSync(join(tmpdir(), 'harness-ts-qwen-'))
     home = join(base, 'home')
     workdir = join(base, 'repo')
     mkdirSync(home)
@@ -64,6 +71,14 @@ describe('qwen session log', () => {
     process.env.HOME = home
     delete process.env[FX.sourceQualification.homeEnv]
     delete process.env[FX.sourceQualification.runtimeDirEnv]
+  })
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    rmSync(base, { recursive: true, force: true })
   })
 
   test('old basename layouts are not sessions', () => {

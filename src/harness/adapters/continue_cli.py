@@ -15,6 +15,7 @@ persists a model id (`chatModelTitle` is unset), so `model` stays null.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -98,11 +99,21 @@ def _read_json_object(path: Path) -> dict | None:
 
 
 def _to_int(v: object) -> int | None:
-    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    return int(v)
 
 
 def _to_float(v: object) -> float | None:
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    try:
+        value = float(v)
+    except OverflowError:
+        return None
+    return value if math.isfinite(value) else None
 
 
 

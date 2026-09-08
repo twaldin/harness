@@ -237,7 +237,8 @@ def test_native_telemetry_boundaries_in_both_runtimes(case: dict, tmp_path: Path
     if shutil.which("bun") is None:
         pytest.skip("bun not available")
     path = tmp_path / "session.jsonl"
-    path.write_text("\n".join(json.dumps(record) for record in case["records"]) + "\n")
+    text = case["text"] if "text" in case else "\n".join(json.dumps(record) for record in case["records"])
+    path.write_text(text + "\n")
     for adapter in case["adapters"]:
         py_result = _py_telemetry_dict(get_adapter(adapter).parse_session_log(str(path)))
         ts_result = _ts_call(adapter, "parseSessionLog", str(path), os.environ.copy())

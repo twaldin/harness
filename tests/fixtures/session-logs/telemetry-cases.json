@@ -1,5 +1,29 @@
 [
   {
+    "name": "Claude malformed usage invalidates session totals",
+    "adapters": ["claude-code", "openclaude"],
+    "records": [
+      {"type":"assistant","message":{"id":"valid","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":1}}},
+      {"type":"assistant","message":{"id":"invalid","model":"claude-sonnet-4-6","usage":{"input_tokens":"broken","output_tokens":2}}}
+    ],
+    "expected": {"tokensIn":null,"tokensOut":null,"model":null,"costUsd":null}
+  },
+  {
+    "name": "Claude unsafe aggregate counts are unknown",
+    "adapters": ["claude-code", "openclaude"],
+    "records": [
+      {"type":"assistant","message":{"id":"one","model":"claude-sonnet-4-6","usage":{"input_tokens":9007199254740991,"output_tokens":0}}},
+      {"type":"assistant","message":{"id":"two","model":"claude-sonnet-4-6","usage":{"input_tokens":1,"output_tokens":0}}}
+    ],
+    "expected": {"tokensIn":null,"tokensOut":null,"model":null,"costUsd":null}
+  },
+  {
+    "name": "Continue nonfinite usage does not discard valid metrics",
+    "adapters": ["continue-cli"],
+    "text": "{\"sessionId\":\"synthetic\",\"history\":[],\"usage\":{\"promptTokens\":1e309,\"completionTokens\":3,\"totalCost\":1e309}}",
+    "expected": {"tokensIn":null,"tokensOut":3,"model":null,"costUsd":null}
+  },
+  {
     "name": "Claude usage updates replace earlier message snapshots",
     "adapters": ["claude-code", "openclaude"],
     "records": [

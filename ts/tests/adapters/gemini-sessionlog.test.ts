@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeEach } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, realpathSync, utimesSync } from 'node:fs'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, realpathSync, utimesSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -66,16 +66,27 @@ function expectTelemetry(actual: Telemetry, expected: Telemetry): void {
 describe('gemini session log', () => {
   let home: string
   let workdir: string
+  let base: string
+  let originalEnv: Record<string, string | undefined>
   const adapter = getAdapter('gemini')
 
   beforeEach(() => {
-    const base = mkdtempSync(join(tmpdir(), 'harness-ts-gemini-'))
+    originalEnv = { HOME: process.env.HOME, [FX.sourceQualification.homeEnv]: process.env[FX.sourceQualification.homeEnv] }
+    base = mkdtempSync(join(tmpdir(), 'harness-ts-gemini-'))
     home = join(base, 'home')
     workdir = join(base, 'repo')
     mkdirSync(home)
     mkdirSync(workdir)
     process.env.HOME = home
     delete process.env[FX.sourceQualification.homeEnv]
+  })
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    rmSync(base, { recursive: true, force: true })
   })
 
   test('old basename layout is not a session', () => {

@@ -173,6 +173,16 @@ def newest_session_log(dirs: Iterable[Path], project_path: str, session_started_
     return str(newest[1]) if newest else None
 
 
+def _token_count(value: object) -> int | None:
+    """Match JavaScript's safe-integer range instead of accepting lossy counts."""
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 2**53 - 1:
+        return None
+    count = int(value)
+    return count if count == value else None
+
+
 def parse_claude_transcript(path: str) -> SessionTelemetry:
     """Sum assistant usage once per API message id; derive cost when no cost field exists.
 
@@ -211,11 +221,15 @@ def parse_claude_transcript(path: str) -> SessionTelemetry:
             if isinstance(message_id, str):
                 seen_message_ids.add(message_id)
             if usage:
-                current_in = int(usage.get("input_tokens") or 0)
-                current_out = int(usage.get("output_tokens") or 0)
+                current_in = _token_count(usage.get("input_tokens"))
+                current_out = _token_count(usage.get("output_tokens"))
+                if current_in is None or current_out is None:
+                    return SessionTelemetry(path, None, None, None, None, None)
                 prior_in, prior_out = previous_usage.get(message_id, (0, 0)) if isinstance(message_id, str) else (0, 0)
                 tokens_in += current_in - prior_in
                 tokens_out += current_out - prior_out
+                if tokens_in > 2**53 - 1 or tokens_out > 2**53 - 1:
+                    return SessionTelemetry(path, None, None, None, None, None)
                 if isinstance(message_id, str):
                     previous_usage[message_id] = (current_in, current_out)
                 saw_usage = True

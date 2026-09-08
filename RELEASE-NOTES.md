@@ -2,6 +2,12 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added maintained `kimi-code` in both languages, with exact model aliases,
+  caller-selected `KIMI_CODE_HOME` and shared subprocess lifecycle. Native print
+  mode implies auto permissions; explicit bypass and arbitrary config files
+  reject. Assistant/tool JSONL stays in `raw`; accounting remains unknown.
+  Source and synthetic conformance only; no native/provider smoke is claimed.
+  See [setup and qualification limits](ADAPTER-MATRIX.md#kimi-code).
 - Added `auggie` in both languages using official print/JSON mode and the shared
   lifecycle. JSON-native results retain unit-tagged billing; non-JSON failures
   remain in process status and stderr. Decoder recursion errors no longer discard

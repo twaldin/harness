@@ -36,7 +36,7 @@ def json_object_events(stdout: str) -> list[dict] | None:
             continue
         try:
             event = json.loads(line, parse_constant=_reject_constant)
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(event, dict):
             events.append(event)

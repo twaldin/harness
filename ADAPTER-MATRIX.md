@@ -879,6 +879,47 @@ that model unavailable; Harness did not substitute another model.
 
 Shared fixtures are synthetic and exercise both public run paths, exact argv, permissions, validation, native success/failure and interrupted output. Full coding tasks, MCP/subagent/extension descendants, BYOK/offline providers, remote sessions, Linux/Windows provider execution and every subscription/model combination remain untested. Deliberately detached or remote work is outside the shared POSIX process-group cleanup guarantee.
 
+### Copilot SDK: unsupported after qualification
+
+**Decision — [TWA-104](https://linear.app/twaldin/issue/TWA-104), September 9,
+2026:** defer the optional Copilot SDK backend rather than weaken owned-tool
+cleanup. The CLI adapter above remains shipped; no Copilot SDK session API,
+dependency or external-server alternative is enabled in Harness.
+
+The qualified pair is official Python `github-copilot-sdk` and TypeScript
+`@github/copilot-sdk` **1.0.13**, with explicitly selected, already-installed
+CLI **1.0.83** (protocol **3**). These are qualification limits, not a supported
+Harness SDK version range. The [Python package](https://pypi.org/project/github-copilot-sdk/1.0.13/)
+requires **Python >=3.11**; Harness's base requirement remains **>=3.10**.
+The [TS package](https://registry.npmjs.org/@github/copilot-sdk/1.0.13) declares
+Node **`^20.19.0 || >=22.12.0`**. Any future integration must keep dependencies
+optional and lazy, select the installed runtime explicitly, and prevent
+first-use runtime download/cache staging. Experimental in-process FFI remains
+excluded.
+
+Native SDK probes on macOS arm64 passed startup, synthetic-provider generation,
+follow-up, disconnect and exact-ID resume under **Python 3.11.15**, **Bun
+1.3.14** and **Node 26.6.0**. They did not establish Harness session conformance
+or packaged-Node SDK support. A separate selected-environment authentication
+probe was unauthenticated; no authenticated SDK provider request was attempted
+or succeeded. The CLI provider evidence above is separate.
+
+Forced containment failed in all three runtimes: an ordinary native `bash`
+tool with `detach:false` ran in a separate process group. After deliberately
+stalling the CLI, TERM → 500 ms → KILL reaped the SDK worker/CLI group, but the
+finite tool's heartbeat continued after group exit. A graceful Bun control
+stopped the tool. All probe tools were subsequently released and verified
+stopped. This matches the upstream [shell-group design](https://github.com/github/copilot-sdk/blob/v1.0.13/nodejs/src/generated/rpc.ts#L26207-L26225);
+native disposal needs a responsive runtime, and post-spawn task PID snapshots
+do not establish complete ownership across tool creation and runtime stalls.
+
+Reconsider SDK support only with reliable native containment that preserves
+the existing cleanup guarantee, including forced disposal. Process-discovery
+heuristics, disabling native tools or silently substituting external transport
+do not satisfy that gate. This finding does not extend the CLI's no-tool
+qualification to attached tool descendants or weaken its documented
+process-group boundary.
+
 ---
 
 ## hermes

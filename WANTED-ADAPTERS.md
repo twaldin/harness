@@ -229,7 +229,9 @@ execution transport. The maintained paths below are useful, but none is a
 small contract-compatible addition: each needs session/permission mapping,
 bounded disposal and cross-language qualification, not merely a flag or import.
 This finding changes no public API, runtime dependency, fixture or package
-version. New integrations remain Backlog; CLI behavior stays unchanged.
+version. This dated survey is not a current support list; later qualification
+decisions are recorded below, and [SPEC](SPEC.md#backend-and-session-implementation-gates)
+defines shipped backends. CLI behavior stays separate.
 
 The [implementation gates](SPEC.md#backend-and-session-implementation-gates)
 remain authoritative. An SDK may wrap a subprocess, embed an agent, or only
@@ -328,7 +330,15 @@ Sources: [ClineCore](https://docs.cline.bot/sdk/reference/cline-core.md),
 [permissions](https://docs.cline.bot/sdk/guides/permission-handling.md),
 [CLI reference](https://docs.cline.bot/cli/cli-reference).
 
-**Copilot.** `abort()` interrupts work; session `disconnect()` releases
+**Copilot — deferred/unsupported.** [TWA-104](https://linear.app/twaldin/issue/TWA-104)
+qualified SDK **1.0.13** / CLI **1.0.83** and found attached native tools survive
+forced SDK/CLI-group teardown under Python, Bun and Node. Tim declined weaker
+cleanup; no Copilot SDK backend ships. The existing CLI adapter remains.
+See [native qualification and dependency limits](ADAPTER-MATRIX.md#copilot-sdk-unsupported-after-qualification).
+[TWA-105](https://linear.app/twaldin/issue/TWA-105) retains reliable native
+containment as a deferred prerequisite, not an implementation dispatch.
+
+For any future qualification, `abort()` interrupts work; session `disconnect()` releases
 attachment resources while preserving persisted history; deletion is separate.
 Explicit native session-ID resume and cwd context exist. Permission decisions
 must preserve managed settings and caller policy, not copy an `approveAll`
@@ -420,15 +430,16 @@ Sources: [Python manifest](https://github.com/agentclientprotocol/python-sdk/blo
 
 ### Disposition and evidence boundary
 
-These deduplicated follow-ups are **Backlog, not dispatched**. Each requires
-matching Python/TypeScript behavior in one PR and retains the common
-identity/permissions/cleanup gates:
+The September 8 survey recorded these deduplicated follow-ups in **Backlog,
+not dispatched**; later ticket decisions supersede that snapshot. Copilot's
+containment follow-up below remains deferred. Any integration requires matching
+Python/TypeScript behavior in one PR and the common identity/permissions/cleanup gates:
 
 | Follow-up | Bounded decision / integration |
 | --- | --- |
 | [TWA-100](https://linear.app/twaldin/issue/TWA-100) | Claude Agent SDK: streaming-input sessions, runtime-pair capability mapping and bounded disposal. |
 | [TWA-103](https://linear.app/twaldin/issue/TWA-103) | Codex: pinned local app-server protocol; resolve experimental compatibility before enabling it. Do not combine unequal SDKs. |
-| [TWA-104](https://linear.app/twaldin/issue/TWA-104) | Copilot SDK: explicit local runtime, permission decisions and correlated terminal/cleanup behavior; no FFI or automatic downloads. |
+| [TWA-105](https://linear.app/twaldin/issue/TWA-105) | Copilot SDK: deferred until reliable native containment preserves forced cleanup. [TWA-104](https://linear.app/twaldin/issue/TWA-104) found SDK 1.0.13 / CLI 1.0.83 unsupported; no narrower surviving-tool contract, FFI or automatic downloads. |
 | [TWA-101](https://linear.app/twaldin/issue/TWA-101) | Cline: choose explicit local SDK + named Python bridge versus native ACP; no hub/spoke management. |
 | [TWA-102](https://linear.app/twaldin/issue/TWA-102) | OpenHands: caller-owned Agent Server only; exact resume, raw events, interrupt settlement and no server/container takeover. |
 | [TWA-98](https://linear.app/twaldin/issue/TWA-98) | OpenCode: explicit caller-owned HTTP/SSE endpoint, auth/workdir identity and abort semantics. |
@@ -444,7 +455,7 @@ a separately qualified bridge/protocol path, not a native SDK. Neither is
 duplicated here. Cloud fleets, Amp orbs, Augment Cosmos, OpenHands Canvas,
 raw model SDKs, scraping and consumer migrations remain excluded.
 
-Local evidence for this refresh: macOS arm64, Claude Code **2.1.220** version
+Original TWA-86 survey evidence (September 8): macOS arm64, Claude Code **2.1.220** version
 only; Codex **0.153.4** version/app-server help and successful isolated
 `generate-json-schema`. Generated interruption parameters require native
 `threadId` and `turnId`; schema generation is not a session handshake or
@@ -457,8 +468,10 @@ started, and no authentication/global configuration was changed.
 **Evidence levels stay separate:** official-source qualification above;
 installed version/help/schema checks just described; existing deterministic
 Harness fixtures/conformance; native runtime against a local synthetic
-provider; and actual authenticated provider success. This SDK inventory
-claims neither of the last two. TWA-83's legacy OpenHands checks remain
+provider; and actual authenticated provider success. The original TWA-86
+survey claimed neither of the last two; [TWA-104's later Copilot qualification](ADAPTER-MATRIX.md#copilot-sdk-unsupported-after-qualification)
+records native synthetic-provider success and the failed containment gate,
+not authenticated SDK provider success. TWA-83's legacy OpenHands checks remain
 limited to its handoff above; previous CLI smoke evidence is not SDK evidence.
 
 ## Validation and maintenance

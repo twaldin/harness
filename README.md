@@ -244,6 +244,76 @@ No package/binary/backend fallback occurs. See the
 [full SDK contract](SPEC.md#optional-omp-sdk-sessions) for configuration
 precedence, disposal bounds, native event semantics and qualification limits.
 
+### Optional Amp SDK sessions
+
+Select `harness="amp", backend="sdk"` with explicit `AmpSdkOptions`.
+Python, Bun and Node callers use the same isolated **Node >=22 bridge**, not
+the native Python `amp-sdk`. Install/select these exact optional dependencies
+in caller-owned locations:
+
+- `@ampcode/sdk@0.1.0-20260823161614-g3631dc6`
+- Amp Neo CLI `0.0.1788883237-g0b98e3`
+
+Harness does not install, upgrade or fall back to another CLI. A conflicting
+SDK-local `@ampcode/cli` dependency rejects rather than overriding `cliPath`.
+The ordinary imports and CLI API need neither dependency.
+
+```python
+from pathlib import Path
+from harness import AmpSdkOptions, SessionSpec, open_session
+
+async def run_amp(workdir: Path, sdk_root: Path, cli_path: Path):
+    session = await open_session(SessionSpec(
+        harness="amp", backend="sdk", workdir=workdir,
+        amp_sdk=AmpSdkOptions(
+            package_root=sdk_root, cli_path=cli_path,
+            executor="local", mode="low",
+        ),
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            print(event.type, event.raw)
+        result = await turn.result
+        return result, session.reference
+    finally:
+        await session.close()
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+const session = await openSession({
+  harness: 'amp', backend: 'sdk', workdir: '/your/workdir',
+  ampSdk: {
+    packageRoot: '/your/sdk/package',
+    cliPath: '/your/pinned/amp',
+    executor: 'local', mode: 'low',
+  },
+})
+try {
+  const turn = session.startTurn('Review this repository without editing files.')
+  for await (const event of turn.events) console.log(event.type, event.raw)
+  console.log(await turn.result, session.reference)
+} finally {
+  await session.close()
+}
+```
+
+Use absolute paths. `executable` selects Node, not Amp. Mode is explicit;
+optional native effort, creation-only visibility and settings-file selection
+are supported. Common model passthrough, approval replies, bypass and remote
+executors reject. Native permissions/plugins/configuration/auth remain upstream.
+Local means local tool execution, not offline operation: Neo's thread actor
+still needs the selected Amp service. No authenticated provider success is
+claimed by the synthetic conformance suite.
+
+Save the complete reference for exact resume with matching workdir and
+`AMP_URL` origin. Each turn is a finite owned SDK operation; interrupt reaps
+that operation before allowing follow-up in the same thread. Native events,
+usage and terminal results stay verbatim. See the
+[Amp dependency, lifecycle and qualification contract](SPEC.md#optional-amp-sdk-sessions).
+
 ### Caller-owned OpenCode HTTP sessions
 
 Select `harness="opencode", backend="rpc"` with an explicit `OpenCodeOptions`

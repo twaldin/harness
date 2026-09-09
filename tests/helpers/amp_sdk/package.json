@@ -1,0 +1,6 @@
+{
+  "name": "@ampcode/sdk",
+  "version": "0.1.0-20260823161614-g3631dc6",
+  "type": "module",
+  "exports": { ".": { "import": "./index.mjs" } }
+}

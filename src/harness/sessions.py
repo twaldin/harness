@@ -1,7 +1,7 @@
-"""Live sessions — an owned child driven over JSONL, or a caller-owned
-OpenCode server driven over HTTP + SSE.
+"""Live sessions — an owned child driven over JSONL, a caller-owned OpenCode
+server driven over HTTP + SSE, or Amp threads driven through one-shot workers.
 
-Three (harness, backend) pairs share one public surface:
+Four (harness, backend) pairs share one public surface:
 
 - `pi` / `rpc`: `pi --mode rpc`, the native JSONL protocol on stdio.
 - `omp` / `sdk`: an owned Bun child running the sibling `_omp_sdk.mjs` bridge,
@@ -14,6 +14,9 @@ Three (harness, backend) pairs share one public surface:
 - `opencode` / `rpc`: direct HTTP requests plus the `GET /event` SSE stream of
   an `opencode serve` instance the caller already runs and owns
   (`OpenCodeOptions.endpoint`). No process is spawned; see `_opencode`.
+- `amp` / `sdk`: one finite Node worker (`_amp_sdk.mjs`) per operation, loading
+  the caller-installed `@ampcode/sdk` from `AmpSdkOptions.package_root` and
+  driving the pinned native CLI at `AmpSdkOptions.cli_path`. See `_amp`.
 
 `open_session(spec)` spawns the child in its own POSIX process group (or opens
 the HTTP transport), completes the identity handshake and returns a
@@ -90,6 +93,12 @@ MAX_FRAME_BYTES = 1_048_576
 SUPPORTED_PI_DISTRIBUTION = "@earendil-works/pi-coding-agent 0.85.1"
 #: OMP SDK distribution the `_omp_sdk.mjs` bridge is qualified against.
 SUPPORTED_OMP_SDK_DISTRIBUTION = "@oh-my-pi/pi-coding-agent 18.1.14"
+#: Amp TypeScript SDK the `_amp_sdk.mjs` worker is qualified against.
+SUPPORTED_AMP_SDK_DISTRIBUTION = "@ampcode/sdk 0.1.0-20260823161614-g3631dc6"
+#: Native Amp CLI the worker verifies through `--version` before any thread call.
+SUPPORTED_AMP_CLI_VERSION = "0.0.1788883237-g0b98e3"
+#: Endpoint used when neither `spec.env` nor the process env sets `AMP_URL`.
+DEFAULT_AMP_ENDPOINT = "https://ampcode.com"
 #: Exact `GET /global/health` version of the OpenCode server this module is
 #: qualified against (anomalyco/opencode v1.18.29); any other is rejected.
 SUPPORTED_OPENCODE_SERVER_VERSION = "1.18.29"
@@ -99,7 +108,7 @@ _TICK = 0.02
 _TERM_GRACE = 0.5
 _DRAIN_BUDGET = 1.0
 #: Qualified (harness, backend) pairs; every other combination is rejected.
-_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc"}
+_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc", "amp": "sdk"}
 _SDK_WORKER = Path(__file__).with_name("_omp_sdk.mjs")
 #: Child environment the SDK bridge owns (both pinned to `agent_dir` so the
 #: selected profile is also the config root); conflicting caller entries are
@@ -118,6 +127,12 @@ OpenCodeApprovalResponse = Literal["once", "reject"]
 #: full ID is verified with `GET /session/{id}`, never prefix-matched).
 _OPENCODE_SESSION_ID = re.compile(r"ses_[0-9A-Za-z]+")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+#: Amp thread identity: `T-` plus a canonical lowercase UUID, never a prefix.
+_AMP_SESSION_ID = re.compile(r"T-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+AmpEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+AmpVisibility = Literal["private", "unlisted", "workspace", "group"]
+_AMP_EFFORTS: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+_AMP_VISIBILITIES: tuple[str, ...] = ("private", "unlisted", "workspace", "group")
 
 
 # ── public types ────────────────────────────────────────────────────────────
@@ -130,12 +145,13 @@ class SessionReference:
     `session_id`   — the full native session ID (never a prefix).
     `session_file` — absolute path of the native session log, or None while the
                      agent has not persisted the session yet. Always None for
-                     OpenCode, whose history lives on the caller's server.
+                     OpenCode and Amp, whose history lives on a server.
     `workdir`      — absolute directory the session was opened in. For
                      OpenCode this is the literal server-side directory.
-    `endpoint`     — normalized OpenCode server origin the session lives on;
-                     None for process-backed (pi / omp) sessions, which reject
-                     endpoint-bearing references on resume.
+    `endpoint`     — normalized server origin the session lives on: the
+                     OpenCode server, or the Amp service (`AMP_URL` origin,
+                     default `https://ampcode.com`); None for pi / omp
+                     sessions, which reject endpoint-bearing references.
     """
 
     session_id: str
@@ -189,11 +205,43 @@ class OpenCodeOptions:
     password: str | None = field(default=None, repr=False)
 
 
+@dataclass(frozen=True)
+class AmpSdkOptions:
+    """Where the `amp` / `sdk` worker finds the caller's SDK and CLI and how
+    it drives threads. Nothing is guessed or probed at validation; the worker
+    verifies the CLI version and thread identity before any prompt.
+
+    `package_root`  — absolute directory of the caller-installed `@ampcode/sdk`
+                      package the worker imports.
+    `cli_path`      — absolute path of the pinned native `amp` CLI the SDK
+                      executes; nothing is looked up on PATH.
+    `executor`      — only "local".
+    `mode`          — non-blank, NUL-free native agent mode passed verbatim
+                      (the SDK would otherwise select `medium` silently).
+    `effort`        — optional native effort level.
+    `visibility`    — optional visibility of a newly created thread; rejected
+                      with `resume` (an existing thread's visibility is never
+                      changed here).
+    `settings_file` — optional absolute caller settings file for the CLI.
+
+    Any other Amp knob (model, permission bypass, other executors) has no
+    mapping and is rejected explicitly.
+    """
+
+    package_root: Path
+    cli_path: Path
+    executor: Literal["local"]
+    mode: str
+    effort: AmpEffort | None = None
+    visibility: AmpVisibility | None = None
+    settings_file: Path | None = None
+
+
 @dataclass
 class SessionSpec:
     """Everything needed to open a live session.
 
-    `harness`         — "pi" (backend "rpc"), "omp" (backend "sdk") or
+    `harness`         — "pi" (backend "rpc"), "omp" / "amp" (backend "sdk") or
                         "opencode" (backend "rpc"); other registered harnesses
                         raise `unsupported-backend`, unknown names
                         `unknown-harness`.
@@ -203,20 +251,28 @@ class SessionSpec:
                         existence check or preparation); noncanonical forms
                         (`.`/`..` segments, empty segments, trailing slash)
                         are `invalid-options`.
-    `backend`         — "rpc" with "pi" / "opencode" or "sdk" with "omp"; any
-                        other pairing and "cli" raise `unsupported-backend`.
+    `backend`         — "rpc" with "pi" / "opencode" or "sdk" with "omp" /
+                        "amp"; any other pairing and "cli" raise
+                        `unsupported-backend`.
     `model`           — Pi: passed as `--model <model>`; OMP: handed to the
                         bridge (trimmed); OpenCode: `provider/model`, split at
                         the first slash into the native provider and model
                         IDs (both non-empty). None keeps the agent's own
                         default. Empty after trimming is `invalid-options`.
+                        Amp has no model selection (`amp_sdk.mode` owns
+                        routing) and rejects any value.
     `env`             — additions layered over the inherited environment. The
-                        sdk backend owns `PI_CODING_AGENT_DIR` and
+                        omp sdk backend owns `PI_CODING_AGENT_DIR` and
                         `PI_CONFIG_DIR` (both `agent_dir`); conflicting
-                        entries are `invalid-options`. OpenCode spawns nothing
-                        and rejects a non-empty env.
+                        entries are `invalid-options`. Amp reads `AMP_URL`
+                        from here (else the process env) for the endpoint and
+                        rejects `AMP_SKIP_UPDATE_CHECK` other than "1" (the
+                        worker pins it). OpenCode spawns nothing and rejects
+                        a non-empty env.
     `executable`      — bare binary name or absolute path; default "pi" for
-                        rpc, "bun" for sdk. Rejected for OpenCode.
+                        rpc, "bun" for omp sdk, "node" for amp sdk (the
+                        worker runtime, never the Amp CLI). Rejected for
+                        OpenCode.
     `permission_policy` — only "upstream"; "bypass" raises `unsupported-capability`.
     `instructions`    — projected to `AGENTS.md` under the workdir lease for the
                         life of the process tree. Rejected for OpenCode (no
@@ -226,8 +282,12 @@ class SessionSpec:
                         spawn and the native `get_state` ID after startup.
                         OpenCode requires `session_file=None`, the same
                         `endpoint` / `workdir` and a full `ses_` ID, verified
-                        with `GET /session/{id}` before anything else.
-    `omp_sdk`         — required with backend "sdk", rejected otherwise.
+                        with `GET /session/{id}` before anything else. Amp
+                        requires `session_file=None`, the same `workdir`, the
+                        computed `AMP_URL` endpoint and a full `T-` UUID,
+                        verified through the SDK before the first turn.
+    `omp_sdk`         — required with harness "omp", rejected otherwise.
+    `amp_sdk`         — required with harness "amp", rejected otherwise.
     `opencode`        — required with harness "opencode", rejected otherwise.
     `timeout_seconds` — wall-clock cap per turn (default 1800). None disables
                         it. Expiry tears the session down (`timed-out`).
@@ -235,7 +295,8 @@ class SessionSpec:
                         OpenCode: bounds every HTTP request except the
                         long-running prompt response (bounded by
                         `timeout_seconds`), the SSE handshake and the
-                        settlement after an interrupt.
+                        settlement after an interrupt. Amp: bounds the open
+                        worker and each turn's native initialization.
     `max_buffer_bytes` — cap on queued, unconsumed event bytes per turn and for
                         the idle stream (default 1 MiB). Overflow is never
                         silent: the session fails with `protocol-error`.
@@ -255,6 +316,7 @@ class SessionSpec:
     max_buffer_bytes: int = DEFAULT_MAX_BUFFER_BYTES
     omp_sdk: OmpSdkOptions | None = None
     opencode: OpenCodeOptions | None = None
+    amp_sdk: AmpSdkOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -273,11 +335,12 @@ class SessionCapabilities:
 @dataclass(frozen=True)
 class SessionEvent:
     """One native frame. `raw` is the parsed JSON object, untouched: the Pi
-    RPC frame, the native SDK event unwrapped from the bridge's `sdk_event`,
-    or the OpenCode SSE event (`{"id", "type", "properties"}`)."""
+    RPC frame, the native SDK event unwrapped from the bridge's `sdk_event`
+    / the Amp worker's `amp_event`, or the OpenCode SSE event
+    (`{"id", "type", "properties"}`)."""
 
     backend: Literal["rpc", "sdk"]
-    harness: Literal["pi", "omp", "opencode"]
+    harness: Literal["pi", "omp", "opencode", "amp"]
     session_id: str
     turn_id: str | None
     request_id: str | None
@@ -289,10 +352,13 @@ class SessionEvent:
 class SessionTurnResult:
     """Terminal outcome of one turn.
 
-    `raw` is the last `agent_end` payload, the rejecting `response` frame or
-    (sdk) the failing `sdk_settled` bridge frame. Usage inside it is the
+    `raw` is the last `agent_end` payload, the rejecting `response` frame,
+    (omp sdk) the failing `sdk_settled` bridge frame or (amp) the native
+    `result` event carried by the worker's `amp_done`. Usage inside it is the
     agent's own cumulative accounting; nothing is aggregated.
-    `exit_code` / `signal` are the observed leader exit, None while it runs.
+    `exit_code` / `signal` are the observed leader exit, None while it runs;
+    for amp they are the native CLI's exit for this turn as reported by
+    `amp_done`, and `stderr` is that turn's worker capture.
     """
 
     session_id: str
@@ -410,10 +476,10 @@ def _validate_session_backend(name: str, backend: object) -> None:
     if backend not in BACKENDS:
         raise HarnessError(f"unknown backend {backend!r}; expected one of {', '.join(BACKENDS)}", code="invalid-options")
     if backend == "cli":
-        raise HarnessError("backend 'cli' has no live session support; use 'rpc' with harness 'pi' / 'opencode' or 'sdk' with harness 'omp'", code="unsupported-backend")
+        raise HarnessError("backend 'cli' has no live session support; use 'rpc' with harness 'pi' / 'opencode' or 'sdk' with harness 'omp' / 'amp'", code="unsupported-backend")
     expected = _SESSION_BACKENDS.get(name)
     if expected is None:
-        raise HarnessError(f"harness {name!r} has no live session support; only 'pi' (rpc), 'opencode' (rpc) and 'omp' (sdk) are qualified", code="unsupported-backend")
+        raise HarnessError(f"harness {name!r} has no live session support; only 'pi' (rpc), 'opencode' (rpc), 'omp' (sdk) and 'amp' (sdk) are qualified", code="unsupported-backend")
     if backend != expected:
         raise HarnessError(f"harness {name!r} has no {backend} session support; use backend {expected!r}", code="unsupported-backend")
 
@@ -607,6 +673,10 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
         return _validate_opencode_spec(spec, model)
     if spec.opencode is not None:
         raise HarnessError(f"opencode applies only to opencode rpc sessions, not {spec.harness} {spec.backend}", code="invalid-options")
+    if spec.harness == "amp":
+        return _validate_amp_spec(spec, model)
+    if spec.amp_sdk is not None:
+        raise HarnessError(f"amp_sdk applies only to amp sdk sessions, not {spec.harness} {spec.backend}", code="invalid-options")
     workdir = absolute_workdir(spec.workdir)
     resume = _validate_reference(spec.resume) if spec.resume is not None else None
     if resume is not None and not _same_dir(str(resume.workdir), workdir):
@@ -629,6 +699,8 @@ def _validate_opencode_spec(spec: SessionSpec, model: str | None) -> SessionSpec
         raise HarnessError("instructions cannot be projected into an OpenCode server directory; leave instructions unset", code="invalid-options")
     if spec.omp_sdk is not None:
         raise HarnessError("omp_sdk applies only to omp sdk sessions, not opencode rpc", code="invalid-options")
+    if spec.amp_sdk is not None:
+        raise HarnessError("amp_sdk applies only to amp sdk sessions, not opencode rpc", code="invalid-options")
     if model is not None:
         provider, _, model_id = model.partition("/")
         if not provider or not model_id:
@@ -670,7 +742,7 @@ def _validate_omp_sdk(spec: SessionSpec) -> OmpSdkOptions | None:
     Nothing is defaulted or probed; a package that fails to load is the
     bridge's startup error (`launch-failed`), not a guess made here."""
     options = spec.omp_sdk
-    if spec.backend != "sdk":
+    if spec.harness != "omp":
         if options is not None:
             raise HarnessError(f"omp_sdk applies only to omp sdk sessions, not {spec.harness} {spec.backend}", code="invalid-options")
         return None
@@ -687,6 +759,88 @@ def _validate_omp_sdk(spec: SessionSpec) -> OmpSdkOptions | None:
         if key in spec.env and spec.env[key] != "default":
             raise HarnessError(f"env[{key!r}] conflicts with the explicit SDK profile path; omit it", code="invalid-options")
     return OmpSdkOptions(package_root=package_root, agent_dir=agent_dir, auth=options.auth)
+
+
+def _amp_endpoint(env: dict[str, str]) -> str:
+    """Origin the Amp CLI will talk to: `AMP_URL` from `env`, else the
+    inherited process environment, else `DEFAULT_AMP_ENDPOINT`; normalized
+    like `opencode.endpoint` so references compare exactly."""
+    value = env.get("AMP_URL", os.environ.get("AMP_URL", DEFAULT_AMP_ENDPOINT))
+    return _normalize_endpoint(value, "env['AMP_URL']")
+
+
+def _validate_amp_reference(reference: object, endpoint: str, workdir: Path) -> SessionReference:
+    """Amp resume identity: full `T-` UUID on the same endpoint and workdir,
+    no local file. The thread itself is verified by the worker before use."""
+    if not isinstance(reference, SessionReference):
+        raise HarnessError("resume must be a SessionReference", code="invalid-options")
+    session_id = reference.session_id
+    if not isinstance(session_id, str) or _AMP_SESSION_ID.fullmatch(session_id) is None:
+        raise HarnessError("resume.session_id must be a full Amp thread ID ('T-' followed by a lowercase UUID)", code="invalid-options")
+    if reference.session_file is not None:
+        raise HarnessError("resume.session_file must be None for Amp; thread history lives on the Amp service", code="invalid-options")
+    if reference.endpoint is None:
+        raise HarnessError("resume.endpoint is required for Amp sessions", code="invalid-options")
+    normalized = _normalize_endpoint(reference.endpoint, "resume.endpoint")
+    if normalized != endpoint:
+        raise HarnessError(f"resume.endpoint {normalized!r} does not match the AMP_URL endpoint {endpoint!r}", code="invalid-options")
+    if not isinstance(reference.workdir, (str, os.PathLike)) or not os.path.isabs(os.fspath(reference.workdir)):
+        raise HarnessError(f"resume.workdir {reference.workdir!r} must be absolute", code="invalid-options")
+    if not _same_dir(os.fspath(reference.workdir), workdir):
+        raise HarnessError(
+            f"resume.workdir {os.fspath(reference.workdir)!r} does not match the session workdir {str(workdir)!r}",
+            code="invalid-options",
+        )
+    return SessionReference(session_id=session_id, session_file=None, workdir=workdir, endpoint=endpoint)
+
+
+def _validate_amp_options(options: object, resuming: bool) -> AmpSdkOptions:
+    if not isinstance(options, AmpSdkOptions):
+        raise HarnessError("amp sdk sessions require amp_sdk=AmpSdkOptions(package_root, cli_path, executor, mode)", code="invalid-options")
+    package_root = _absolute_option("amp_sdk.package_root", options.package_root)
+    cli_path = _absolute_option("amp_sdk.cli_path", options.cli_path)
+    if options.executor != "local":
+        raise HarnessError(f"amp_sdk.executor must be 'local', got {options.executor!r}; no other executor is qualified", code="unsupported-capability")
+    mode = options.mode
+    if not isinstance(mode, str) or not mode.strip() or "\0" in mode:
+        raise HarnessError("amp_sdk.mode must be a non-blank string without NUL bytes; the SDK would otherwise select 'medium' silently", code="invalid-options")
+    effort = options.effort
+    if effort is not None and effort not in _AMP_EFFORTS:
+        raise HarnessError(f"amp_sdk.effort must be one of {', '.join(_AMP_EFFORTS)}, got {effort!r}", code="invalid-options")
+    visibility = options.visibility
+    if visibility is not None:
+        if visibility not in _AMP_VISIBILITIES:
+            raise HarnessError(f"amp_sdk.visibility must be one of {', '.join(_AMP_VISIBILITIES)}, got {visibility!r}", code="invalid-options")
+        if resuming:
+            raise HarnessError("amp_sdk.visibility applies to thread creation only; an existing thread's visibility is never changed on resume", code="invalid-options")
+    settings_file = None if options.settings_file is None else _absolute_option("amp_sdk.settings_file", options.settings_file)
+    return AmpSdkOptions(
+        package_root=package_root,
+        cli_path=cli_path,
+        executor="local",
+        mode=mode,
+        effort=effort,
+        visibility=visibility,
+        settings_file=settings_file,
+    )
+
+
+def _validate_amp_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
+    """Amp threads: the worker runtime is `executable` (Node), the CLI comes
+    from `amp_sdk.cli_path`; there is no model flag and no mapped env owner
+    besides the update check the worker pins."""
+    if spec.omp_sdk is not None:
+        raise HarnessError("omp_sdk applies only to omp sdk sessions, not amp sdk", code="invalid-options")
+    if model is not None:
+        raise HarnessError("model is not supported for amp; amp_sdk.mode selects routing", code="invalid-options")
+    skip = spec.env.get("AMP_SKIP_UPDATE_CHECK")
+    if skip is not None and skip != "1":
+        raise HarnessError(f"env['AMP_SKIP_UPDATE_CHECK']={skip!r} conflicts with the worker's pinned value '1'; omit it", code="invalid-options")
+    endpoint = _amp_endpoint(spec.env)
+    workdir = absolute_workdir(spec.workdir)
+    resume = _validate_amp_reference(spec.resume, endpoint, workdir) if spec.resume is not None else None
+    amp_sdk = _validate_amp_options(spec.amp_sdk, resume is not None)
+    return replace(spec, workdir=workdir, model=None, env=dict(spec.env), resume=resume, amp_sdk=amp_sdk)
 
 
 def _build(spec: SessionSpec) -> BuildCommand:
@@ -1532,8 +1686,9 @@ def _signal_name(returncode: int | None) -> str | None:
 async def open_session(spec: SessionSpec) -> LiveSession:
     """Open the live session for `spec`: spawn the session child (`pi --mode
     rpc`, or `bun` running the OMP SDK bridge) and complete the `get_state`
-    handshake, or connect to the caller's OpenCode server (health, directory,
-    session identity, `GET /event` subscription).
+    handshake, connect to the caller's OpenCode server (health, directory,
+    session identity, `GET /event` subscription), or run the Amp worker's
+    `open` operation (CLI version, thread creation / verification).
 
     Validation (harness, backend, options, resume header) happens before any
     filesystem, process or network side effect. Instructions are projected
@@ -1548,6 +1703,10 @@ async def open_session(spec: SessionSpec) -> LiveSession:
         return await open_opencode_session(spec)
     if sys.platform not in ("darwin", "linux"):
         raise NotImplementedError("Owned subprocess groups require macOS or Linux")
+    if spec.harness == "amp":
+        from harness._amp import open_amp_session
+
+        return await open_amp_session(spec)
     if spec.resume is not None:
         _verify_session_header(spec.resume, spec.backend)
     built = _build(spec)
@@ -1583,6 +1742,9 @@ async def _await_startup(session: LiveSession, startup: Coroutine[object, object
 
 
 __all__ = [
+    "AmpEffort",
+    "AmpSdkOptions",
+    "AmpVisibility",
     "LiveSession",
     "OmpSdkOptions",
     "OpenCodeApprovalResponse",

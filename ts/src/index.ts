@@ -10,8 +10,8 @@ export type {
 export type { InstructionProjection, ProjectInstructionsOptions, PreparedCommand } from './instructions.js'
 export type { RunSubprocessOptions } from './subproc.js'
 export type {
-  SessionBackend, JsonObject, SessionReference, OmpSdkOptions, OpenCodeOptions, OpenCodeAuth, OpenCodeApprovalResponse, SessionSpec,
-  SessionCapabilities, SessionTurnStatus, SessionEvent, SessionTurnResult, SessionTurn,
+  SessionBackend, JsonObject, SessionReference, OmpSdkOptions, AmpSdkOptions, AmpEffort, AmpVisibility, OpenCodeOptions, OpenCodeAuth,
+  OpenCodeApprovalResponse, SessionSpec, SessionCapabilities, SessionTurnStatus, SessionEvent, SessionTurnResult, SessionTurn,
 } from './sessions.js'
 export { HarnessError, validateRunSpec } from './base.js'
 export { register, listAdapters, getAdapter, getCapabilities, buildCommand, parseOutput, run, runAsync } from './registry.js'

@@ -1,6 +1,6 @@
 {
   "name": "@twaldin/harness-ts",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "type": "module",
   "description": "Harness: CLI command construction and output parsing for AI coding agents",
   "main": "./dist/index.js",
@@ -17,7 +17,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=node && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && tsc -p tsconfig.build.json",
+    "build": "bun build src/index.ts --outdir=dist --target=node && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && cp ../src/harness/_amp_sdk.mjs dist/amp-sdk.mjs && tsc -p tsconfig.build.json",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test"

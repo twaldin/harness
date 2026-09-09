@@ -195,6 +195,13 @@ OMP SDK sessions use `getSessionCapabilities("omp", "sdk")` /
 `get_session_capabilities("omp", "sdk")`, qualified for the optional 18.1.14
 package on Bun >=1.3.14. Python and Node use the same owned bridge worker;
 ordinary CLI imports have no SDK dependency.
+Amp SDK sessions use `getSessionCapabilities("amp", "sdk")` /
+`get_session_capabilities("amp", "sdk")` with an explicit local executor, mode,
+SDK package and pinned Neo CLI. Both languages use one isolated Node >=22
+worker per operation. Exact thread resume and interruption preserve the native
+thread; approval replies and bypass are unsupported. Local execution still
+requires the native Amp thread service. See the
+[Amp SDK contract and separate qualification evidence](SPEC.md#optional-amp-sdk-sessions).
 OpenCode HTTP sessions use `getSessionCapabilities("opencode", "rpc")` /
 `get_session_capabilities("opencode", "rpc")` against an explicitly selected
 caller-owned 1.18.29 endpoint. Both languages implement native HTTP/SSE,

@@ -1,0 +1,20 @@
+{
+  "sessionId": "T-11111111-2222-4333-8444-555555555555",
+  "sdkVersion": "0.1.0-20260823161614-g3631dc6",
+  "cliVersion": "0.0.1788883237-g0b98e3",
+  "cases": [
+    { "name": "native-success", "prompt": "success", "status": "completed", "exitCode": 0, "rawType": "result" },
+    { "name": "native-agent-error", "prompt": "agent-error", "status": "agent-error", "exitCode": 0, "rawType": "result" },
+    { "name": "permission-rejection", "prompt": "permission-rejection", "status": "agent-error", "exitCode": 0, "rawType": "result" },
+    { "name": "nonzero-after-result", "prompt": "exit-after-result", "status": "exited", "exitCode": 3, "rawType": "result" },
+    { "name": "native-failure-before-init", "prompt": "preinit-error", "status": "exited", "exitCode": 3 },
+    { "name": "native-init-deadline", "prompt": "init-hang", "status": "protocol-error" },
+    { "name": "wrong-native-workdir", "prompt": "wrong-cwd", "status": "protocol-error" },
+    { "name": "partial-final-frame", "prompt": "partial", "status": "protocol-error" },
+    { "name": "malformed-json", "prompt": "invalid-json", "status": "protocol-error" },
+    { "name": "invalid-utf8", "prompt": "invalid-utf8", "status": "protocol-error" },
+    { "name": "missing-terminal", "prompt": "missing-result", "status": "protocol-error" },
+    { "name": "duplicate-terminal", "prompt": "duplicate-result", "status": "protocol-error" },
+    { "name": "wrong-native-identity", "prompt": "wrong-id", "status": "protocol-error" }
+  ]
+}

@@ -57,3 +57,6 @@ jobs:
       - name: Built-package caller-owned OpenCode conformance (Node)
         run: node tests/node-opencode.mjs
         working-directory: ts
+      - name: Built-package caller-owned OpenHands conformance (Node)
+        run: node tests/node-openhands.mjs
+        working-directory: ts

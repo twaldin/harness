@@ -25,6 +25,11 @@
 // caller-owned server, implemented in opencode.ts and loaded lazily. It
 // shares the spec validation, `EventQueue`, `TurnCore` and result shapes
 // declared here, never a child process.
+//
+// `openhands` on `rpc` is the fourth: direct HTTP + WebSocket against a
+// caller-owned OpenHands Agent Server (openhands.ts, loaded lazily together
+// with the optional `ws` peer). It is session-only: there is no one-shot
+// adapter, so `getAdapter('openhands')` stays unknown-harness.
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { closeSync, existsSync, openSync, readSync, realpathSync } from 'node:fs'
@@ -39,11 +44,11 @@ import type { PreparedCommand } from './instructions.js'
 import { DRAIN_MS, GRACE_MS, assertSupportedPlatform, describeError } from './lifecycle.js'
 import { getAdapter } from './registry.js'
 
-/** `rpc` drives `pi` (and `opencode` over HTTP); `sdk` drives `omp` through the owned Bun bridge. Any other pairing (and `cli`) is `unsupported-backend`. */
+/** `rpc` drives `pi` (and `opencode`/`openhands` over HTTP); `sdk` drives `omp` through the owned Bun bridge. Any other pairing (and `cli`) is `unsupported-backend`. */
 export type SessionBackend = 'rpc' | 'sdk'
 
-/** The harnesses with a live session backend. */
-type SessionHarness = 'pi' | 'omp' | 'opencode'
+/** The harnesses with a live session backend. `openhands` has no CLI adapter and exists only here. */
+type SessionHarness = 'pi' | 'omp' | 'opencode' | 'openhands'
 
 /**
  * Selection of the caller-installed OMP SDK. Nothing here is guessed: the
@@ -77,38 +82,61 @@ export interface OpenCodeOptions {
 /** Native OpenCode permission replies this session forwards. `always` is refused: upstream stores it as an instance-wide rule shared by every client. */
 export type OpenCodeApprovalResponse = 'once' | 'reject'
 
+/**
+ * Selection of a caller-owned OpenHands Agent Server (pinned 1.45.0).
+ * Nothing is discovered or provisioned: endpoint, credential and the
+ * server-side agent profile are explicit, and the server is never started,
+ * configured, initialized or disposed by the session.
+ */
+export interface OpenHandsOptions {
+  /** Absolute `http(s)://host[:port]` origin, optional trailing slash; credentials, path, query and fragment are rejected. */
+  endpoint: string
+  /** Session API key sent as `X-Session-API-Key` (REST) and as the first `auth` frame (WebSocket); never in URLs or diagnostics. Required and non-empty. */
+  apiKey: string
+  /** Exact name of the caller-selected server-side agent profile (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`); resolved through GET /api/agent-profiles/{name}, never listed or seeded. */
+  agentProfile: string
+  /**
+   * Must be exactly `true`: the caller attests that the supplied server has no
+   * unwanted webhooks or callbacks configured. The pinned server attaches its
+   * server-level webhooks to every conversation, and this session neither
+   * verifies nor disables them; the attestation is a caller precondition, not
+   * a network check.
+   */
+  confirmNoUnwantedCallbacks: boolean
+}
+
 /** A parsed JSON object frame; array and scalar frames are protocol errors. */
 export type JsonObject = Record<string, unknown>
 
 /** Identity of a native session: the full native ID plus the file it persists to (or the server it lives on). */
 export interface SessionReference {
-  /** Full native session ID; never a prefix. */
+  /** Full native session ID; never a prefix. The canonical lowercase conversation UUID on `openhands`. */
   sessionId: string
-  /** Absolute session file, or null while the native session has not been persisted yet (always null on `opencode`). */
+  /** Absolute session file, or null while the native session has not been persisted yet (always null on `opencode` and `openhands`). */
   sessionFile: string | null
-  /** Absolute working directory the session was opened in; the literal server-side directory on `opencode`. */
+  /** Absolute working directory the session was opened in; the literal server-side directory on `opencode` and `openhands`. */
   workdir: string
-  /** Normalized server origin on `opencode`; absent for process sessions, which reject a reference that carries one. */
+  /** Normalized server origin on `opencode` and `openhands`; absent for process sessions, which reject a reference that carries one. */
   endpoint?: string
 }
 
 export interface SessionSpec {
   harness: string
-  /** Local absolute directory for `pi`/`omp`; for `opencode` the literal absolute POSIX directory on the server (never resolved or created locally). */
+  /** Local absolute directory for `pi`/`omp`; for `opencode` and `openhands` the literal absolute POSIX directory on the server (never resolved or created locally). */
   workdir: string
-  /** Required; `rpc` for `pi` and `opencode`, `sdk` for `omp`. */
+  /** Required; `rpc` for `pi`, `opencode` and `openhands`, `sdk` for `omp`. */
   backend: SessionBackend
-  /** Passed through as `--model <trimmed>` (rpc), to the SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. */
+  /** Passed through as `--model <trimmed>` (rpc), to the SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. Required on `openhands`: the exact native model the selected profile's LLM profile must declare. */
   model?: string
-  /** Layered over the inherited process env; never mutated. On `sdk`, entries conflicting with the owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected. Must be empty on `opencode`. */
+  /** Layered over the inherited process env; never mutated. On `sdk`, entries conflicting with the owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected. Must be empty on `opencode` and `openhands`. */
   env?: Record<string, string>
-  /** Replaces the `pi` binary (rpc) or the `bun` binary running the bridge worker (sdk): a bare name resolved on PATH or an absolute path. Rejected on `opencode`. */
+  /** Replaces the `pi` binary (rpc) or the `bun` binary running the bridge worker (sdk): a bare name resolved on PATH or an absolute path. Rejected on server sessions. */
   executable?: string
   /** Only `upstream` is supported; `bypass` is rejected. */
   permissionPolicy?: PermissionPolicy
-  /** Projected into `AGENTS.md` for the session's lifetime. Rejected on `opencode` (no local workdir). */
+  /** Projected into `AGENTS.md` for the session's lifetime. Rejected on server sessions (no local workdir). */
   instructions?: string
-  /** Resume an existing native session; needs `sessionFile` and the full `sessionId` (on `opencode`: a null `sessionFile`, the matching `endpoint` and the full `ses_` ID). */
+  /** Resume an existing native session; needs `sessionFile` and the full `sessionId` (on `opencode`/`openhands`: a null `sessionFile`, the matching `endpoint` and the full native ID). */
   resume?: SessionReference
   /** Wall-clock limit per turn; defaults to 1800. `null` disables it. */
   timeoutSeconds?: number | null
@@ -120,6 +148,8 @@ export interface SessionSpec {
   ompSdk?: OmpSdkOptions
   /** Required for harness `opencode`, rejected otherwise. */
   opencode?: OpenCodeOptions
+  /** Required for harness `openhands`, rejected otherwise. */
+  openhands?: OpenHandsOptions
 }
 
 /** `SessionSpec` after defaults and validation; the read-only snapshot a `LiveSession` exposes. */
@@ -129,7 +159,7 @@ export interface ResolvedSessionSpec {
   readonly backend: SessionBackend
   readonly model: string | null
   readonly env: Readonly<Record<string, string>>
-  /** Leader binary for process sessions; null on `opencode`. */
+  /** Leader binary for process sessions; null on server sessions. */
   readonly executable: string | null
   readonly permissionPolicy: PermissionPolicy
   readonly instructions: string | null
@@ -141,6 +171,8 @@ export interface ResolvedSessionSpec {
   readonly ompSdk: Readonly<OmpSdkOptions> | null
   /** Frozen, endpoint-normalized copy of the caller's selection for `opencode`; null otherwise. */
   readonly opencode: Readonly<OpenCodeOptions> | null
+  /** Frozen, endpoint-normalized copy of the caller's selection for `openhands`; null otherwise. */
+  readonly openhands: Readonly<OpenHandsOptions> | null
 }
 
 /** What a harness supports as a live session on a backend. Static; never probes installs or credentials. */
@@ -164,17 +196,19 @@ export type SessionTurnStatus =
   | 'closed'
   | 'exited'
   | 'signaled'
+  /** `openhands` only: native stuck detection stopped the run. */
+  | 'stuck'
 
-/** One native frame, response frames included. Unknown native event types pass through untouched in `raw`; on `sdk`, `raw` is the exact native SDK event, never the bridge wrapper; on `opencode`, `raw` is the decoded SSE `{id, type, properties}` object. */
+/** One native frame, response frames included. Unknown native event types pass through untouched in `raw`; on `sdk`, `raw` is the exact native SDK event, never the bridge wrapper; on `opencode`, `raw` is the decoded SSE `{id, type, properties}` object; on `openhands`, `raw` is the whole session-socket envelope (`seq` retained). */
 export interface SessionEvent {
   backend: SessionBackend
   harness: SessionHarness
   sessionId: string
   /** Null for frames that arrived while no turn was active, and on `opencode` for message frames of the selected session that do not belong to the active turn's lineage. */
   turnId: string | null
-  /** The native `id` correlation field when the frame carries one; on `opencode` the native message or permission request ID. */
+  /** The native `id` correlation field when the frame carries one; on `opencode` the native message or permission request ID; on `openhands` the inner native event `id`. */
   requestId: string | null
-  /** Native `type` string. */
+  /** Native `type` string; on `openhands` the inner event `kind` for durable/transient frames, the envelope `type` otherwise. */
   type: string
   raw: JsonObject
 }
@@ -183,13 +217,13 @@ export interface SessionTurnResult {
   sessionId: string
   turnId: string
   status: SessionTurnStatus
-  /** Last `agent_end` payload, the failed `prompt` response, the failing `sdk_settled` bridge frame, or on `opencode` the native prompt response (`{info, parts}`) / failing HTTP JSON body. */
+  /** Last `agent_end` payload, the failed `prompt` response, the failing `sdk_settled` bridge frame, on `opencode` the native prompt response (`{info, parts}`) / failing HTTP JSON body, or on `openhands` `{state, terminal_event}` (final native `full_state` and the durable terminal transition) / `{http_status, body}` for a rejected request. */
   raw: JsonObject | null
   error: string | null
-  /** Leader exit code once reaped, else null. Signaled exits report `-signum`. Always null on `opencode` (no process is observed). */
+  /** Leader exit code once reaped, else null. Signaled exits report `-signum`. Always null on server sessions (no process is observed). */
   exitCode: number | null
   signal: string | null
-  /** Bounded prefix of the session's stderr so far; empty with `stderrBytes` 0 on `opencode`. */
+  /** Bounded prefix of the session's stderr so far; empty with `stderrBytes` 0 on server sessions. */
   stderr: string
   stderrBytes: number
   stderrTruncated: boolean
@@ -220,8 +254,14 @@ const LF = 0x0a
 const CR = 0x0d
 /** Native OpenCode session IDs: the server validates the prefix only, so the rest is merely required to be safe alphanumerics. */
 const OPENCODE_SESSION_ID = /^ses_[0-9A-Za-z]+$/
-/** Any ASCII control character (including DEL); rejected in every OpenCode option that ends up on the wire. */
+/** Canonical lowercase hyphenated UUID: what this client generates and what the pinned server echoes for conversation IDs. */
+export const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+/** `PROFILE_NAME_PATTERN` of the pinned SDK (llm_profile_store.py), shared by the LLM and agent profile routes. */
+export const OPENHANDS_PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+/** Any ASCII control character (including DEL); rejected in every server option that ends up on the wire. */
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+/** A header-safe credential: printable ASCII without whitespace. */
+const PRINTABLE_TOKEN = /^[\u0021-\u007e]+$/
 
 export function invalid(message: string): HarnessError {
   return new HarnessError(message, 'invalid-options')
@@ -280,27 +320,27 @@ function ompSdkEnv(options: Readonly<OmpSdkOptions>): Readonly<Record<string, st
 }
 
 /** Which backend each session harness is qualified on; anything else is `unsupported-backend`. */
-const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc' }
+const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', openhands: 'rpc' }
 
 function isSessionHarness(name: string): name is SessionHarness {
-  return name === 'pi' || name === 'omp' || name === 'opencode'
+  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'openhands'
 }
 
-/** Resolve the harness first, then validate the backend before rejecting an unsupported pairing. */
+/** Resolve the harness first, then validate the backend before rejecting an unsupported pairing. `openhands` is session-only: it never goes through the adapter registry. */
 function requireSessionHarness(name: unknown, backend: unknown): { harness: SessionHarness; backend: SessionBackend } {
   if (typeof name !== 'string') throw invalid('harness must be a string')
-  const adapter = getAdapter(name)
+  const resolved = name === 'openhands' ? name : getAdapter(name).name
   if (backend !== 'cli' && backend !== 'rpc' && backend !== 'sdk') {
     throw invalid(`Unknown backend: ${JSON.stringify(backend)}. Expected one of: cli, rpc, sdk`)
   }
-  if (!isSessionHarness(adapter.name)) {
-    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc) and "omp" (sdk) are supported`, 'unsupported-backend')
+  if (!isSessionHarness(resolved)) {
+    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "openhands" (rpc) and "omp" (sdk) are supported`, 'unsupported-backend')
   }
-  const qualified = SESSION_BACKENDS[adapter.name]
+  const qualified = SESSION_BACKENDS[resolved]
   if (backend !== qualified) {
-    throw new HarnessError(`Live sessions for "${adapter.name}" are only implemented on backend "${qualified}", not "${backend}"`, 'unsupported-backend')
+    throw new HarnessError(`Live sessions for "${resolved}" are only implemented on backend "${qualified}", not "${backend}"`, 'unsupported-backend')
   }
-  return { harness: adapter.name, backend: qualified }
+  return { harness: resolved, backend: qualified }
 }
 
 /**
@@ -357,7 +397,7 @@ function normalizeEndpoint(raw: unknown, field: string): string {
     throw invalid(`${field} is not an absolute URL`)
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw invalid(`${field} must use http or https, got ${JSON.stringify(url.protocol)}`)
-  if (url.username !== '' || url.password !== '') throw invalid(`${field} must not embed credentials; use auth "basic" with username/password`)
+  if (url.username !== '' || url.password !== '') throw invalid(`${field} must not embed credentials`)
   const authority = raw.slice(raw.indexOf('://') + 3)
   if (authority.endsWith(':') || authority.endsWith(':/')) throw invalid(`${field} must not have an empty port`)
   const slash = authority.indexOf('/')
@@ -390,12 +430,37 @@ function resolveOpenCode(raw: unknown): Readonly<OpenCodeOptions> {
 }
 
 /**
- * The literal server-side directory an OpenCode session runs in: absolute
+ * Validate the caller's OpenHands server selection. The endpoint is
+ * normalized, the API key is kept verbatim and never echoed, the profile name
+ * must already satisfy the server's own pattern, and the callback attestation
+ * must be an explicit `true`.
+ */
+function resolveOpenHands(raw: unknown): Readonly<OpenHandsOptions> {
+  if (!isJsonObject(raw)) throw invalid('openhands must be an OpenHandsOptions object')
+  if (Object.keys(raw).some((key) => !['endpoint', 'apiKey', 'agentProfile', 'confirmNoUnwantedCallbacks'].includes(key))) {
+    throw invalid('openhands contains an unsupported option')
+  }
+  const { apiKey, agentProfile, confirmNoUnwantedCallbacks } = raw
+  const endpoint = normalizeEndpoint(raw.endpoint, 'openhands.endpoint')
+  if (typeof apiKey !== 'string' || !PRINTABLE_TOKEN.test(apiKey)) {
+    throw invalid('openhands.apiKey must be a non-empty printable ASCII token without whitespace')
+  }
+  if (typeof agentProfile !== 'string' || !OPENHANDS_PROFILE_NAME.test(agentProfile)) {
+    throw invalid('openhands.agentProfile must be an exact server-side agent profile name matching ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+  }
+  if (confirmNoUnwantedCallbacks !== true) {
+    throw invalid('openhands.confirmNoUnwantedCallbacks must be exactly true: the caller attests that the server has no unwanted webhooks or callbacks configured; this session neither verifies nor disables server-side callbacks')
+  }
+  return Object.freeze({ endpoint, apiKey, agentProfile, confirmNoUnwantedCallbacks: true })
+}
+
+/**
+ * The literal server-side directory a server session runs in: absolute
  * POSIX, canonical (no empty, `.` or `..` segments, no trailing slash except
  * for the root itself). Nothing is resolved or checked locally.
  */
-function requireServerWorkdir(raw: string): string {
-  if (!raw.startsWith('/')) throw invalid(`workdir ${JSON.stringify(raw)} must be an absolute POSIX path on the OpenCode server`)
+function requireServerWorkdir(raw: string, harness: SessionHarness): string {
+  if (!raw.startsWith('/')) throw invalid(`workdir ${JSON.stringify(raw)} must be an absolute POSIX path on the ${harness} server`)
   if (CONTROL_CHARS.test(raw)) throw invalid('workdir must not contain control characters')
   if (raw === '/') return raw
   if (raw.endsWith('/')) throw invalid(`workdir ${JSON.stringify(raw)} must not end with a slash`)
@@ -428,21 +493,25 @@ function resolveReference(raw: unknown, workdir: string): SessionReference {
   return { sessionId, sessionFile, workdir: refWorkdir }
 }
 
-/** Resume target for OpenCode: the full `ses_` ID on the same normalized endpoint and literal workdir, with no session file. Verified against the server in `open`. */
-function resolveServerReference(raw: unknown, workdir: string, endpoint: string): SessionReference {
+/** Resume target for a server session: the full native ID on the same normalized endpoint and literal workdir, with no session file. Verified against the server in `open`. */
+function resolveServerReference(raw: unknown, workdir: string, endpoint: string, harness: 'opencode' | 'openhands'): SessionReference {
   if (!isJsonObject(raw)) throw invalid('resume must be a SessionReference object')
   const { sessionId, sessionFile, workdir: refWorkdir, endpoint: refEndpoint } = raw
-  if (typeof sessionId !== 'string' || !OPENCODE_SESSION_ID.test(sessionId)) {
-    throw invalid('resume.sessionId must be the full native OpenCode session ID (ses_ followed by alphanumerics)')
+  if (harness === 'opencode') {
+    if (typeof sessionId !== 'string' || !OPENCODE_SESSION_ID.test(sessionId)) {
+      throw invalid('resume.sessionId must be the full native OpenCode session ID (ses_ followed by alphanumerics)')
+    }
+  } else if (typeof sessionId !== 'string' || !CANONICAL_UUID.test(sessionId)) {
+    throw invalid('resume.sessionId must be the full canonical lowercase conversation UUID of the OpenHands conversation')
   }
-  if (sessionFile !== null) throw invalid('resume.sessionFile must be null for OpenCode sessions; they live on the server, not in a local file')
+  if (sessionFile !== null) throw invalid(`resume.sessionFile must be null for ${harness} sessions; they live on the server, not in a local file`)
   if (refWorkdir !== workdir) {
     throw invalid(`resume.workdir ${JSON.stringify(refWorkdir)} does not match the session workdir ${JSON.stringify(workdir)}`)
   }
-  if (refEndpoint === undefined) throw invalid('resume.endpoint is required for OpenCode sessions')
+  if (refEndpoint === undefined) throw invalid(`resume.endpoint is required for ${harness} sessions`)
   const normalized = normalizeEndpoint(refEndpoint, 'resume.endpoint')
   if (normalized !== endpoint) {
-    throw invalid(`resume.endpoint ${JSON.stringify(normalized)} does not match opencode.endpoint ${JSON.stringify(endpoint)}`)
+    throw invalid(`resume.endpoint ${JSON.stringify(normalized)} does not match ${harness}.endpoint ${JSON.stringify(endpoint)}`)
   }
   return { sessionId, sessionFile: null, workdir, endpoint }
 }
@@ -467,11 +536,21 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   } else if (rawOpenCode !== undefined) {
     throw invalid('opencode is only accepted for harness "opencode"')
   }
+  const rawOpenHands: unknown = spec.openhands
+  let openhands: Readonly<OpenHandsOptions> | null = null
+  if (harness === 'openhands') {
+    if (rawOpenHands === undefined) throw invalid('openhands is required for harness "openhands": endpoint, apiKey, agentProfile and the callback attestation are never guessed')
+    openhands = resolveOpenHands(rawOpenHands)
+  } else if (rawOpenHands !== undefined) {
+    throw invalid('openhands is only accepted for harness "openhands"')
+  }
+  /** Server sessions have no local process, workdir lease or environment. */
+  const remote = opencode !== null || openhands !== null
   const rawWorkdir: unknown = spec.workdir
   if (typeof rawWorkdir !== 'string' || rawWorkdir === '' || rawWorkdir.includes('\0')) {
     throw invalid('workdir must be a non-empty string without NUL bytes')
   }
-  const workdir = opencode === null ? resolve(rawWorkdir) : requireServerWorkdir(rawWorkdir)
+  const workdir = remote ? requireServerWorkdir(rawWorkdir, harness) : resolve(rawWorkdir)
 
   let model: string | null = null
   const rawModel: unknown = spec.model
@@ -483,6 +562,9 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
       const slash = model.indexOf('/')
       if (slash <= 0 || slash === model.length - 1) throw invalid(`model ${JSON.stringify(model)} must be "provider/model" for opencode`)
     }
+  }
+  if (openhands !== null && model === null) {
+    throw invalid('model is required for openhands: the exact native model the selected profile\'s LLM profile declares (no normalization or fallback)')
   }
 
   const env: Record<string, string> = {}
@@ -496,8 +578,8 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
       env[key] = value
     }
   }
-  if (opencode !== null && Object.keys(env).length > 0) {
-    throw invalid('env is not supported for opencode: the server process is caller-owned and its environment cannot be changed per session')
+  if (remote && Object.keys(env).length > 0) {
+    throw invalid(`env is not supported for ${harness}: the server process is caller-owned and its environment cannot be changed per session`)
   }
   if (ompSdk !== null) {
     for (const [key, owned] of Object.entries(ompSdkEnv(ompSdk))) {
@@ -515,8 +597,8 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
 
   let executable: string | null = backend === 'sdk' ? 'bun' : 'pi'
   const rawExecutable: unknown = spec.executable
-  if (opencode !== null) {
-    if (rawExecutable !== undefined) throw invalid('executable is not supported for opencode: no local process is launched')
+  if (remote) {
+    if (rawExecutable !== undefined) throw invalid(`executable is not supported for ${harness}: no local process is launched`)
     executable = null
   } else if (rawExecutable !== undefined) {
     if (typeof rawExecutable !== 'string' || rawExecutable === '' || rawExecutable.includes('\0')) {
@@ -538,13 +620,17 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
 
   const rawInstructions: unknown = spec.instructions
   if (rawInstructions !== undefined && typeof rawInstructions !== 'string') throw invalid('instructions must be a string')
-  if (rawInstructions !== undefined && opencode !== null) {
-    throw invalid('instructions are not supported for opencode: the session has no local workdir to project AGENTS.md into')
+  if (rawInstructions !== undefined && remote) {
+    throw invalid(`instructions are not supported for ${harness}: the session has no local workdir to project AGENTS.md into`)
   }
 
   let resume: SessionReference | null = null
   if (spec.resume !== undefined) {
-    resume = opencode === null ? resolveReference(spec.resume, workdir) : resolveServerReference(spec.resume, workdir, opencode.endpoint)
+    resume = opencode !== null
+      ? resolveServerReference(spec.resume, workdir, opencode.endpoint, 'opencode')
+      : openhands !== null
+        ? resolveServerReference(spec.resume, workdir, openhands.endpoint, 'openhands')
+        : resolveReference(spec.resume, workdir)
   }
 
   let timeoutSeconds: number | null = DEFAULT_TIMEOUT_SECONDS
@@ -586,6 +672,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     maxBufferBytes,
     ompSdk,
     opencode,
+    openhands,
   })
 }
 
@@ -823,11 +910,11 @@ function lastAssistantMessage(messages: unknown): JsonObject | null {
 /**
  * An open live session. Obtain one through `openSession`; the native
  * resources (process group, workdir lease and projected instructions for
- * `pi`/`omp`; HTTP connections and the event stream for `opencode`) are owned
- * until `close()` (or an internal failure) tears them down. Turns are
- * sequential: the next `startTurn` after a settled result is a follow-up in
- * the same native session. There is no callback API; consume `turn.events` /
- * `events`.
+ * `pi`/`omp`; HTTP connections and the event stream or socket for
+ * `opencode`/`openhands`) are owned until `close()` (or an internal failure)
+ * tears them down. Turns are sequential: the next `startTurn` after a settled
+ * result is a follow-up in the same native session. There is no callback API;
+ * consume `turn.events` / `events`.
  */
 export abstract class LiveSession {
   readonly spec: ResolvedSessionSpec
@@ -843,6 +930,11 @@ export abstract class LiveSession {
       // Lazy by contract: the HTTP/SSE transport is only loaded when an OpenCode session is selected.
       const { OpenCodeSession } = await import('./opencode.js')
       return OpenCodeSession.connect(spec)
+    }
+    if (spec.openhands !== null) {
+      // Lazy by contract: the HTTP/WebSocket transport (and its optional `ws` peer) is only loaded for OpenHands.
+      const { OpenHandsSession } = await import('./openhands.js')
+      return OpenHandsSession.connect(spec)
     }
     return ProcessSession.launch(spec)
   }
@@ -873,7 +965,8 @@ export abstract class LiveSession {
    * Answer an outstanding native permission request of this session. Only
    * `opencode` supports it (`getSessionCapabilities(...).approval`); the
    * request must have been observed as a `permission.asked` event of the
-   * selected session and still be unanswered.
+   * selected session and still be unanswered. `openhands` refuses: a native
+   * `waiting_for_confirmation` fails the turn instead.
    */
   abstract respondApproval(requestId: string, response: OpenCodeApprovalResponse): Promise<void>
 
@@ -1519,9 +1612,10 @@ class ProcessSession extends LiveSession {
  * AGENTS.md), spawn the leader (`pi --mode rpc`, or `bun` running the OMP SDK
  * bridge worker) and complete the `get_state` handshake; rejects with the
  * lease released and the process group stopped when any step fails. For
- * `opencode`: qualify the caller-owned server (health/version, directory,
- * session identity) and subscribe to its event stream; rejects with every
- * owned connection closed, never touching the server itself.
+ * `opencode`/`openhands`: qualify the caller-owned server (version, profile,
+ * directory, session identity) and subscribe to its event stream or session
+ * socket; rejects with every owned connection closed, never touching the
+ * server itself.
  */
 export async function openSession(spec: SessionSpec): Promise<LiveSession> {
   return LiveSession.open(spec)

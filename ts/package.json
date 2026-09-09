@@ -17,7 +17,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=node && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && tsc -p tsconfig.build.json",
+    "build": "bun build src/index.ts --outdir=dist --target=node --external ws && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && tsc -p tsconfig.build.json",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test"
@@ -25,9 +25,19 @@
   "dependencies": {
     "better-sqlite3": "^12.0.0"
   },
+  "peerDependencies": {
+    "ws": "^8.18.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "@types/bun": "latest",
-    "typescript": "^5.0.0"
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.0.0",
+    "ws": "^8.18.0"
   }
 }

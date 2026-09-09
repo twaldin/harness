@@ -49,7 +49,7 @@ Codex bypass also disables sandboxing. Unsupported bypass requests fail; no
 tool is silently escalated. Existing upstream config and environment still apply.
 
 The one-shot execution backend defaults to `"cli"`. Selecting `"rpc"` or `"sdk"`
-in `RunSpec` is an explicit unsupported-backend error, never a fallback.
+for a registered CLI adapter in `RunSpec` is an explicit unsupported-backend error, never a fallback.
 Controlled Pi RPC uses the separate [session API](#controlled-pi-rpc-sessions).
 `get_capabilities("codex")` / `getCapabilities('codex')` reports one-shot support
 without probing installation or auth. Typed native options cover Claude Code
@@ -303,6 +303,76 @@ synthetic follow-ups that change message ancestry are explicitly unsupported.
 Mock-server conformance is not native-runtime or authenticated-provider
 qualification; those checks have not run. See the
 [HTTP session contract and evidence limits](SPEC.md#caller-owned-opencode-http-sessions).
+
+### Caller-owned OpenHands Agent Server sessions
+
+Select the session-only `harness="openhands", backend="rpc"` for an
+already-running **OpenHands Agent Server 1.45.0**. Supply its endpoint,
+server session key, existing native agent profile, exact model and absolute
+server workdir. Provider credentials stay on that server; Harness neither
+discovers nor uploads them. Python needs `harness-cli[openhands]`
+(`httpx` 0.28.x and `websockets` 15.x); Node needs the optional `ws` 8.x peer,
+while Bun supplies its runtime WebSocket implementation.
+Imports remain lazy. No SDK, CLI, Canvas or server is launched.
+
+The caller must explicitly confirm the supplied server has no unwanted
+automation callbacks/webhooks. **Harness registers none, but cannot inspect
+or disable server-configured webhooks.** Confirming this prerequisite is
+not a client-side security check. The selected profile's native tools,
+skills, MCP configuration and server memory preferences remain trusted
+upstream configuration.
+
+```python
+from harness import OpenHandsOptions, SessionSpec, open_session
+
+async def review(server_workdir: str, model: str, options: OpenHandsOptions):
+    # Caller supplies endpoint, api_key, agent_profile and
+    # confirm_no_unwanted_callbacks=True only after checking the server.
+    async with await open_session(SessionSpec(
+        harness="openhands", backend="rpc", workdir=server_workdir,
+        model=model, openhands=options,
+    )) as session:
+        turn = session.start_turn("Review the repository without editing files.")
+        async for event in turn.events:
+            print(event.type)
+        print((await turn.result).status)
+        return session.reference
+```
+
+```typescript
+import { openSession, type OpenHandsOptions } from '@twaldin/harness-ts'
+
+async function review(
+  serverWorkdir: string, model: string, openhands: OpenHandsOptions,
+) {
+  // Caller supplies endpoint, apiKey, agentProfile and
+  // confirmNoUnwantedCallbacks: true only after checking the server.
+  const session = await openSession({
+    harness: 'openhands', backend: 'rpc', workdir: serverWorkdir,
+    model, openhands,
+  })
+  try {
+    const turn = session.startTurn('Review the repository without editing files.')
+    for await (const event of turn.events) console.log(event.type)
+    console.log((await turn.result).status)
+    return session.reference
+  } finally {
+    await session.close()
+  }
+}
+```
+
+Resume passes the exact UUID reference with the same endpoint/workdir/profile;
+a missing conversation never creates a replacement. The caller owns exclusive
+write access. Native `finished`, `error`, `stuck` and `paused` remain distinct;
+an acknowledgement or disconnect is not success. Approval responses and
+permission bypass are unsupported. The ordered native session channel does
+not provide token-by-token deltas in this pin.
+
+Close and timeout release only client transport. Remote work and history
+remain caller-owned; no server is killed or reconfigured. Fixture coverage
+is not native-server/provider qualification: **neither has run**. See the
+[OpenHands contract and evidence limits](SPEC.md#caller-owned-openhands-agent-server-sessions).
 
 ---
 

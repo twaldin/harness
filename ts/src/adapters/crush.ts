@@ -2,111 +2,69 @@ import { register } from '../registry.js'
 import type { Adapter, AgentStatus, BuildCommand, ParsedOutput, ReadyState, RunSpec, SessionTelemetry, SubprocOutcome } from '../base.js'
 import { finalizeCommand, validateRunSpec } from '../base.js'
 import { stripAnsi, lastNonEmptyJoin } from '../util.js'
-import { deriveCost } from '../pricing.js'
-import { createRequire } from 'module'
+import { NO_TOTALS, field, identityRaw, openReadOnly, parseSelector, telemetryFor, unanimous, validCost, validTokens } from '../session-db.js'
+import type { SessionTotals } from '../session-db.js'
 import { existsSync } from 'fs'
-import { basename, join, resolve } from 'path'
-import { homedir } from 'os'
+import { join, resolve } from 'path'
 
-interface SqliteDriver {
-  get(sql: string, ...params: unknown[]): unknown
-  close(): void
+/** `crush run --verbose` logs the new session on stderr; continuation records are deliberately not matched. */
+const CREATED_SESSION_RE = /^INFO\s+Created session for non-interactive run session_id=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\r?$/
+
+/** The native session ID a fresh non-interactive run created; null when none or several distinct IDs were logged. */
+function crushSessionID(stderr: string): string | null {
+  let found: string | null = null
+  for (const line of stripAnsi(stderr).split('\n')) {
+    const id = CREATED_SESSION_RE.exec(line)?.[1]
+    if (id === undefined) continue
+    if (found !== null && found !== id) return null
+    found = id
+  }
+  return found
 }
 
-function openDb(dbPath: string): SqliteDriver | null {
-  const isBun = typeof (globalThis as unknown as { Bun?: unknown }).Bun !== 'undefined'
-  const requireFn = createRequire(import.meta.url)
-  if (isBun) {
-    try {
-      const mod = requireFn('bun:sqlite') as { Database: new (p: string, o?: unknown) => {
-        prepare(s: string): { get(...p: unknown[]): unknown }
-        close(): void
-      } }
-      const db = new mod.Database(dbPath, { readonly: true })
-      return {
-        get: (sql, ...params) => db.prepare(sql).get(...params),
-        close: () => db.close(),
-      }
-    } catch {
-      return null
-    }
-  }
-  try {
-    const Database = requireFn('better-sqlite3') as new (p: string, o?: unknown) => {
-      prepare(s: string): { get(...p: unknown[]): unknown }
-      close(): void
-    }
-    const db = new Database(dbPath, { readonly: true, timeout: 5000 })
-    return {
-      get: (sql, ...params) => db.prepare(sql).get(...params),
-      close: () => db.close(),
-    }
-  } catch {
-    return null
-  }
-}
-
-/** Caller-selected data dir (spec env, then inherited env) is upstream state; otherwise the harness default under the workdir. */
+/**
+ * The data dir the child uses. A caller key in the spec env wins (an empty
+ * value never resurrects an inherited path), then an inherited nonempty
+ * value, relative to the child's workdir like `--data-dir`; otherwise the
+ * harness default under the workdir, the only one created at prepare time.
+ */
 function crushDataDir(workdir: string, extraEnv: Record<string, string> | undefined): { dir: string; harnessOwned: boolean } {
-  const envPath = (extraEnv ?? {})['CRUSH_DATA_DIR'] ?? process.env['CRUSH_DATA_DIR']
-  if (envPath) return { dir: envPath.replace(/^~/, homedir()), harnessOwned: false }
+  const explicit = extraEnv?.['CRUSH_DATA_DIR'] ?? process.env['CRUSH_DATA_DIR']
+  if (explicit !== undefined && explicit !== '') return { dir: resolve(workdir, explicit), harnessOwned: false }
   return { dir: join(workdir, '.harness', 'crush-data'), harnessOwned: true }
 }
 
-function readCrushSessionTotalsByDbPath(
-  dbPath: string,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
-  if (!existsSync(dbPath)) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
-
-  const db = openDb(dbPath)
-  if (!db) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
-
+/**
+ * Upstream aggregates for exactly one session: `sessions.prompt_tokens`,
+ * `completion_tokens` and `cost` are reported literally when valid. The
+ * model comes from that session's assistant messages when they unanimously
+ * name one nonempty model and provider; a missing messages table leaves the
+ * session aggregates intact.
+ */
+function readCrushSession(dbPath: string, sessionID: string): SessionTotals {
+  if (!existsSync(dbPath)) return NO_TOTALS
+  const db = openReadOnly(dbPath)
+  if (!db) return NO_TOTALS
   try {
-    const row = db.get(
-      `
-      SELECT id, prompt_tokens, completion_tokens, cost
-      FROM sessions
-      WHERE parent_session_id IS NULL
-      ORDER BY updated_at DESC
-      LIMIT 1
-      `,
-    ) as { id: unknown; prompt_tokens: unknown; completion_tokens: unknown; cost: unknown } | undefined
-    if (!row) return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
-
-    const tokensIn = typeof row.prompt_tokens === 'number' ? Math.trunc(row.prompt_tokens) : null
-    const tokensOut = typeof row.completion_tokens === 'number' ? Math.trunc(row.completion_tokens) : null
-    const costUsd = typeof row.cost === 'number' ? row.cost : null
-
-    // sessions has no model column upstream; the model lives on messages.model.
-    // Report it only when every assistant turn of the session agrees on one.
+    const row = db.get('SELECT prompt_tokens, completion_tokens, cost FROM sessions WHERE id = ?', sessionID)
+    if (row === null) return NO_TOTALS
+    const tokensIn = validTokens(field(row, 'prompt_tokens'))
+    const tokensOut = validTokens(field(row, 'completion_tokens'))
+    const costUsd = validCost(field(row, 'cost'))
     let model: string | null = null
     try {
-      const modelRow = db.get(
-        `
-        SELECT CASE WHEN COUNT(DISTINCT model) = 1 AND COUNT(NULLIF(model, '')) = COUNT(*)
-                    THEN MAX(model) END AS model
-        FROM messages
-        WHERE session_id = ? AND role = 'assistant'
-        `,
-        row.id,
-      ) as { model: unknown } | undefined
-      if (typeof modelRow?.model === 'string') model = modelRow.model
+      const messages = db.all("SELECT model, provider FROM messages WHERE session_id = ? AND role = 'assistant'", sessionID)
+      const providers = messages.map((message) => field(message, 'provider'))
+      model = unanimous(providers) === null ? null : unanimous(messages.map((message) => field(message, 'model')))
     } catch {
-      // messages table absent: totals stand, model unknown
+      // messages table absent: aggregates stand, model unknown
     }
     return { tokensIn, tokensOut, costUsd, model }
   } catch {
-    return { tokensIn: null, tokensOut: null, costUsd: null, model: null }
+    return NO_TOTALS
   } finally {
     db.close()
   }
-}
-
-function readCrushSessionTotals(
-  workdir: string,
-  extraEnv: Record<string, string> | undefined,
-): { tokensIn: number | null; tokensOut: number | null; costUsd: number | null; model: string | null } {
-  return readCrushSessionTotalsByDbPath(join(crushDataDir(workdir, extraEnv).dir, 'crush.db'))
 }
 
 const crushAdapter: Adapter = {
@@ -120,35 +78,32 @@ const crushAdapter: Adapter = {
     const data = crushDataDir(workdir, spec.env)
     return finalizeCommand(this, spec, validated, {
       cmd: 'crush',
-      args: ['run', '--data-dir', data.dir, '--model', model, '--small-model', model, spec.prompt],
+      args: ['run', '--verbose', '--data-dir', data.dir, '--model', model, '--small-model', model, spec.prompt],
       // Caller-selected data dirs are upstream state; only the harness default is created at prepare time.
       directories: data.harnessOwned ? [data.dir] : [],
     })
   },
 
-  parseOutput(spec: RunSpec, _outcome: SubprocOutcome): ParsedOutput {
-    const { tokensIn, tokensOut, costUsd } = readCrushSessionTotals(resolve(spec.workdir), spec.env)
-    return { costUsd, tokensIn, tokensOut, raw: null }
+  // Telemetry is correlated by the native session ID the verbose log reports;
+  // the SQLite row for exactly that session is read afterwards.
+  parseOutput(spec: RunSpec, outcome: SubprocOutcome): ParsedOutput {
+    const sessionID = crushSessionID(outcome.stderr)
+    if (sessionID === null) return { costUsd: null, tokensIn: null, tokensOut: null, raw: null }
+    const dbPath = join(crushDataDir(resolve(spec.workdir), spec.env).dir, 'crush.db')
+    const { tokensIn, tokensOut, costUsd } = readCrushSession(dbPath, sessionID)
+    return { costUsd, tokensIn, tokensOut, raw: identityRaw(sessionID, costUsd) }
   },
 
-  sessionLogPath(workdir: string, _since?: number): string | null {
-    const dbPath = join(crushDataDir(workdir, undefined).dir, 'crush.db')
-    if (!existsSync(dbPath)) return null
-    let wd = workdir
-    try { wd = basename(resolve(workdir)) } catch { wd = basename(workdir) }
-    return `${dbPath}#session(${wd})`
+  // The store is keyed by native session ID; without that identity there is no session log to name.
+  sessionLogPath(_workdir: string, _since?: number): string | null {
+    return null
   },
 
+  /** Accepts only an explicit `<database path>#session=<percent-encoded native ID>` selector. */
   parseSessionLog(path: string): SessionTelemetry {
-    const dbPath = path.split('#')[0] ?? path
-    const { tokensIn, tokensOut, costUsd, model } = readCrushSessionTotalsByDbPath(dbPath)
-    // sessions.cost is NOT NULL DEFAULT 0.0 upstream, so 0 may be a genuine
-    // zero-cost run; without a session model there is nothing to price it with.
-    let finalCost = costUsd
-    if ((finalCost == null || finalCost === 0) && (tokensIn != null || tokensOut != null)) {
-      finalCost = deriveCost(model, tokensIn, tokensOut) ?? finalCost
-    }
-    return { sessionLogPath: path, tokensIn, tokensOut, costUsd: finalCost, model, raw: null }
+    const selector = parseSelector(path)
+    if (selector === null) return telemetryFor(path, NO_TOTALS, null)
+    return telemetryFor(path, readCrushSession(selector.dbPath, selector.sessionID), selector.sessionID)
   },
 }
 

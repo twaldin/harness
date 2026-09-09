@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'path'
 import { HarnessError, validateRunSpec } from '../src/base.js'
-import type { Backend, ErrorCode, RunSpec } from '../src/base.js'
+import type { Backend, ErrorCode, NativeOptions, RunSpec } from '../src/base.js'
 import { buildCommand, getAdapter, getCapabilities, parseOutput, register } from '../src/registry.js'
 import '../src/adapters/index.js'
 
@@ -55,11 +55,18 @@ const BYPASS_FLAGS: Record<string, string[]> = {
   kilo: ['--auto'],
   omp: ['--auto-approve'],
   'continue-cli': ['--auto'],
+  cline: ['--auto-approve', 'true'],
   copilot: ['--allow-all'],
+  'mistral-vibe': ['--auto-approve'],
+  'mini-swe-agent': ['--yolo'],
+  cursor: ['--force'],
+  kiro: ['--trust-all-tools'],
 }
 const BYPASS_ENVS: Record<string, Record<string, string>> = { goose: { GOOSE_MODE: 'auto' } }
+/** Native knobs `specFor`'s projected instructions need before the adapter accepts them. */
+const PROJECTION_NATIVE: Record<string, NativeOptions> = { 'mistral-vibe': { kind: 'mistral-vibe', trust: true } }
 
-const NO_BYPASS = ['opencode', 'pi', 'crush', 'swe-agent']
+const NO_BYPASS = ['amp', 'opencode', 'pi', 'crush', 'swe-agent', 'kimi-code', 'qoder']
 
 const ALL_BYPASS_FLAGS = Object.values(BYPASS_FLAGS).flat()
 const SHIPPED = [...Object.keys(BYPASS_FLAGS), ...Object.keys(BYPASS_ENVS), ...NO_BYPASS]
@@ -68,10 +75,11 @@ describe('permission policy', () => {
   for (const [name, flags] of Object.entries(BYPASS_FLAGS)) {
     test(`${name}: omitted policy injects no bypass flag; explicit bypass injects ${flags.join(' ')}`, () => {
       const workdir = freshWorkdir()
-      const upstream = buildCommand(specFor(name, { workdir }))
+      const nativeOptions = PROJECTION_NATIVE[name]
+      const upstream = buildCommand(specFor(name, { workdir, nativeOptions }))
       for (const flag of ALL_BYPASS_FLAGS) expect(upstream.args).not.toContain(flag)
 
-      const bypass = buildCommand(specFor(name, { workdir, permissionPolicy: 'bypass' }))
+      const bypass = buildCommand(specFor(name, { workdir, nativeOptions, permissionPolicy: 'bypass' }))
       for (const flag of flags) expect(bypass.args).toContain(flag)
       // bypass adds exactly the mapped flags, nothing else moves
       expect(bypass.args.filter((a) => !flags.includes(a))).toEqual(upstream.args)
@@ -215,6 +223,7 @@ describe('native options', () => {
     const allowTools = new Array<string>(1)
     expectCode(() => buildCommand(specFor('copilot', { nativeOptions: { kind: 'copilot', allowTools } })), 'invalid-options')
   })
+
 })
 
 describe('getCapabilities', () => {
@@ -241,7 +250,14 @@ describe('getCapabilities', () => {
       aider: [null, '--config'],
       'continue-cli': [null, '--config'],
       omp: ['PI_CODING_AGENT_DIR', '--config'],
+      cline: ['CLINE_DIR', null],
       copilot: ['COPILOT_HOME', null],
+      'mistral-vibe': ['VIBE_HOME', null],
+      'mini-swe-agent': ['MSWEA_GLOBAL_CONFIG_DIR', '--config'],
+      cursor: ['CURSOR_CONFIG_DIR', null],
+      amp: [null, '--settings-file'],
+      'kimi-code': ['KIMI_CODE_HOME', null],
+      qoder: ['QODER_CONFIG_DIR', null],
     }
     for (const name of SHIPPED) {
       const caps = getCapabilities(name)
@@ -256,7 +272,7 @@ describe('getCapabilities', () => {
       const caps = getCapabilities(name)
       expect(caps.permissionPolicies[0]).toBe('upstream')
       expect(caps.permissionPolicies.includes('bypass')).toBe(name in BYPASS_FLAGS || name in BYPASS_ENVS)
-      if (name !== 'claude-code' && name !== 'codex' && name !== 'copilot') expect(caps.nativeOptions).toBeNull()
+      if (name !== 'claude-code' && name !== 'codex' && name !== 'cline' && name !== 'copilot' && name !== 'amp' && name !== 'mistral-vibe' && name !== 'kiro' && name !== 'qoder') expect(caps.nativeOptions).toBeNull()
       else expect(caps.nativeOptions).toBe(name)
       expect(caps.streaming).toBe(true)
       expect(caps.cancellation).toBe(true)

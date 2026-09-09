@@ -32,6 +32,12 @@ def test_crush_preserves_explicit_provider_prefixes():
     assert normalize_model_for_harness("crush", "openrouter/google/gemini-2.5-pro") == "openrouter/google/gemini-2.5-pro"
 
 
+def test_openclaude_preserves_gateway_namespaced_models_and_bare_names():
+    assert normalize_model_for_harness("openclaude", "deepseek/deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
+    assert normalize_model_for_harness("openclaude", "openrouter/anthropic/claude-sonnet-4-6") == "openrouter/anthropic/claude-sonnet-4-6"
+    assert normalize_model_for_harness("openclaude", " gpt-5.4 ") == "gpt-5.4"
+
+
 def test_model_no_resolve_escape_hatch_returns_raw_model():
     assert normalize_model_for_harness("pi", "gpt-5.4", resolve=False) == "gpt-5.4"
     assert normalize_model_for_harness("codex", "openai/gpt-5.4", resolve=False) == "openai/gpt-5.4"

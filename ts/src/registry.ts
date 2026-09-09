@@ -83,6 +83,7 @@ async function execute(spec: RunSpec): Promise<RunResult> {
     onOutput: frozen.onOutput,
     extraEnv: built.env,
     cancel: frozen.cancel,
+    gracefulSignal: built.gracefulSignal,
   })
   const prepared = prepareCommand(built)
   let cleanupSafe = false

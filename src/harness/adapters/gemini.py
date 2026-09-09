@@ -2,10 +2,20 @@
 
 `gemini -p PROMPT --output-format json` emits a JSON envelope where token
 usage lives at `stats.models[*].tokens.{input,candidates}`.
+
+Interactive sessions are recorded by gemini-cli's ChatRecordingService under
+`<home>/.gemini/tmp/<project-id>/chats/session-<stamp>-<id8>.jsonl` (legacy
+`.json`), where `<home>` is `GEMINI_CLI_HOME` or the user's home and
+`<project-id>` is the slug registered in `<home>/.gemini/projects.json`
+(older installs: the sha256 hex of the project root). Every record carries
+`projectHash = sha256(projectRoot)`, which lets discovery reject sessions that
+belong to another project.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -128,13 +138,34 @@ class GeminiAdapter(Adapter):
             return ["Enter"]
         return None
 
-    # gemini-cli writes interactive logs to ~/.gemini/tmp/<basename(workdir)>/logs.json
-    # and headless --output-format=json stats to stdout/files with stats.models.
-    # session_log_path still points at interactive logs; parse_session_log can
-    # parse either shape when given a file path.
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
-        path = Path.home() / ".gemini" / "tmp" / workdir.name / "logs.json"
-        return str(path) if path.exists() else None
+        gemini_dir = _gemini_dir()
+        roots = _project_roots(workdir)
+        hashes = {_sha256(root) for root in roots}
+        best: tuple[float, str, Path] | None = None
+        for identifier in _project_identifiers(gemini_dir, roots):
+            chats = gemini_dir / "tmp" / identifier / "chats"
+            try:
+                entries = list(chats.iterdir())
+            except OSError:
+                continue
+            for entry in entries:
+                if _SESSION_FILE_RE.match(entry.name) is None:
+                    continue
+                try:
+                    if not entry.is_file():
+                        continue
+                    mtime = entry.stat().st_mtime
+                except OSError:
+                    continue
+                if session_started_after is not None and mtime < session_started_after:
+                    continue
+                if best is not None and (mtime, entry.name) <= best[:2]:
+                    continue
+                if _session_project_hash(entry) not in hashes:
+                    continue
+                best = (mtime, entry.name, entry)
+        return str(best[2]) if best is not None else None
 
     def parse_session_log(self, path: str) -> SessionTelemetry:
         p = Path(path)
@@ -145,6 +176,14 @@ class GeminiAdapter(Adapter):
         except OSError:
             return SessionTelemetry(path, None, None, None, None, None)
 
+        conversation = _gemini_conversation(raw_text)
+        if conversation is not None:
+            tokens_in, tokens_out, model = _conversation_usage(conversation["messages"])
+            cost = derive_cost(model, tokens_in, tokens_out) if tokens_in is not None else None
+            return SessionTelemetry(path, tokens_in, tokens_out, cost, model, conversation)
+
+        # Not a chats/ record: accept a headless stats envelope written to a file,
+        # otherwise surface whatever JSON is there without inventing usage.
         stats = _parse_gemini_stats_blob(raw_text)
         if stats["tokens_in"] is not None and stats["tokens_out"] is not None:
             return SessionTelemetry(path, stats["tokens_in"], stats["tokens_out"], stats["cost_usd"], stats["model"], stats["raw"])
@@ -152,6 +191,181 @@ class GeminiAdapter(Adapter):
             return SessionTelemetry(path, None, None, None, None, json.loads(raw_text))
         except json.JSONDecodeError:
             return SessionTelemetry(path, None, None, None, None, None)
+
+
+_SESSION_FILE_RE = re.compile(r"^session-.*\.jsonl?$")
+_MAX_SAFE_INTEGER = 9007199254740991
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _gemini_dir() -> Path:
+    """`Storage.getGlobalGeminiDir()`: `GEMINI_CLI_HOME` (verbatim) or the home dir, plus `.gemini`."""
+    override = os.environ.get("GEMINI_CLI_HOME")
+    return (Path(override) if override else Path.home()) / ".gemini"
+
+
+def _project_roots(workdir: Path) -> list[str]:
+    """Spellings gemini-cli may have used as the project root for `workdir`.
+
+    The CLI keys everything on `path.resolve(process.cwd())`; `process.cwd()`
+    is the physical path, so the realpath comes first and the literal absolute
+    path is kept as a fallback.
+    """
+    absolute = os.path.abspath(workdir)
+    try:
+        real = os.path.realpath(workdir)
+    except OSError:
+        real = absolute
+    return [real] if real == absolute else [real, absolute]
+
+
+def _project_identifiers(gemini_dir: Path, roots: list[str]) -> list[str]:
+    """Candidate `tmp/<id>` directory names for a project, most authoritative first.
+
+    Registry slug from `projects.json`, then `tmp/*/.project_root` ownership
+    markers, then the pre-registry sha256 hash directory.
+    """
+    identifiers: list[str] = []
+    try:
+        registry = json.loads((gemini_dir / "projects.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        registry = None
+    projects = registry.get("projects") if isinstance(registry, dict) else None
+    if isinstance(projects, dict):
+        for root in roots:
+            slug = projects.get(root)
+            if isinstance(slug, str) and re.fullmatch(r"[a-z0-9-]+", slug) and slug not in identifiers:
+                identifiers.append(slug)
+    try:
+        entries = list((gemini_dir / "tmp").iterdir())
+    except OSError:
+        entries = []
+    for entry in entries:
+        try:
+            owner = (entry / ".project_root").read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if owner in roots and entry.name not in identifiers:
+            identifiers.append(entry.name)
+    for root in roots:
+        digest = _sha256(root)
+        if digest not in identifiers:
+            identifiers.append(digest)
+    return identifiers
+
+
+def _session_project_hash(path: Path) -> str | None:
+    """`projectHash` from the leading metadata record (JSONL) or the legacy whole-file record."""
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    first = line
+                    break
+            else:
+                return None
+        try:
+            record = json.loads(first)
+        except ValueError:
+            record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    project_hash = record.get("projectHash") if isinstance(record, dict) else None
+    return project_hash if isinstance(project_hash, str) else None
+
+
+def _gemini_conversation(text: str) -> dict | None:
+    """Replay a chats/ record into its final state, mirroring `loadConversationRecord`.
+
+    Message records are keyed by `id` (a re-appended message replaces its
+    earlier snapshot in place), `$rewindTo` drops that message and everything
+    after it, and a `$set.messages` checkpoint rebuilds the list. Returns None
+    when no record shape is recognised.
+    """
+    records: list[object] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except ValueError:
+            continue
+    if not records:
+        try:
+            records = [json.loads(text)]
+        except ValueError:
+            return None
+
+    metadata: dict = {}
+    messages: dict[str, dict] = {}
+    recognised = False
+
+    def put(message: object) -> None:
+        if isinstance(message, dict) and isinstance(message.get("id"), str):
+            messages[message["id"]] = message
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if isinstance(record.get("$rewindTo"), str):
+            recognised = True
+            ids = list(messages)
+            cut = ids.index(record["$rewindTo"]) if record["$rewindTo"] in messages else 0
+            for message_id in ids[cut:]:
+                del messages[message_id]
+        elif isinstance(record.get("id"), str):
+            recognised = True
+            put(record)
+        elif isinstance(record.get("$set"), dict):
+            recognised = True
+            updates = record["$set"]
+            if isinstance(updates.get("messages"), list):
+                messages.clear()
+                for message in updates["messages"]:
+                    put(message)
+            metadata.update({key: value for key, value in updates.items() if key != "messages"})
+        elif isinstance(record.get("sessionId"), str) and isinstance(record.get("projectHash"), str):
+            recognised = True
+            metadata.update({key: value for key, value in record.items() if key != "messages"})
+            if isinstance(record.get("messages"), list):
+                for message in record["messages"]:
+                    put(message)
+    if not recognised:
+        return None
+    return {**metadata, "messages": list(messages.values())}
+
+
+def _conversation_usage(messages: list[dict]) -> tuple[int | None, int | None, str | None]:
+    """Sum `tokens.{input,output}` over gemini messages; None until any message reports usage."""
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    model: str | None = None
+    usage_models: set[str | None] = set()
+    for message in messages:
+        if message.get("type") != "gemini":
+            continue
+        if isinstance(message.get("model"), str) and message["model"]:
+            model = message["model"]
+        tokens = message.get("tokens")
+        if tokens is None:
+            continue
+        if not isinstance(tokens, dict):
+            return None, None, model
+        count_in = _gemini_token_count(tokens.get("input"))
+        count_out = _gemini_token_count(tokens.get("output"))
+        if count_in is None or count_out is None:
+            return None, None, model
+        usage_models.add(message.get("model") if isinstance(message.get("model"), str) and message["model"] else None)
+        tokens_in = (tokens_in or 0) + count_in
+        tokens_out = (tokens_out or 0) + count_out
+        if tokens_in > _MAX_SAFE_INTEGER or tokens_out > _MAX_SAFE_INTEGER:
+            return None, None, model
+    if usage_models:
+        model = next(iter(usage_models)) if len(usage_models) == 1 else None
+    return tokens_in, tokens_out, model
 
 
 def _json_candidates(stdout: str) -> list[str]:

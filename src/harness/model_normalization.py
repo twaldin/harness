@@ -28,7 +28,6 @@ BARE_MODEL_HARNESSES = {
     "claude-code",
     "codex",
     "gemini",
-    "openclaude",
     "qwen",
 }
 
@@ -39,8 +38,14 @@ PROVIDER_MODEL_HARNESSES = {
     "swe-agent",
 }
 
+# Harnesses that send an explicit ``provider/model`` string to the backend
+# verbatim. OpenClaude routes gateway model IDs such as
+# ``deepseek/deepseek-v4-flash`` (LLMTR, Command Code) or
+# ``anthropic/claude-sonnet-4-6`` (OpenRouter) unchanged, so stripping the
+# namespace would select a different model.
 PRESERVE_EXPLICIT_PROVIDER_HARNESSES = {
     "crush",
+    "openclaude",
 }
 
 

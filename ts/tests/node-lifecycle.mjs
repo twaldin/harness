@@ -20,7 +20,7 @@ export const LANGUAGE = 'typescript'
 export const RUNNERS = ['sync', 'async']
 
 const REQUIRED_CATEGORIES = ['spawn', 'stdinEof', 'signal', 'timeout', 'cancellation', 'grandchildren', 'flood', 'chunkBoundary']
-const OPTION_NAMES = { timeoutSeconds: true, inactivityTimeoutSeconds: true, maxOutputBytes: true, stdin: true, onOutput: true }
+const OPTION_NAMES = { timeoutSeconds: true, inactivityTimeoutSeconds: true, maxOutputBytes: true, stdin: true, onOutput: true, gracefulSignal: true }
 const OUTCOME_FIELDS = {
   termination: true, exitCode: true, timedOut: true, signal: true, launchError: true, timeoutKind: true, callbackError: true,
   stdout: true, stderr: true, stdoutBytes: true, stderrBytes: true, stdoutTruncated: true, stderrTruncated: true,

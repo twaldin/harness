@@ -13,6 +13,12 @@ export type PermissionPolicy = 'upstream' | 'bypass'
 
 export type ClaudeCodeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type CodexSandbox = 'read-only' | 'workspace-write' | 'danger-full-access'
+/**
+ * Signal the runner sends the owned process group once before escalating to
+ * SIGKILL. `SIGTERM` is the default; adapters whose CLI only shuts down
+ * cleanly on SIGINT declare `SIGINT` through `Adapter.gracefulSignal`.
+ */
+export type GracefulSignal = 'SIGTERM' | 'SIGINT'
 
 export interface ClaudeCodeOptions {
   kind: 'claude-code'
@@ -26,6 +32,14 @@ export interface CodexOptions {
   sandbox?: CodexSandbox
 }
 
+export interface ClineOptions {
+  kind: 'cline'
+  /** Emitted as `--provider <value>`; omitted leaves upstream configuration in charge. */
+  provider?: string
+  /** Emitted as `--auto-approve true|false`. Conflicts with `permissionPolicy: 'bypass'` (which is `--auto-approve true`). */
+  autoApprove?: boolean
+}
+
 export interface CopilotOptions {
   kind: 'copilot'
   /**
@@ -37,8 +51,47 @@ export interface CopilotOptions {
   denyTools?: readonly string[]
 }
 
+export interface AmpOptions {
+  kind: 'amp'
+  /** Emitted as `--mode <value>`: a nonblank built-in or plugin mode key/label, passed verbatim. */
+  mode?: string
+}
+
+export interface VibeOptions {
+  kind: 'mistral-vibe'
+  /** Emitted as `--agent=<value>`; omitted leaves the upstream config's active agent in charge. */
+  agent?: string
+  /**
+   * Emitted as the bare `--trust` flag when true. Vibe only reads a workspace
+   * `AGENTS.md` once the workspace is trusted, so a non-empty `RunSpec.instructions`
+   * requires `trust: true`; the harness never trusts implicitly.
+   */
+  trust?: boolean
+}
+
+export interface KiroOptions {
+  kind: 'kiro'
+  /**
+   * Emitted verbatim as `--trust-tools=<value>` (Kiro's own comma-separated
+   * tool-name grammar applies inside the value); empty explicitly trusts no tools. Conflicts with
+   * `permissionPolicy: 'bypass'` (which is `--trust-all-tools`).
+   */
+  trustTools?: string
+  /** Emitted as the bare `--require-mcp-startup` flag when true and omitted when false. */
+  requireMcpStartup?: boolean
+}
+
+/** Explicit non-bypass Qoder modes; native `auto` and `bypass_permissions` are unsupported. */
+export type QoderPermissionMode = 'default' | 'accept_edits' | 'dont_ask'
+
+export interface QoderOptions {
+  kind: 'qoder'
+  /** Emitted as `--permission-mode <value>`; omitted leaves the upstream config's permission mode in charge. */
+  permissionMode?: QoderPermissionMode
+}
+
 /** Typed per-harness CLI options. `kind` must match `RunSpec.harness`. */
-export type NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions
+export type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions | QoderOptions
 
 export type OutputStream = 'stdout' | 'stderr'
 
@@ -107,6 +160,8 @@ export interface BuildCommand {
   directories?: readonly string[]
   /** Model reported on `RunResult`: the requested model or the adapter default, or null when a caller config file selects it. Absent means requested/default. */
   model?: string | null
+  /** Signal sent to the process group once before the SIGKILL escalation (see `Adapter.gracefulSignal`). Absent means SIGTERM. */
+  gracefulSignal?: GracefulSignal
 }
 
 /**
@@ -258,6 +313,14 @@ export interface Adapter {
    */
   configFileFlag?: string
 
+  /**
+   * Signal the runner sends this CLI's process group once when a run must
+   * stop (timeout, cancellation, leftover cleanup) before the bounded
+   * SIGKILL escalation. Absent means SIGTERM. Declare `SIGINT` only when the
+   * CLI shuts down cleanly on SIGINT but not on SIGTERM.
+   */
+  gracefulSignal?: GracefulSignal
+
   // ---- session-aware (optional; fall back to flt's local impl when missing) ----
 
   /** Keystrokes to submit a message in this CLI's TUI. e.g. ['Enter'] or ['Escape','Enter']. */
@@ -353,7 +416,7 @@ export interface ValidatedRunSpec {
   /** argv to splice in at the adapter's bypass slot; empty under `upstream`. */
   permissionArgs: readonly string[]
   nativeOptions: NativeOptions | null
-  /** argv the native options render to, to splice in at the adapter's native slot; empty when none apply. */
+  /** argv the native options render to (e.g. `['--effort', 'high']`), to splice in at the adapter's native slot; empty when none apply. */
   nativeArgs: readonly string[]
   /** Absolute working directory; relative input resolved against the process cwd without changing it. */
   workdir: string
@@ -372,6 +435,18 @@ type NativeField =
   | { readonly shape: 'enum'; readonly flag: string; readonly values: readonly string[] }
   /** Verbatim upstream rules, each emitted as `flag=rule` in caller order. */
   | { readonly shape: 'rules'; readonly flag: string }
+  /** Boolean emitted as `flag true|false`. */
+  | { readonly shape: 'boolean'; readonly flag: string }
+  /** Boolean emitted as the bare `flag` when true and omitted when false. */
+  | { readonly shape: 'switch'; readonly flag: string }
+  /** Non-empty NUL-free string emitted as `flag value`. */
+  | { readonly shape: 'string'; readonly flag: string }
+  /** Non-blank NUL-free string emitted as `flag value` (upstream resolves it at runtime). */
+  | { readonly shape: 'nonblank'; readonly flag: string }
+  /** Non-blank NUL-free identifier emitted as `flag=value` (equals form survives names starting with '-'). */
+  | { readonly shape: 'name'; readonly flag: string }
+  /** Native tool set emitted as `flag=value`; empty explicitly trusts no tools. */
+  | { readonly shape: 'tool-set'; readonly flag: string }
 /** Per native-options kind: field name → schema. Field order is argv order. */
 const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Record<string, NativeField>>>> = {
   'claude-code': {
@@ -380,12 +455,36 @@ const NATIVE_OPTION_FIELDS: Readonly<Record<NativeOptions['kind'], Readonly<Reco
   codex: {
     sandbox: { shape: 'enum', flag: '--sandbox', values: ['read-only', 'workspace-write', 'danger-full-access'] satisfies readonly CodexSandbox[] },
   },
+  cline: {
+    provider: { shape: 'string', flag: '--provider' },
+    autoApprove: { shape: 'boolean', flag: '--auto-approve' },
+  },
   copilot: {
     allowTools: { shape: 'rules', flag: '--allow-tool' },
     denyTools: { shape: 'rules', flag: '--deny-tool' },
   },
+  amp: {
+    mode: { shape: 'nonblank', flag: '--mode' },
+  },
+  'mistral-vibe': {
+    agent: { shape: 'name', flag: '--agent' },
+    trust: { shape: 'switch', flag: '--trust' },
+  },
+  kiro: {
+    trustTools: { shape: 'tool-set', flag: '--trust-tools' },
+    requireMcpStartup: { shape: 'switch', flag: '--require-mcp-startup' },
+  },
+  qoder: {
+    permissionMode: { shape: 'enum', flag: '--permission-mode', values: ['default', 'accept_edits', 'dont_ask'] satisfies readonly QoderPermissionMode[] },
+  },
 }
 const NATIVE_OPTION_KINDS = Object.keys(NATIVE_OPTION_FIELDS).map((kind) => JSON.stringify(kind)).join(', ')
+const GRACEFUL_SIGNALS: readonly GracefulSignal[] = ['SIGTERM', 'SIGINT']
+
+/** Whether `value` names a signal the lifecycle engine can send. Shared by the finalizer and the low-level runners. */
+export function isGracefulSignal(value: unknown): value is GracefulSignal {
+  return typeof value === 'string' && GRACEFUL_SIGNALS.includes(value as GracefulSignal)
+}
 
 /** Upstream tool rules: non-blank strings the CLI can take as arguments, in caller order. */
 function isToolRuleList(value: unknown): value is readonly string[] {
@@ -442,6 +541,25 @@ function resolveNativeOptions(adapter: Adapter, spec: RunSpec): ResolvedNativeOp
         )
       }
       args.push(field.flag, value)
+    } else if (field.shape === 'boolean' || field.shape === 'switch') {
+      if (typeof value !== 'boolean') {
+        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a boolean`, 'invalid-options')
+      }
+      if (field.shape === 'boolean') args.push(field.flag, value ? 'true' : 'false')
+      else if (value) args.push(field.flag)
+    } else if (field.shape === 'string' || field.shape === 'nonblank') {
+      const empty = typeof value === 'string' && (field.shape === 'nonblank' ? value.trim() === '' : value === '')
+      if (typeof value !== 'string' || empty || value.includes('\0')) {
+        const expected = field.shape === 'nonblank' ? 'non-blank' : 'non-empty'
+        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a ${expected} string without NUL bytes`, 'invalid-options')
+      }
+      args.push(field.flag, value)
+    } else if (field.shape === 'name' || field.shape === 'tool-set') {
+      const emptySet = field.shape === 'tool-set' && value === ''
+      if (typeof value !== 'string' || (!emptySet && value.trim() === '') || value.includes('\0')) {
+        throw new HarnessError(`Invalid nativeOptions.${key} ${JSON.stringify(value)}; expected a non-blank string without NUL bytes${field.shape === 'tool-set' ? ' or empty to trust no tools' : ''}`, 'invalid-options')
+      }
+      args.push(`${field.flag}=${value}`)
     } else {
       if (!isToolRuleList(value)) {
         throw new HarnessError(
@@ -517,6 +635,18 @@ export function validateRunSpec(adapter: Adapter, spec: RunSpec): ValidatedRunSp
       'invalid-options',
     )
   }
+  if (nativeOptions?.kind === 'cline' && nativeOptions.autoApprove !== undefined && permissionPolicy === 'bypass') {
+    throw new HarnessError(
+      'nativeOptions.autoApprove conflicts with permissionPolicy "bypass" (cline bypass is --auto-approve true); choose one',
+      'invalid-options',
+    )
+  }
+  if (nativeOptions?.kind === 'kiro' && nativeOptions.trustTools !== undefined && permissionPolicy === 'bypass') {
+    throw new HarnessError(
+      'nativeOptions.trustTools conflicts with permissionPolicy "bypass" (kiro bypass is --trust-all-tools); choose one',
+      'invalid-options',
+    )
+  }
 
   // Empty string falls back to the default like undefined; whitespace is
   // trimmed after selection by the normalizer (matches Python).
@@ -551,18 +681,25 @@ export interface PlannedCommand {
   directories?: readonly string[]
   /** Overrides the reported model (requested or default), e.g. `null` when the CLI picks it from a caller config. */
   model?: string | null
+  /** Overrides the adapter's declared `gracefulSignal`; the registry re-finalizer uses it to preserve third-party plans. */
+  gracefulSignal?: GracefulSignal
 }
 
 /**
  * Turn an adapter's plan into the public `BuildCommand`. Pure: applies
  * `executable`, the absolute workdir, the env layering (adapter, then caller,
- * then config home) and plans the instructions projection from
- * `adapter.instructionsFilename`. Every built-in builder returns through here.
+ * then config home), plans the instructions projection from
+ * `adapter.instructionsFilename` and carries the graceful signal (the plan's,
+ * else the adapter's declaration). Every built-in builder returns through here.
  */
 export function finalizeCommand(adapter: Adapter, spec: RunSpec, validated: ValidatedRunSpec, planned: PlannedCommand): BuildCommand {
   const env: Record<string, string> = { ...(planned.env ?? {}), ...(spec.env ?? {}) }
   if (validated.configHome !== null) env[adapter.configHomeEnv!] = validated.configHome
   const project = adapter.instructionsFilename !== '' && spec.instructions !== undefined
+  const gracefulSignal: unknown = planned.gracefulSignal ?? adapter.gracefulSignal
+  if (gracefulSignal !== undefined && !isGracefulSignal(gracefulSignal)) {
+    throw new HarnessError(`Harness "${adapter.name}" declares gracefulSignal ${JSON.stringify(gracefulSignal)}; expected ${GRACEFUL_SIGNALS.join(' or ')}`, 'adapter-error')
+  }
   const built: BuildCommand = {
     cmd: validated.executable ?? planned.cmd,
     args: planned.args,
@@ -573,5 +710,6 @@ export function finalizeCommand(adapter: Adapter, spec: RunSpec, validated: Vali
     model: planned.model === undefined ? spec.model || adapter.defaultModel : planned.model,
   }
   if (project) built.instructionContent = spec.instructions
+  if (gracefulSignal !== undefined) built.gracefulSignal = gracefulSignal
   return built
 }

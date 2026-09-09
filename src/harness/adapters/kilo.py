@@ -1,13 +1,33 @@
-"""Kilo adapter — invokes `kilo run` and reads token/cost totals from sqlite."""
+"""Kilo adapter — invokes `kilo run` and reads token/cost totals from sqlite.
+
+`--format json` puts the native `sessionID` on every run event; that exact ID
+keys the `message` rows read from the DB. The builder pins an absolute
+per-workdir `KILO_DB` unless the caller chose one; a caller's relative value
+stays verbatim and, as upstream, resolves against `Global.Path.data`
+(`$XDG_DATA_HOME|~/.local/share` + `kilo`).
+"""
 from __future__ import annotations
 
 import json
 import os
 import re
-import sqlite3
 from pathlib import Path
 
 from harness._subproc import SubprocOutcome
+from harness.adapters._native_db import (
+    NO_TOTALS,
+    SessionTotals,
+    channel_db_disabled,
+    discover_session_db,
+    effective_env,
+    identity_raw,
+    native_session_id_from_events,
+    parse_session_selector,
+    read_message_totals,
+    resolve_native_db,
+    session_telemetry,
+    xdg_data_dir,
+)
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -19,7 +39,6 @@ from harness.base import (
     SessionTelemetry,
     absolute_workdir,
 )
-from harness.pricing import derive_cost
 from harness.util import last_non_empty_join
 
 _CONFIRM_CANCEL_RE = re.compile(r"Confirm\s+Cancel", re.IGNORECASE)
@@ -50,14 +69,19 @@ class KiloAdapter(Adapter):
         model = resolved.model
 
         workdir = absolute_workdir(spec.workdir)
-        db_path = _kilo_db_path(workdir, spec.env)
-        # The default per-workdir DB parent is a harness artifact prepare
-        # creates; a KILO_DB override (e.g. a container-only path) is
-        # caller-owned and left to the runtime.
-        directories = () if _kilo_db_override(spec.env) else (db_path.parent,)
-
-        # Use a deterministic per-workdir DB for container safety.
-        env = {"KILO_DB": str(db_path)}
+        override = _kilo_db_override(spec.env)
+        env: dict[str, str] = {}
+        directories: tuple[Path, ...] = ()
+        if override is None:
+            # Deterministic per-workdir DB for container safety; its parent is a
+            # harness artifact prepare creates.
+            db_path = _kilo_default_db_path(workdir)
+            env["KILO_DB"] = str(db_path)
+            directories = (db_path.parent,)
+        elif override:
+            # Caller-owned (e.g. a container-only path): passed verbatim, never
+            # expanded or re-rooted, and left to the runtime to create.
+            env["KILO_DB"] = override
         # Force single-model behavior for helper/small-model paths, unless the
         # caller already selected a config (explicitly or inherited); that
         # content is passed through untouched.
@@ -81,8 +105,11 @@ class KiloAdapter(Adapter):
         return self.finalize_command(spec, cmd="kilo", args=args, env=env, directories=directories)
 
     def parse_output(self, spec: RunSpec, outcome: SubprocOutcome) -> ParsedOutput:
-        tokens_in, tokens_out, cost, _model = _read_kilo_session_totals(Path(spec.workdir), spec.env)
-        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": None}
+        session_id = native_session_id_from_events(outcome.stdout)
+        if session_id is None:
+            return {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
+        tokens_in, tokens_out, cost, _model = _read_kilo_session_totals(session_id, Path(spec.workdir), spec.env)
+        return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out, "raw": identity_raw(session_id, cost)}
 
     # ---- session-aware ---------------------------------------------------
 
@@ -123,89 +150,52 @@ class KiloAdapter(Adapter):
             return "idle"
         return "unknown"
 
+    # The DB alone identifies nothing: correlation needs the native session ID
+    # from a run's `--format json` output, which this hook has no access to.
     def session_log_path(self, workdir: Path, session_started_after: float | None = None) -> str | None:
-        db_path = _kilo_db_path(workdir, None)
-        if not db_path.exists():
-            return None
-        return f"{db_path}#session({workdir.resolve().name if workdir.exists() else workdir.name})"
+        return None
 
     def parse_session_log(self, path: str) -> SessionTelemetry:
-        db_raw = path.split("#", 1)[0]
-        hint = ""
-        if "session(" in path and path.endswith(")"):
-            hint = path.split("session(", 1)[1][:-1]
-        tokens_in, tokens_out, cost, model = _read_kilo_session_totals_by_db_path(Path(db_raw), hint or "/")
-        if (cost is None or cost == 0) and (tokens_in is not None or tokens_out is not None):
-            cost = derive_cost(model, tokens_in, tokens_out) or cost
-        return SessionTelemetry(path, tokens_in, tokens_out, cost, model, None)
+        selector = parse_session_selector(path)
+        if selector is None:
+            return session_telemetry(path, None, NO_TOTALS)
+        db_path, session_id = selector
+        return session_telemetry(path, session_id, read_message_totals(db_path, session_id))
 
 
-def _kilo_db_override(extra_env: dict[str, str] | None = None) -> str | None:
-    return (extra_env or {}).get("KILO_DB") or os.environ.get("KILO_DB") or None
+def _kilo_db_override(extra_env: dict[str, str] | None) -> str | None:
+    """The `KILO_DB` the child sees before the builder's default: the caller's
+    value when the caller set the key (an explicit empty string included, since
+    `finalize_command` lets it win), else a nonempty inherited value."""
+    if extra_env is not None and "KILO_DB" in extra_env:
+        return extra_env["KILO_DB"]
+    return os.environ.get("KILO_DB") or None
 
 
-def _kilo_db_path(workdir: Path, extra_env: dict[str, str] | None = None) -> Path:
-    env_path = _kilo_db_override(extra_env)
-    if env_path:
-        return Path(env_path).expanduser()
+def _kilo_default_db_path(workdir: Path) -> Path:
     return workdir / ".harness" / "kilo" / "kilo.db"
 
 
-def _read_kilo_session_totals_by_db_path(
-    db_path: Path,
-    workdir_basename: str,
-) -> tuple[int | None, int | None, float | None, str | None]:
-    if not db_path.exists():
-        return None, None, None, None
-
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
-        return None, None, None, None
-
-    try:
-        # Assistant rows carry data.modelID/providerID (never data.model); the
-        # model is reported only when every assistant row agrees on one.
-        row = conn.execute(
-            """
-            SELECT
-                COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)  AS tokens_in,
-                COALESCE(SUM(json_extract(data, '$.tokens.output')), 0) AS tokens_out,
-                COALESCE(SUM(json_extract(data, '$.cost')), 0)          AS cost,
-                CASE WHEN COUNT(DISTINCT json_extract(data, '$.modelID')) = 1
-                          AND COUNT(NULLIF(json_extract(data, '$.modelID'), '')) = COUNT(*)
-                     THEN MAX(json_extract(data, '$.modelID')) END       AS model,
-                COUNT(*)                                                 AS row_count
-            FROM message
-            WHERE session_id IN (
-                SELECT id FROM session
-                WHERE directory LIKE ?
-                ORDER BY time_updated DESC
-                LIMIT 1
-            )
-            AND json_extract(data, '$.role') = 'assistant'
-            """,
-            (f"%{workdir_basename}%",),
-        ).fetchone()
-    except sqlite3.Error:
-        conn.close()
-        return None, None, None, None
-
-    conn.close()
-    if not row or row[4] == 0:
-        return None, None, None, None
-
-    model = row[3] if isinstance(row[3], str) else None
-    return int(row[0]), int(row[1]), float(row[2]), model
+def _kilo_db_path(session_id: str, workdir: Path, extra_env: dict[str, str] | None = None) -> Path | None:
+    """The DB the run wrote to. A nonempty override follows upstream
+    `Database.path()`; an explicit empty one hands upstream its channel default,
+    whose filename is not observable, so the exact session row is looked for
+    among the data dir's `*.db` files; otherwise the builder's per-workdir DB."""
+    override = _kilo_db_override(extra_env)
+    if override is None:
+        return _kilo_default_db_path(absolute_workdir(workdir))
+    env = effective_env(extra_env)
+    data_dir = xdg_data_dir(env, "kilo", workdir, strip_newlines=True)
+    if override:
+        return resolve_native_db(override, data_dir)
+    return discover_session_db(
+        data_dir,
+        session_id,
+        channel_db="kilo.db",
+        channel_disabled=channel_db_disabled(env, "KILO_DISABLE_CHANNEL_DB"),
+    )
 
 
-def _read_kilo_session_totals(
-    workdir: Path,
-    extra_env: dict[str, str] | None = None,
-) -> tuple[int | None, int | None, float | None, str | None]:
-    try:
-        workdir_real = workdir.resolve()
-    except OSError:
-        workdir_real = workdir
-    workdir_basename = workdir_real.name
-    return _read_kilo_session_totals_by_db_path(_kilo_db_path(workdir, extra_env), workdir_basename)
+def _read_kilo_session_totals(session_id: str, workdir: Path, extra_env: dict[str, str] | None = None) -> SessionTotals:
+    """(tokens_in, tokens_out, cost_usd, model) for the exact native session; all None when unavailable."""
+    return read_message_totals(_kilo_db_path(session_id, workdir, extra_env), session_id)

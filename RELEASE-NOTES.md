@@ -2,6 +2,35 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Added maintained `kimi-code` in both languages, with exact model aliases,
+  caller-selected `KIMI_CODE_HOME` and shared subprocess lifecycle. Native print
+  mode implies auto permissions; explicit bypass and arbitrary config files
+  reject. Assistant/tool JSONL stays in `raw`; accounting remains unknown.
+  Source and synthetic conformance only; no native/provider smoke is claimed.
+  See [setup and qualification limits](ADAPTER-MATRIX.md#kimi-code).
+- Added `qoder` in Python and TypeScript with explicit non-bypass permission
+  modes, caller-selected model/config/auth and shared subprocess cleanup.
+  Native JSON/errors remain raw; token/USD metrics stay null. Provider edit/test
+  success is unqualified. See [setup and compatibility limits](ADAPTER-MATRIX.md#qoder).
+- Added `auggie` in both languages using official print/JSON mode and the shared
+  lifecycle. JSON-native results retain unit-tagged billing; non-JSON failures
+  remain in process status and stderr. Decoder recursion errors no longer discard
+  surrounding valid records. See [setup and qualification limits](ADAPTER-MATRIX.md#auggie).
+- Added `amp` local execute mode in both languages through the shared subprocess
+  lifecycle. `AmpOptions.mode` selects an upstream mode; direct model selection
+  and bypass reject. JSONL retains native thread identity, errors and optional
+  token usage; USD is unavailable. See [setup and smoke limits](ADAPTER-MATRIX.md#amp).
+- Added `mistral-vibe` in both languages, using native completed-history JSONL
+  and the shared lifecycle. `VibeOptions` exposes agent selection and explicit
+  invocation-only workspace trust; projected instructions require trust.
+  Models use native configuration aliases; token/USD metrics stay null.
+  See [setup, permission behavior and qualification limits](ADAPTER-MATRIX.md#mistral-vibe).
+- Added the standalone `cline` CLI adapter in Python and TypeScript, with native
+  provider/approval options, `CLINE_DIR`, explicit instruction attachment and
+  terminal NDJSON usage. Upstream defaults to auto-approval.
+  Cline selects one SIGINT through the shared lifecycle engine; other adapters
+  retain SIGTERM. External command drivers must honor the planned graceful signal.
+  See [setup, cancellation and provider coverage limits](ADAPTER-MATRIX.md#cline).
 - Added `goose` in Python and TypeScript using the official headless JSONL CLI
   and shared subprocess lifecycle. Preserves caller-selected model/provider/extensions,
   supports inline instructions, `GOOSE_PATH_ROOT` and explicit `GOOSE_MODE=auto`,
@@ -38,6 +67,12 @@
 - Added explicit backend selection and static capability queries. The one-shot
   API executes only `cli`; `rpc` and `sdk` fail before preparation or process
   creation. Controlled Pi RPC now uses the separate session API.
+- Added optional OMP SDK sessions in Python and TypeScript through one owned
+  Bun child per session, with explicit package, profile and credential-store
+  selection. Native events and session IDs survive streaming, follow-up and
+  resume; interruption and disposal use the existing session lifecycle.
+  Harness imports do not initialize OMP, and CLI behavior stays unchanged.
+  See [SDK setup, runtime and qualification limits](SPEC.md#optional-omp-sdk-sessions).
 - Added typed Claude Code effort and Codex sandbox options, validated before
   file writes. Codex sandbox and bypass cannot be combined.
 - Aligned eager registry initialization, collision errors, model selection,
@@ -54,6 +89,17 @@
   telemetry limits, and paired migration examples. Existing results remain
   compatible; these source changes are not yet a package release. Paired
   fixture-update patch bumps follow SPEC and do not publish packages.
+- Repaired Claude Code, OpenClaude, Factory Droid, Gemini, Qwen, Continue and
+  SWE-wrapper artifact helpers in both languages, with shared upstream-shaped
+  fixtures and native cutoff units. Discovery honors qualified config roots and
+  project metadata instead of unrelated latest/basename logs. OpenClaude now
+  uses only its own config root and preserves provider model namespaces.
+  Native session metrics replace guessed schemas; Continue headless output
+  remains non-telemetry. See [sources and runtime limits](ADAPTER-MATRIX.md#artifact-qualification--2026-09-08).
+  Malformed or unsafe Claude token totals and non-finite Claude/Continue metrics
+  remain unknown rather than throwing or reporting invalid numeric telemetry.
+  Claude cost overflow preserves valid usage; the telemetry bridge rejects blank cutoffs.
+  Pane precedence and controlled-session ownership are unchanged.
 
 ## 2026-05-06 (later)
 

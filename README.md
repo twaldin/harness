@@ -2,7 +2,7 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kimi-code`, `kiro`, `qoder` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
 
 ## Quick start
 
@@ -83,8 +83,8 @@ or implementation merge.
 
 Python `run()` blocks; Python `run_async()` and TypeScript `run()` / `runAsync()`
 allow concurrent calls. On macOS/Linux, each invocation owns a fresh process
-group, terminates leftover children on exit, and escalates SIGTERM to SIGKILL
-after a bounded grace period.
+group, terminates leftover group members on exit, and escalates the adapter's
+graceful signal (SIGTERM by default; SIGINT for Cline) to SIGKILL after a bounded grace period.
 
 Pass `cancel=threading.Event()` in Python or `cancel: controller.signal` from
 an `AbortController` in TypeScript. Explicit cancellation returns a result;
@@ -167,6 +167,143 @@ are not completion. See [the session contract](SPEC.md#controlled-rpc-sessions)
 for terminal statuses, deadlines, local-only extension limitations, ownership,
 and the distinction between offline conformance and native/provider smoke.
 
+### Optional Oh My Pi SDK sessions
+
+Select `harness="omp", backend="sdk"` explicitly. Both languages host the
+optional **OMP 18.1.14 SDK in an owned Bun >=1.3.14 child** and expose the same
+turn/events/result/interrupt/close API as Pi sessions. This is a supported
+Python/Node bridge, not a native Python SDK or caller-process TypeScript
+embedding. Ordinary Harness imports and CLI use do not load OMP or initialize
+its settings.
+
+Install the optional package in a caller-owned project, for example
+`bun add @oh-my-pi/pi-coding-agent@18.1.14`. Then supply its absolute package
+directory and an explicit OMP profile:
+
+```python
+import asyncio
+from pathlib import Path
+from harness import OmpSdkOptions, SessionSpec, open_session
+
+async def main():
+    session = await open_session(SessionSpec(
+        harness="omp", backend="sdk", workdir=Path("/tmp/scratch"),
+        omp_sdk=OmpSdkOptions(
+            package_root=Path("/your/project/node_modules/@oh-my-pi/pi-coding-agent"),
+            agent_dir=Path("/your/omp-profile"),
+            auth="environment",
+        ),
+        model="openai/gpt-4.1",
+        # executable="/absolute/path/to/bun",  # optional, default: "bun"
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            print(event.type, event.raw)
+        result = await turn.result
+        print(result.status, session.reference.session_id)
+    finally:
+        await session.close()
+
+asyncio.run(main())
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+const session = await openSession({
+  harness: 'omp', backend: 'sdk', workdir: '/tmp/scratch',
+  ompSdk: {
+    packageRoot: '/your/project/node_modules/@oh-my-pi/pi-coding-agent',
+    agentDir: '/your/omp-profile',
+    auth: 'environment',
+  },
+  model: 'openai/gpt-4.1',
+})
+try {
+  const turn = session.startTurn('Review this repository without editing files.')
+  for await (const event of turn.events) console.log(event.type, event.raw)
+  const result = await turn.result
+  console.log(result.status, session.reference.sessionId)
+} finally {
+  await session.close()
+}
+```
+
+`"local"` auth
+opens the selected profile's credential database; `"environment"` uses an
+in-memory credential database. Both still honor native provider environment,
+dotenv and model configuration. Set child `HOME` through `env` when needed;
+the selected profile/workdir and their extensions must be trusted. Neither
+mode is a sandbox, permission bypass or guarantee of no upstream state writes.
+
+`get_session_capabilities("omp", "sdk")` /
+`getSessionCapabilities("omp", "sdk")` reports events, interruption, follow-up
+and exact native resume; concurrent turns and approval responses are unsupported.
+No package/binary/backend fallback occurs. See the
+[full SDK contract](SPEC.md#optional-omp-sdk-sessions) for configuration
+precedence, disposal bounds, native event semantics and qualification limits.
+
+### Caller-owned OpenCode HTTP sessions
+
+Select `harness="opencode", backend="rpc"` with an explicit `OpenCodeOptions`
+endpoint and auth choice. The caller supplies an already-running **OpenCode
+1.18.29** server and its canonical absolute workdir; Harness does not start,
+configure or stop it. Python needs the optional `harness-cli[opencode]` extra
+(`httpx` 0.28.x); TypeScript uses runtime `fetch`, with no OpenCode SDK dependency.
+
+```python
+from harness import OpenCodeOptions, SessionSpec, open_session
+
+async def review(endpoint: str, server_workdir: str):
+    session = await open_session(SessionSpec(
+        harness="opencode", backend="rpc", workdir=server_workdir,
+        opencode=OpenCodeOptions(endpoint=endpoint, auth="none"),
+    ))
+    try:
+        turn = session.start_turn("Review the repository without editing files.")
+        async for event in turn.events:
+            print(event.type)
+        print((await turn.result).status)
+        return session.reference
+    finally:
+        await session.close()
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+async function review(endpoint: string, serverWorkdir: string) {
+  const session = await openSession({
+    harness: 'opencode', backend: 'rpc', workdir: serverWorkdir,
+    opencode: { endpoint, auth: 'none' },
+  })
+  try {
+    const turn = session.startTurn('Review the repository without editing files.')
+    for await (const event of turn.events) console.log(event.type)
+    console.log((await turn.result).status)
+    return session.reference
+  } finally {
+    await session.close()
+  }
+}
+```
+
+`auth: "none"` deliberately selects an unsecured server. For Basic auth,
+explicitly supply `auth: "basic"`, `username` and `password`; no credentials or
+endpoint are discovered. Resume passes the exact returned reference, same
+endpoint and server workdir. Only one writer may drive that native session.
+
+Observed permission requests can be answered with `respond_approval` /
+`respondApproval`, using `"once"` or `"reject"`; `"always"` is unsupported
+because it changes rules shared by other clients. `interrupt()` explicitly
+aborts the native turn. **Closing or timing out closes only local transport;
+server work can continue.** Long-context auto-compaction and other native
+synthetic follow-ups that change message ancestry are explicitly unsupported.
+Mock-server conformance is not native-runtime or authenticated-provider
+qualification; those checks have not run. See the
+[HTTP session contract and evidence limits](SPEC.md#caller-owned-opencode-http-sessions).
+
 ---
 
 ## Who should use this
@@ -193,7 +330,7 @@ I wrote per-CLI spawn / env / output-parsing logic three separate times across t
 
 Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
 
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all seventeen adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-six adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
 
 ---
 
@@ -259,7 +396,7 @@ verify, then stop. Make the smallest possible change.""",
 `instructions` is temporarily projected into the adapter's instruction file in
 `workdir` (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, or `CONTINUE.md`).
 Aider uses `.harness-aider-instructions.md` through `--read`; Continue passes its
-projected file through `--rule`; swe-agent includes instructions in the prompt.
+projected file through `--rule`; swe-agent and mini-swe-agent include instructions in the prompt.
 `run` restores still-owned files when execution
 finishes. Use different workdirs for concurrent runs: overlapping preparation in
 one canonical workdir rejects instead of mixing instructions.
@@ -293,7 +430,7 @@ It never silently overwrites those edits or steals a stale lease.
 `RunSpec.executable` selects a bare binary name or absolute executable path.
 `config_home` / `configHome` and `config_file` / `configFile` select absolute
 upstream paths only where the adapter declares support (`configHome` maps to
-`CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HERMES_HOME`). Unsupported choices
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERMES_HOME`, `CLINE_DIR` or `PI_CODING_AGENT_DIR`). Unsupported choices
 reject; no files or credentials are copied. Omitted overrides preserve the
 caller-selected environment and host-local authentication. See the
 [configuration mappings and migration](SPEC.md#supported-configuration-overrides).
@@ -419,7 +556,7 @@ Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md
 
 ## Status
 
-Seventeen adapters are included: `claude-code`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
+Twenty-six adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kimi-code`, `kiro`, `qoder`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
 ### host Node version
 
@@ -462,13 +599,22 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 ### Linux/container caveats (harness-bench)
 
 - Upstream CLI runtime requirements are independent of the Harness package: current OpenClaude requires Node >=22; verify each selected distribution/version in the [qualification ledger](ADAPTER-MATRIX.md#dated-qualification-ledger).
-- `kilo` and `crush` adapters force deterministic per-workdir sqlite locations (`<workdir>/.harness/...`) for container-safe metrics parsing.
+- `kilo` and `crush` default to per-workdir SQLite locations and preserve caller overrides. Database telemetry requires an observed native run ID; see [identity and accounting limits](ADAPTER-MATRIX.md#opencode). Reported zero is not a billing guarantee; Crush token counters are not run totals.
 - `kilo` and `crush` enforce strict same-model defaults (`model == small_model`) to avoid helper-model drift.
 - `openclaude` adapter does not set `--fallback-model`; single-model runs are default.
 - `factory-droid` adapter pins `--model` and `--spec-model` to the same value for fairness.
 - `hermes` is a Python CLI (`hermes chat --cli --quiet --query=<prompt>`, upstream Python `>=3.11,<3.14`) installed by the [official installer](https://hermes-agent.nousresearch.com/docs/getting-started/installation/); it reports null tokens/cost, preserves stdout verbatim and exposes only `raw.session_id` from stderr. The library has no default model for it: omit `model` to use the upstream `config.yaml` selection, and pass `configHome` to select an existing `HERMES_HOME`. Optional Docker/SSH/Modal terminal backends are configured upstream by the caller.
+- `cline` uses the standalone npm `cline` CLI, not the VS Code extension or background hub. It selects the local runtime and SIGINT teardown, uses caller-selected provider/model settings, and parses terminal JSON usage. Upstream defaults to auto-approval; `ClineOptions(auto_approve=False)` / `{ kind: 'cline', autoApprove: false }` explicitly requires approval, which is denied with stdin closed. See [setup, capabilities and qualification limits](ADAPTER-MATRIX.md#cline).
 - `goose` uses the official native CLI's `run --quiet --output-format stream-json`. Model/provider/extensions remain caller-selected; explicit bypass sets child `GOOSE_MODE=auto`. Usage comes from the final `complete` event, and provider errors can still exit zero. Configured stdio MCP extensions use separate process groups and can survive cancellation on macOS; see [setup and qualification limits](ADAPTER-MATRIX.md#goose).
 - `copilot` uses the current official `@github/copilot` CLI, not `gh copilot`. It preserves native model/auth selection and JSONL events, supports explicit `CopilotOptions` tool allow/deny rules, and leaves token/USD totals null. See [setup, subscription requirements and qualification limits](ADAPTER-MATRIX.md#copilot).
+- `amp` runs local execute mode with JSONL events, not remote orbs. Direct model selection rejects; `AmpOptions.mode` selects an upstream mode and `configFile` selects user settings. Thread identity and native failures stay in raw; provider errors can exit zero. See [permissions, accounting and coverage](ADAPTER-MATRIX.md#amp).
+- `mistral-vibe` uses official Python package `mistral-vibe`, executable `vibe`, with completed-history JSONL output. Models remain native config aliases, and workspace trust is explicit via `VibeOptions`; instructions require that opt-in. See [setup, permissions and coverage](ADAPTER-MATRIX.md#mistral-vibe).
+- `cursor` uses the standalone Cursor `agent` CLI in print/stream-JSON mode, not the editor's `cursor` launcher. Model/auth/config remain native; only explicit bypass adds `--force`. See [permissions, optional usage and qualification limits](ADAPTER-MATRIX.md#cursor).
+- `mini-swe-agent` invokes native `mini`, separately from the legacy `swe-agent` wrapper. Onboarding is disabled in the child; tool approval remains explicit. It reads only a trajectory confirmed by the current CLI output. Local shell actions can escape CLI-group cancellation. See [setup, permissions, extraction and coverage](ADAPTER-MATRIX.md#mini-swe-agent).
+- `kiro` uses official `kiro-cli` headless V2 with JSONL events. Tool trust is explicit through `KiroOptions`; bypass alone grants all tools. Model/auth remain caller-selected, and token/USD totals remain null. See [setup, migration and coverage](ADAPTER-MATRIX.md#kiro).
+- `auggie` uses official `@augmentcode/auggie` in print/JSON mode. A configured Augment account and noninteractive entitlement are required; JSON-native completion/error records remain in `raw`, while authentication, entitlement and other non-JSON failures remain in process status and `stderr`. Credits are never converted to USD. See [setup, permissions and qualification limits](ADAPTER-MATRIX.md#auggie).
+- `kimi-code` invokes maintained `@moonshot-ai/kimi-code` (`kimi`), not the Python predecessor. **Print mode always uses native auto permissions**; explicit bypass is unsupported rather than silently dropped. Exact model aliases and `KIMI_CODE_HOME` remain caller-selected. JSONL assistant/tool messages remain in `raw`, with null accounting. Source/fixture qualification only; no installed/provider smoke. See [setup and limits](ADAPTER-MATRIX.md#kimi-code).
+- `qoder` uses official `@qoder-ai/qodercli` with JSON output. `QoderOptions(permission_mode="accept_edits")` / `{kind: 'qoder', permissionMode: 'accept_edits'}` approves workspace edits, not shell commands. Model, `QODER_CONFIG_DIR` and account auth remain caller-selected; metrics stay null. See [setup, prompt compatibility and provider-smoke gaps](ADAPTER-MATRIX.md#qoder).
 
 Pending:
 - Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).

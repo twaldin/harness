@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC sessions and optional externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to controlled sessions and future backends; SDK execution remains unsupported.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC and optional OMP SDK sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -11,7 +11,7 @@ harness/
 ├── src/harness/            (python)
 │   ├── base.py             (types)
 │   ├── registry.py         (run/list_adapters/get_adapter)
-│   ├── adapters/*.py       (17 adapters)
+│   ├── adapters/*.py       (26 adapters)
 │   ├── _instructions.py    (owned projection lifecycle)
 │   └── _subproc.py         (subprocess lifecycle)
 └── ts/                     (typescript, new)
@@ -36,7 +36,7 @@ The core headless API is described here. Both package roots also expose adapters
 ```ts
 // RunSpec — everything an adapter needs to invoke its CLI
 interface RunSpec {
-  harness: string                  // "claude-code" | "openclaude" | "factory-droid" | "codex" | "gemini" | "opencode" | "aider" | "swe-agent" | "qwen" | "continue-cli" | "pi" | "omp" | "crush" | "kilo" | "hermes" | "goose" | "copilot"
+  harness: string                  // registered adapter name; see Registry below
   prompt: string                   // the task (becomes positional arg or stdin)
   workdir: string                  // cwd for the subprocess; normalized to an absolute path
   model?: string                   // canonical or adapter-specific identifier (normalized per harness; see ADAPTER-MATRIX.md)
@@ -67,6 +67,7 @@ interface BuildCommand {
   instructionContent?: string      // exact bytes to encode as UTF-8 during preparation; empty is valid
   directories?: string[]           // planned artifact directories created during preparation
   model?: string | null            // requested/default reporting label; null when selected by config
+  gracefulSignal?: 'SIGTERM' | 'SIGINT' // first teardown signal; omitted means SIGTERM
 }
 
 // RunResult — after execution + output parsing
@@ -112,16 +113,40 @@ interface CodexOptions {
   kind: 'codex'
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'
 }
+interface ClineOptions {
+  kind: 'cline'
+  provider?: string                // upstream provider ID, independent of model
+  autoApprove?: boolean            // explicit per-run tool approval override
+}
 interface CopilotOptions {
   kind: 'copilot'
   allowTools?: readonly string[]
   denyTools?: readonly string[]
 }
-type NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions
+interface AmpOptions {
+  kind: 'amp'
+  mode?: string                    // built-in or plugin mode, not a model ID
+}
+interface VibeOptions {
+  kind: 'mistral-vibe'
+  agent?: string                   // exact upstream profile name
+  trust?: boolean                  // explicit invocation-only workspace trust
+}
+interface KiroOptions {
+  kind: 'kiro'
+  trustTools?: string              // verbatim comma-separated native tool names
+  requireMcpStartup?: boolean      // fail if configured MCP startup fails
+}
+interface QoderOptions {
+  kind: 'qoder'
+  permissionMode?: 'default' | 'accept_edits' | 'dont_ask'
+}
+type QoderPermissionMode = 'default' | 'accept_edits' | 'dont_ask'
+type NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions | QoderOptions
 interface Capabilities {
   backend: Backend
   permissionPolicies: readonly PermissionPolicy[]
-  nativeOptions: 'claude-code' | 'codex' | 'copilot' | null
+  nativeOptions: 'claude-code' | 'codex' | 'cline' | 'copilot' | 'amp' | 'mistral-vibe' | 'kiro' | 'qoder' | null
   streaming: boolean
   cancellation: boolean
   sessions: boolean
@@ -131,14 +156,19 @@ interface Capabilities {
 ```
 
 Python exports `Backend`, `PermissionPolicy`, `NativeOptions`, `Capabilities`,
-`ClaudeCodeOptions`, `CodexOptions` and `CopilotOptions` with equivalent values.
+`ClaudeCodeOptions`, `CodexOptions`, `ClineOptions`, `CopilotOptions`, `AmpOptions`, `VibeOptions`, `KiroOptions` and `QoderOptions` with equivalent values.
+`QoderPermissionMode` is also exported in both languages.
 Construct native options as `ClaudeCodeOptions(effort="high")`,
-`CodexOptions(sandbox="read-only")` or
+`CodexOptions(sandbox="read-only")`,
+`ClineOptions(provider="openai-compatible", auto_approve=False)` or
 `CopilotOptions(allow_tools=("shell(git status)",), deny_tools=("write",))`;
 their `kind` is fixed by the dataclass. Copilot rule collections accept tuples
 or lists in Python and arrays in TypeScript. Empty collections emit no flags.
 Each member must be a nonempty, non-whitespace, NUL-free string; valid native
 rules are preserved verbatim, including upstream's comma/filter syntax.
+`AmpOptions(mode="low")` / `{kind: 'amp', mode: 'low'}` selects an Amp mode,
+including a plugin mode key or label. It must be a nonblank, NUL-free string;
+Harness preserves it verbatim and does not equate a mode with a model.
 Native options are a discriminated union, not an untyped bag passed to an
 arbitrary upstream. New variants land with a real implementation in both languages.
 
@@ -235,7 +265,7 @@ Importing Harness loads no optional SDK and does not initialize upstream setting
 
 `getCapabilities("codex")` reports CLI support, `["upstream", "bypass"]`,
 native option kind `"codex"`, `true` for cancellation and streaming, and `false`
-for sessions. All seventeen CLI adapters share these lifecycle capabilities.
+for sessions. All twenty-six CLI adapters share these lifecycle capabilities.
 They describe
 Harness-controlled operations, not whether the underlying tool supports a
 protocol or writes session logs. Optional pane/log helper availability is
@@ -244,7 +274,8 @@ installation/authentication/version checks; see the adapter matrix for evidence.
 
 ### Permission policy and migration
 
-Omitted policy and `"upstream"` mean Harness adds no approval/bypass flag or mode environment override.
+Omitted policy and `"upstream"` mean Harness adds no approval/bypass flag or mode environment override unless
+the caller explicitly supplies a native override such as `ClineOptions.autoApprove`.
 Upstream policy still depends on the selected tool, its headless mode, caller
 environment and existing configuration. This does **not** promise a sandbox,
 an interactive approval channel, or denial of every tool call. An upstream
@@ -261,17 +292,24 @@ approval request by silently escalating.
 | gemini, qwen | `-y` |
 | aider | `--yes-always` |
 | kilo, continue-cli | `--auto` |
-| hermes | `--yolo` |
+| hermes, mini-swe-agent | `--yolo` |
 | omp | `--auto-approve` |
+| cline | `--auto-approve true` |
 | goose | child environment `GOOSE_MODE=auto` (no flag); conflicting explicit `env.GOOSE_MODE` rejects |
 | copilot | `--allow-all` |
+| mistral-vibe | `--auto-approve` |
+| cursor | `--force` (native explicit denies and team policy still apply) |
+| kiro | `--trust-all-tools` |
 
-The other four adapters reject `"bypass"` as unsupported; a missing mapping is
+Adapters without a mapping (including Amp, Kimi Code and Qoder) reject `"bypass"` as unsupported; a missing mapping is
 not evidence that upstream has no permissions. Unsupported choices are never
 silently ignored. Narrow native options stay explicit: Codex `sandbox` emits
 `--sandbox`, and cannot be combined with `"bypass"` because that would override
 the selected sandbox. Claude Code `effort` emits `--effort`; it is not a common
 model/effort policy for every tool.
+Cline `provider` emits `--provider`; `autoApprove` emits `--auto-approve true|false`.
+An explicit `autoApprove` and `"bypass"` conflict, even when both request approval.
+Cline's upstream CLI defaults to auto-approval; `"upstream"` is not a denial policy.
 Copilot `allowTools` / `denyTools` emit repeated `--allow-tool=<rule>` /
 `--deny-tool=<rule>` arguments, respectively; upstream denial takes precedence
 over grants, including explicit bypass. These rules do not enable bypass.
@@ -411,7 +449,8 @@ zero defaults. This compatibility behavior is not proof of zero billed usage.
 
 ### opencode
 
-Cost and tokens come from the sqlite session DB read after the process exits.
+Cost and tokens come from the sqlite session DB read after exit, selected by
+the native `sessionID` observed in `run --format json`, not by workdir or recency.
 
 ```json
 {
@@ -423,7 +462,7 @@ Cost and tokens come from the sqlite session DB read after the process exits.
   "costUsd": 0.0821,
   "tokensIn": 4201,
   "tokensOut": 887,
-  "raw": null
+  "raw": {"sessionID": "ses_example", "costSource": "reported"}
 }
 ```
 
@@ -598,6 +637,218 @@ exit code or Harness termination cause. Omitted model leaves upstream selection
 in charge and reports null. See the [adapter reference](ADAPTER-MATRIX.md#copilot)
 for setup, explicit permissions and qualification limits.
 
+### amp
+
+Local `--executor local --stream-json --execute=<prompt>` only. Nonempty
+`model` requests reject as `unsupported-capability`; model reporting is null.
+`AmpOptions.mode` selects an upstream mode, not a model. Empty prompts reject;
+finite stdin supplements the prompt. Remote orbs/runners, thread continuation,
+streaming JSON input, thinking output and controlled RPC/SDK sessions are not
+exposed. See [setup and permissions](ADAPTER-MATRIX.md#amp).
+
+`raw` preserves every complete JSON object line, including `session_id`,
+native errors, cache usage and unknown event types; null if none. Malformed,
+non-object and incomplete lines are ignored; stdout itself is preserved under
+the shared capture limit. `tokensIn` and `tokensOut` independently prefer valid
+`input_tokens` / `output_tokens` from the last top-level `result.usage`;
+missing/invalid fields fall back to sums of observed top-level
+`assistant.message.usage` fields. Parent-tool events are retained but not counted.
+Counts and their sums must be nonnegative safe integers; missing counts are null, reported
+zero remains zero. Cache read/creation counts stay in raw, not `tokensIn`,
+matching the Claude headless convention. Partial output reports observed counts,
+not an estimate of the full run. Cost is null: the documented stream does not
+report USD and Amp's mode routing does not establish a price.
+
+Native provider failures can emit `result.is_error: true` and still exit zero.
+Callers must inspect the terminal event; Harness preserves the process exit
+and termination status rather than converting a native error into a parse failure.
+
+### mistral-vibe
+
+`vibe --output streaming --prompt=PROMPT` emits completed native history entries
+as JSONL, not token deltas or a terminal usage envelope. `raw` preserves every
+complete JSON object in order; malformed/nonobject lines are ignored, and no
+objects means null. Complete entries survive partial output and process failure.
+All token/cost metrics are null; native error notices do not rewrite process exit.
+
+Omitted model uses upstream configuration and reports null. An explicit model
+alias is trimmed and set as child `VIBE_ACTIVE_MODEL`; conflicting explicit
+environment selection rejects. `VibeOptions(agent="ask", trust=True)` /
+`{kind: 'mistral-vibe', agent: 'ask', trust: true}` selects a native profile and
+invocation-only workspace trust. Trust loads project configuration, hooks and
+instructions; it is distinct from tool auto-approval. Nonempty `instructions`
+requires explicit `trust=true`, otherwise `unsupported-capability`, rather than
+silently projecting an ignored file or granting trust implicitly. Empty prompts
+reject before preparation. Harness never passes `--worktree`. See the
+[adapter reference](ADAPTER-MATRIX.md#mistral-vibe) for unsupported operations.
+
+### kimi-code
+
+The maintained Kimi Code CLI runs as
+`kimi --output-format stream-json [--model=ALIAS] --prompt=PROMPT`.
+Equals-form options preserve flag-shaped prompts and model aliases as data.
+Empty or whitespace-only prompts reject before preparation. Explicit aliases
+are trimmed but otherwise unchanged; omitted model preserves upstream selection
+and reports null. Instructions use shared owned workdir `AGENTS.md` projection.
+
+**Print mode uses native `auto` permissions, even under Harness `upstream`.**
+Static deny rules still apply; this is not an interactive approval channel.
+Upstream rejects `--yolo`, `--auto` and `--plan` with a prompt, so Harness exposes
+only `upstream` and rejects explicit `bypass` as `unsupported-capability`.
+No native permission/plan options are exposed.
+
+`configHome` maps to `KIMI_CODE_HOME`; the native filename remains `config.toml`.
+Arbitrary `configFile` overrides are unsupported. Caller environment, config
+and authentication remain authoritative; Harness does not log in, copy
+credentials, alter global configuration or migrate predecessor sessions.
+
+`raw` retains complete stdout JSON objects in order: assistant content/tool calls,
+tool results and unknown messages. Malformed, truncated and nonobject lines are
+ignored; no objects means null. Stderr remains separate. All token/USD totals
+stay null, including when an unknown event resembles usage. Process exits and
+shared termination metadata are not rewritten using predecessor exit semantics.
+CLI streaming/cancellation use the shared owned-process lifecycle; ACP/web/SDK,
+resume and session-log helpers are unsupported. See
+[source qualification and runtime gaps](ADAPTER-MATRIX.md#kimi-code).
+
+### kiro
+
+`kiro-cli chat --no-interactive --agent-engine v2 --output-format stream-json`
+selects the qualified V2 one-shot path, not the legacy V1 or preview V3 engine.
+The prompt follows `--` so leading hyphens remain data; empty prompts reject.
+Omitted model preserves upstream selection and reports null; explicit model
+IDs are trimmed and otherwise preserved as `--model=<value>`.
+
+`KiroOptions(trust_tools="read,grep", require_mcp_startup=True)` /
+`{kind: 'kiro', trustTools: 'read,grep', requireMcpStartup: true}` emits
+`--trust-tools=read,grep --require-mcp-startup`. Tool names are a NUL-free string
+in upstream comma-separated syntax; empty explicitly trusts no tools, while
+whitespace-only values reject. Explicit `trustTools`
+conflicts with bypass, which would broaden the requested trust. Omitted trust
+adds no permission flags; false `requireMcpStartup` adds no flag.
+Instructions use the shared owned `AGENTS.md` projection.
+
+`raw` preserves every complete JSON object line in order, including unknown
+events; malformed, truncated and nonobject lines are ignored. No objects means
+null. Complete events survive failure and timeout. Token and USD totals remain
+null: no aggregate accounting schema is qualified. Native error events do not
+rewrite the observed process exit. Raw stdout/stderr and shared streaming
+callbacks preserve output independently of parsing.
+
+Config home/file overrides, native agent/engine switching, session resume,
+ACP/RPC and SDK execution are unsupported. Unknown native fields reject rather
+than disappear. See [setup and qualification limits](ADAPTER-MATRIX.md#kiro).
+
+### qoder
+
+`qoder --print --output-format json --input-format text --max-turns 20
+[--model MODEL] [--permission-mode MODE] --prompt=PROMPT` selects local
+one-shot execution. Empty prompts reject. Qoder 1.1.47 rejects a positional
+prompt beginning `--` even after the argument separator, so Harness uses the
+still-supported, deprecated equals-form prompt flag; its warning remains on
+stderr. Omitted model uses upstream selection and reports null; explicit IDs
+are trimmed and otherwise preserved. Shared preparation projects `AGENTS.md`.
+
+`QoderOptions(permission_mode="accept_edits")` /
+`{kind: 'qoder', permissionMode: 'accept_edits'}` explicitly approves safe
+workspace edits, not shell commands or sensitive paths. Supported modes are
+`default`, `accept_edits` and `dont_ask`; omission emits no permission flag.
+Text-input headless confirmation requests are denied. Existing upstream
+permission rules remain authoritative; these modes are not a sandbox.
+Bypass, automatic agent-decided permissions and host-driven approvals are
+unsupported; Harness never injects `--yolo`.
+
+A whole JSON object is retained as `raw`; otherwise complete JSON object
+lines are retained as an ordered list. A valid nonobject JSON document yields
+null, not nested result extraction. Malformed/truncated lines are ignored;
+complete events survive incomplete streams. No objects means null.
+Native result/error/permission fields remain raw and do not rewrite process
+exit or cancellation. Token and USD metrics stay null: metadata is not a
+qualified usage contract, and 1.1.47's result builder hardcodes USD to zero.
+
+`configHome` maps to `QODER_CONFIG_DIR`; inherited and explicit authentication
+remain caller-selected. Config-file overrides, output/input protocol switches,
+resume, RPC and SDK sessions are unsupported. Stream-json parsing is diagnostic
+only, not the separate host-driven approval protocol. See
+[qualification and provider-smoke gaps](ADAPTER-MATRIX.md#qoder).
+
+### cursor
+
+`raw` preserves all complete JSON object lines in order, including assistant
+deltas, duplicate buffered flushes, tool events and terminal results. Malformed,
+truncated and non-object lines are ignored by parsing, not removed from stdout.
+The last `type: "result"` object's optional `usage.inputTokens` and
+`usage.outputTokens` supply independent nonnegative safe-integer counts (at most
+2^53 - 1); invalid or missing fields are null. Qualified Cursor 2026.09.02-c22c1a3 already subtracts
+cache reads/writes from `inputTokens`; Harness does not add them back or sum
+message events. No USD metric is reported. Older documented results without
+usage remain valid and report null counts. Process exit/termination remains
+authoritative even if a native event describes an error.
+
+The command is local print/stream-JSON with partial output, native model
+selection when omitted, explicit `--force` only for bypass, and SIGINT graceful
+teardown. No native mode/sandbox/trust/MCP approval or persist/resume/worker
+mapping is exposed. See [setup and qualification limits](ADAPTER-MATRIX.md#cursor).
+
+### mini-swe-agent
+
+The distinct native `mini` CLI uses `--task=TEXT --exit-immediately --output
+<workdir>/.harness/mini-swe-agent.traj.json`. Instructions are prepended to the
+task, not projected to a file. No model is selected by Harness when omitted;
+explicit model IDs pass through unchanged apart from surrounding whitespace.
+`MSWEA_CONFIGURED=true` in the child skips onboarding, not tool confirmation.
+An empty task or explicit empty `MSWEA_CONFIGURED` rejects as `invalid-options`.
+Only explicit bypass adds `--yolo`; upstream policy retains native confirmation
+or configured approvals. With stock confirm mode, closed stdin causes EOF failure
+instead of granting permission. Unattended coding needs bypass or caller-configured
+approvals. `--exit-immediately` disables only the final new-task prompt.
+
+The parser reads the reserved workdir trajectory only after a zero, non-timeout
+exit whose stdout ends with the exact `Saved trajectory to 'PATH'` marker
+(ANSI and Rich line wrapping tolerated). Missing marker/file, malformed JSON,
+or an unrecognized `trajectory_format` returns null metrics/raw. In particular, an interrupted or
+provider-failed invocation never reuses an earlier run's file. Its stdout/stderr
+remains available, but unconfirmed partial trajectory telemetry is not exposed.
+The CLI overwrites this reserved path; use a caller-owned workdir.
+Artifact reads reject symlinks, non-regular files, files larger than 16 MiB and
+files whose length changes while being read. They open nonblocking and read at
+most the checked size plus one byte; rejected artifacts yield null metrics/raw.
+
+For `mini-swe-agent-1.1` trajectories, `raw` retains the whole object.
+`info.model_stats.instance_cost` is a nonnegative finite USD value, including zero.
+Assistant `extra.response.usage` counts are summed independently: `prompt_tokens`
+then `input_tokens`, and `completion_tokens` then `output_tokens`, falling back
+only for missing/null primary keys. Invalid counts are omitted; a dimension with
+no valid counts or a total above 2^53 - 1 is null. No repricing or non-assistant
+usage aggregation occurs. A native `LimitsExceeded` exit status can accompany
+process exit zero; inspect `raw.info.exit_status` for `Submitted`, rather than
+treating process success as task completion.
+
+Streaming is console text, not structured events. Default local shell actions
+start separate process groups in mini 2.4.6 and can survive Harness cancellation;
+only the owned CLI group has the shared teardown guarantee. Container/custom
+environments selected in native config remain caller-owned and unqualified.
+No SDK/RPC, resume, pane or session-discovery mapping is exposed. See the
+[adapter reference](ADAPTER-MATRIX.md#mini-swe-agent) for setup and evidence.
+
+### auggie
+
+`auggie --print --output-format json --show-cost` emits a compact terminal
+`type: "result"` object, not streaming assistant/tool events. `raw` retains all
+complete JSON object lines in order (null when none); noise, nonobjects and
+truncated records remain in stdout. The last result's `billing.total_cost`
+populates `costUsd` only when `billing.usage_unit` is exactly `"usd"` and the
+cost is a finite nonnegative number. Credit billing and missing/invalid billing
+yield null; no conversion, summation or earlier-result fallback. Token metrics
+are always null.
+
+Process success alone does not establish agent completion. Inspect the final
+native `is_error` and `subtype`: `success` differs from `empty_completion`,
+`error_during_execution` and `error_max_turns`. Native error fields remain in raw;
+Harness preserves the actual process exit and its own timeout/cancellation cause.
+Authentication and enterprise noninteractive-entitlement failures can exit 1
+without JSON. See [setup and qualification limits](ADAPTER-MATRIX.md#auggie).
+
 ---
 
 ## Adapter contract
@@ -608,14 +859,14 @@ Each adapter provides:
 | --- | --- |
 | `name` | short id used in RunSpec.harness — matches the CLI name |
 | `instructionsFilename` | where to write RunSpec.instructions; empty string = no file (fold into prompt) |
-| `defaultModel` | used when RunSpec.model is unset; `hermes`, `goose` and `copilot` have none (empty sentinel), so upstream selection applies and the reported model is null |
+| `defaultModel` | used when RunSpec.model is unset; `amp`, `auggie`, `hermes`, `goose`, `copilot`, `cursor`, `kimi-code`, `kiro`, `mini-swe-agent`, `mistral-vibe` and `qoder` have none (empty sentinel), so upstream selection applies and the reported model is null |
 | `buildCommand(spec)` | returns a side-effect-free command and instruction plan |
 | `parseOutput(spec, outcome)` | returns `{costUsd, tokensIn, tokensOut, raw}` |
 
 `buildCommand` MUST NOT write files, create directories, or fork a subprocess.
 Built-in builders apply the common launch finalizer so direct adapter calls and
 registry calls honor executable, cwd, env and supported config overrides alike.
-`parseOutput` MAY read files the CLI wrote (opencode/kilo/crush sqlite DBs, swe-agent trajectory JSON) but MUST NOT block on I/O > 5s.
+`parseOutput` MAY read files the CLI wrote (opencode/kilo/crush sqlite DBs, swe-agent/mini-swe-agent trajectory JSON) but MUST NOT block on I/O > 5s.
 
 ### JSON-fixture-driven verification
 
@@ -626,7 +877,7 @@ the registry; adding an adapter or fixture alone fails conformance.
 | fixture field | shared assertion |
 |---|---|
 | `spec` | synthetic caller input; `<root>` and `<workdir>` resolve to fresh temporary directories |
-| `expectedCommand` | exact executable, argv, cwd, env additions, instruction path, planned directories and resolved model; building writes nothing |
+| `expectedCommand` | exact executable, argv, cwd, env additions, instruction path, planned directories, resolved model and optional graceful signal; building writes nothing |
 | `capabilities` | complete capability record; unsupported backend, permission, native-option and config requests reject before preparation |
 | `sampleOutput` / `expectedParsed` | identical parsed metrics and structured `raw` payload |
 | `artifacts` | optional synthetic SQLite statements or trajectory JSON, created before direct parsing and by the substitute CLI during execution |
@@ -686,8 +937,16 @@ Configuration files are passed by path, never read or copied by the builder.
 | claude-code | `CLAUDE_CONFIG_DIR` | `--settings` |
 | codex | `CODEX_HOME` | unsupported |
 | hermes | `HERMES_HOME` | unsupported |
+| cline | `CLINE_DIR` | unsupported |
 | goose | `GOOSE_PATH_ROOT` | unsupported |
 | copilot | `COPILOT_HOME` | unsupported |
+| amp | unsupported | `--settings-file` (custom user settings; workspace/managed settings still apply) |
+| mistral-vibe | `VIBE_HOME` | unsupported |
+| cursor | `CURSOR_CONFIG_DIR` (config, not all data/credentials) | unsupported |
+| mini-swe-agent | `MSWEA_GLOBAL_CONFIG_DIR` | `--config` (complete config replacement, not an overlay on `mini.yaml`) |
+| kiro | unsupported | unsupported |
+| kimi-code | `KIMI_CODE_HOME` | unsupported (native `config.toml` under the selected home) |
+| qoder | `QODER_CONFIG_DIR` | unsupported |
 | aider | unsupported | `--config` |
 | continue-cli | unsupported | `--config` |
 | omp | `PI_CODING_AGENT_DIR` (also selects `--profile default`) | `--config` |
@@ -708,7 +967,7 @@ Raw `HOME`, `XDG_*` and native env overrides remain caller-controlled; passing
 an env variable does not claim the upstream supports it or separates credentials.
 Harness does not rewrite a user's settings to make a model selection stick.
 An omitted/empty model retains the existing adapter default contract; for Hermes,
-Goose and Copilot that contract is no `--model` flag and a null reported model.
+Cline, Goose and Copilot that contract is no `--model` flag and a null reported model.
 
 OMP preserves the requested model string, including unknown provider prefixes;
 it does not apply Pi's `openai-codex/` inference. An explicit OMP `configHome`
@@ -718,6 +977,14 @@ remains upstream-controlled. This selects agent state, not all global/project
 discovery or a sandbox. OMP config files are additional overlays, not replacements.
 See the [OMP adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for setup,
 event semantics, native errors and qualification limits.
+
+Cline's CLI backend selects local runtime execution, disables its detached
+auto-updater and clears daemon entry through per-run environment additions.
+Conflicting caller-supplied values reject, rather than changing backend silently.
+Native provider and approval choices are independent of the model. `configHome`
+selects existing Cline configuration; upstream writes still occur in that home.
+See the [Cline adapter reference](ADAPTER-MATRIX.md#cline) for the exact env
+contract, instruction attachment, event parsing, cancellation and coverage limits.
 
 Goose preserves explicit model IDs without provider inference. `GOOSE_PROVIDER`
 and extensions remain caller-configured. `GOOSE_PATH_ROOT` relocates config,
@@ -766,10 +1033,14 @@ working directory or latest log file. Existing `sessionLogPath` and
 `parseSessionLog` helpers locate/read artifacts; they do not open, own, resume
 or cancel a session. Python `session_started_after` is Unix seconds and
 TypeScript `sessionStartedAfter` is Unix milliseconds, preserving their native
-time conventions. Pass the same instant after converting units. Not every
-adapter honors the cutoff; newest-file and basename-based database selectors
-are discovery heuristics, not proof of session ownership. Do not use them to
-attribute concurrent runs without an upstream session ID.
+time conventions. Pass the same instant after converting units. Claude Code,
+OpenClaude, Factory, Gemini, Qwen, Continue and the SWE wrapper honor an
+inclusive file-mtime cutoff. Other adapter limitations remain documented in
+the [matrix](ADAPTER-MATRIX.md#session-telemetry-coverage). A modified/resumed
+old conversation can pass the cutoff; newest-file selectors are
+discovery heuristics, not proof of ownership. Do not attribute concurrent runs
+without an upstream session ID. File helpers read the caller process's selected
+config environment, not remembered child `RunSpec` overrides.
 
 Current execution behavior and limits:
 
@@ -781,7 +1052,7 @@ Current execution behavior and limits:
 | output | stdout/stderr separate; optional `onOutput(chunk, stream)` with serialized callback backpressure |
 | timeout | finite non-negative seconds, default 1800; null/None disables; zero expires immediately after launch; `exitCode=-1`, `timedOut=true`, `timeoutKind="wall"` |
 | inactivity | disabled by default; positive finite seconds since the last raw byte on either output stream; expiry sets `timeoutKind="inactivity"` |
-| process cleanup | fresh owned POSIX process group; SIGTERM, then SIGKILL after 0.5 seconds if still present; drain/close within a further 1 second |
+| process cleanup | fresh owned POSIX process group; one graceful signal (SIGTERM by default, SIGINT for Cline), then SIGKILL after 0.5 seconds if still present; drain/close within a further 1 second |
 | cancellation | optional `cancel`: Python `threading.Event`, TS `AbortSignal`; explicit cancellation returns `termination="cancelled"`, `exitCode=-1`, `timedOut=false` |
 | launch failure | `termination="launch-failed"`, `exitCode=-1`, `launchError` / `launch_error` carries the OS code |
 | signal reporting | `termination="signaled"`, negative signal number as exit code and a separate signal name; SIGTERM alone is not a timeout |
@@ -789,11 +1060,20 @@ Current execution behavior and limits:
 | callback failure | `callbackError` retains the exception; while the leader runs, `termination="callback-error"`, `exitCode=-1`, `timedOut=false`; same owned teardown |
 
 `termination="exited"` covers both zero and non-zero ordinary exits. Timeout
-and cancellation retain their cause even if the leader handles SIGTERM and
+and cancellation retain their cause even if the leader handles the graceful signal and
 exits zero. `signal` records the leader's actual terminating signal, if any.
 The first terminal condition observed by the runner wins. After ordinary
 leader exit, cleanup stops leftover group members without changing the leader's
 result; inherited pipes must not turn a completed leader into a timeout.
+
+`BuildCommand.gracefulSignal` (`graceful_signal` in Python) tells external
+drivers which first teardown signal the adapter needs. The low-level subprocess
+helpers accept the same option, restricted to `SIGTERM` or `SIGINT`; omission
+retains SIGTERM. Execution forwards the planned value through the shared engine.
+Cline needs SIGINT: its qualified one-shot SIGTERM handler cannot reach the
+active session, while SIGINT disposes that session and stops its shell tools.
+This does not expand ownership beyond the process-group boundary below or
+guarantee cleanup after a crash or forced kill.
 
 ### Streaming, stdin and output limits
 
@@ -1019,6 +1299,22 @@ Raw payloads retain upstream details but are untrusted and may contain prompts,
 paths or secrets. No telemetry is transmitted by Harness. Upstream tools may
 have their own telemetry settings, which remain caller-controlled.
 
+OpenCode, Kilo and Crush correlate database metrics only with an observed native
+run ID. Their `raw` contains `sessionID` and `costSource` (`reported` or
+`unavailable`); missing/conflicting identity gives null metrics/raw. A missing
+artifact retains an observed ID with unavailable metrics. Reported zero stays
+zero; these adapters do not estimate cost. “Reported” names the upstream field,
+which may itself be estimated/defaulted and is not proof of billed USD.
+OpenCode/Kilo sum complete assistant metrics; Crush exposes native last-step
+token counters, not cumulative run totals. Cache semantics remain
+[adapter-specific](ADAPTER-MATRIX.md#opencode).
+
+These database adapters cannot discover ownership from `sessionLogPath(workdir,
+since)` and return null there. `parseSessionLog` accepts only
+`<database-path>#session=<percent-encoded-native-ID>`; legacy basename selectors
+and bare paths return unavailable metrics. Exact-ID telemetry lookup neither
+opens nor resumes a controlled session and does not change its owner lifecycle.
+
 ## Controlled RPC sessions
 
 `open_session(SessionSpec(...))` / `openSession(spec)` opens an owned native
@@ -1031,8 +1327,9 @@ The qualified protocol is **Pi 0.85.1**, distributed as
 explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
-Other registered adapters reject session selection with `unsupported-backend`.
-Unknown names still produce `unknown-harness`.
+Other pairings reject with `unsupported-backend`, except the separately
+documented OMP SDK and caller-owned OpenCode HTTP sessions below. Unknown
+names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
 
@@ -1055,8 +1352,9 @@ Optional fields:
 `backend: "rpc"`, `events`, `interrupt`, `followUp`, `resume` true;
 `concurrentTurns` and `approval` false. It performs no local availability/auth
 probe. Existing `getCapabilities` describes one-shot execution and retains
-its CLI behavior. There is no generic raw-command, steering, queued follow-up,
-approval-response or arbitrary native-options channel.
+its CLI behavior. There is no generic raw-command, steering, queued follow-up
+or arbitrary native-options channel. Pi's `respondApproval` /
+`respond_approval` rejects with `unsupported-capability`.
 
 ### Identity, turns and events
 
@@ -1160,11 +1458,292 @@ Sources refreshed September 8:
 [Pi session implementation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/agent-session.ts),
 [OMP RPC differences](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md).
 
+## Optional OMP SDK sessions
+
+`open_session` / `openSession` also accept `harness: "omp", backend: "sdk"`.
+They retain the session types, serial turns, event queues, native references,
+deadlines, instruction lease, interruption and owned disposal described above.
+The one-shot `RunSpec` API remains CLI-only; there is no automatic fallback.
+
+### Explicit dependencies and host-local configuration
+
+The qualified SDK is **`@oh-my-pi/pi-coding-agent` 18.1.14**, with **Bun
+>=1.3.14**. Other package names/versions reject at startup (`launch-failed`).
+Install the SDK separately in a caller-owned project. Harness does not install
+it, declare it as a mandatory dependency, or load it during ordinary imports,
+CLI execution or capability queries.
+
+Both languages use the **same shipped Bun bridge worker**, hosting one native
+`createAgentSession` per owned process. This is a supported Python and Node
+bridge, not a native Python SDK or in-process embedding into the caller's
+TypeScript runtime. OMP imports mutate process-global environment/discovery
+state and register CLI-oriented signal handlers; process isolation prevents
+these from changing the caller's OMP settings, environment, cwd or listeners.
+The worker owns its own termination handlers and calls native SDK disposal.
+
+`SessionSpec.omp_sdk` / `ompSdk` is required for OMP SDK and rejected for Pi RPC.
+The exported `OmpSdkOptions` has three required fields:
+
+| TypeScript / Python | meaning |
+|---|---|
+| `packageRoot` / `package_root` | absolute directory of the installed SDK package, containing its `package.json` |
+| `agentDir` / `agent_dir` | absolute caller-selected OMP profile/state directory |
+| `auth` | `"local"` opens `<agentDir>/agent.db`; `"environment"` uses an in-memory credential database |
+
+`executable` selects Bun (bare name or absolute path), default `bun`.
+`model` is the native model pattern, trimmed but otherwise unchanged; omission
+retains native model/config/resume selection. Native fallback notices remain
+visible as `harness_model_fallback` events. Both auth modes preserve upstream
+environment, dotenv and `models.yml` key resolution. `"environment"` means
+no persisted credential database is opened for authentication, not an
+environment whitelist or a promise of no upstream state writes. `"local"`
+permits native credential-store schema/cache writes and OAuth refresh in the
+selected database; Harness neither copies credentials nor discovers a broker.
+
+The worker pins OMP's default profile resolver and both agent/config roots to
+`agentDir` before importing the SDK. It translates the config root into OMP's
+HOME-relative `PI_CONFIG_DIR` format. Conflicting explicit
+`PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`, `OMP_PROFILE` or `PI_PROFILE` entries
+reject before preparation. Inherited named profiles cannot redirect this
+selection. Other environment entries are inherited and overlaid as usual.
+`Settings.loadReadOnly` avoids settings migration/persistence; native model
+configuration, caches, session files and tools can still perform upstream
+writes in their selected locations. This is not a filesystem sandbox.
+
+`--no-env-file` disables **Bun's** automatic dotenv loading, not OMP's own
+profile/project/HOME dotenv loading. Native project discovery, configured
+extensions, tools, MCP and permission defaults remain upstream behavior.
+Choose a trusted profile/workdir and set child `HOME` explicitly when isolation
+from ambient home configuration is required. No approval-response channel or
+permission bypass is exposed; unsupported common operations reject rather than
+being simulated. Custom SDK objects, steering, queued follow-up, forks and
+arbitrary native method calls have no Harness mapping.
+
+### SDK events, settlement and resume
+
+`get_session_capabilities("omp", "sdk")` /
+`getSessionCapabilities("omp", "sdk")` reports `backend: "sdk"`, with events,
+interrupt, follow-up and resume true; concurrent turns and approval false.
+It reports implemented behavior, not installed dependencies or authentication.
+
+SDK subscriptions feed the same bounded async event streams. Events carry
+`backend: "sdk", harness: "omp"` and retain the complete native event in `raw`;
+transport wrappers are not exposed. Request responses carry bridge request
+IDs, not invented upstream request IDs. Native `agent_end` snapshots remain
+available, including `isTerminal: false`, unknown events and usage fields.
+Do not sum repeated cumulative usage snapshots.
+
+Completion waits for the native `prompt()` promise, `waitForIdle()` and pending
+owner-scoped async work, never an intermediate `agent_end` or Pi's
+`agent_settled`. SDK-local commands can finish without a model event.
+Thrown prompt errors produce `agent-error` with an explicitly identified
+`sdk_settled` bridge error in `raw`; assistant errors/aborts retain native
+`agent_end`. Native abort acknowledgement and turn settlement must both finish
+before follow-up. An interrupt that cannot settle reaches the configured
+request deadline and owned teardown rather than pretending to have stopped.
+
+Native session files/IDs are preserved. Resume validates the exact ID/workdir
+before startup and again after opening the SDK manager. OMP's optional leading
+title record is accepted only for this backend; it does not weaken Pi framing.
+Close unsubscribes, calls `beginDispose`/`dispose`, closes the owned auth store,
+and retains persisted history. The existing 500 ms TERM / KILL / 1000 ms drain
+bound applies. Failed or forced SDK disposal raises `adapter-error` after owned
+cleanup instead of claiming native disposal succeeded.
+
+Shared `tests/omp_sdk_cases.json` and a synthetic SDK package exercise the
+actual bridge in Python, Bun and packaged Node without provider dependencies.
+Native 18.1.14/Bun 1.3.14 qualification uses isolated homes and a local
+synthetic SSE provider, separate from credentialed provider success. No real
+provider success or cross-version SDK compatibility is claimed.
+
+Sources refreshed September 8:
+[SDK guide](https://github.com/can1357/oh-my-pi/blob/main/docs/sdk.md),
+[18.1.14 package metadata](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent/v/18.1.14),
+[native environment](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/utils/src/env.ts),
+[SDK session lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/coding-agent/src/session/agent-session.ts).
+
+## Caller-owned OpenCode HTTP sessions
+
+`open_session` / `openSession` accept `harness: "opencode", backend: "rpc"`.
+Here RPC means direct documented HTTP routes with an SSE event subscription,
+not the OpenCode CLI, TUI automation, an owned server, or a Python SDK.
+One-shot `run` remains CLI-only. There is no dependency/backend fallback.
+
+### Explicit endpoint, authentication and remote identity
+
+The source-qualified release is **OpenCode 1.18.29**, tag commit
+`16747470f976aca3d362ad730bcd3fe82ecc2c9a`. Startup requires authenticated
+`GET /global/health` to return `healthy: true, version: "1.18.29"`.
+Other versions, including source builds reporting `"local"`, reject with
+`unsupported-backend`. The pinned OpenAPI document is 3.1.0 with a constant
+`info.version: "1.0.0"`; that field is not a release-compatibility guarantee.
+
+`SessionSpec.opencode` is required for this pairing and rejected elsewhere.
+Both roots export `OpenCodeOptions`, `OpenCodeAuth` (`"none" | "basic"`) and
+`OpenCodeApprovalResponse` (`"once" | "reject"`):
+
+| field | semantics |
+|---|---|
+| `endpoint` | required HTTP(S) origin; optional trailing slash; no embedded credentials, path prefix, query, fragment or discovery |
+| `auth` | required `"none"` or `"basic"`; never inferred from environment or local auth stores |
+| `username`, `password` | required nonempty strings for `"basic"`, forbidden with `"none"`; username cannot contain a colon; control characters reject |
+
+Basic credentials travel only in `Authorization`, never a URL. Redirects are
+not followed. The caller must trust the selected endpoint; HTTP provides no
+transport encryption. `"none"` explicitly selects an unsecured endpoint, not
+an authentication fallback. Successful Basic requests do not prove the server
+requires authentication: upstream disables its check when no password is set.
+No `workspace` routing query is sent; upstream could otherwise proxy the
+request and its credentials to a different server.
+
+Python requires the optional `harness-cli[opencode]` extra (`httpx` 0.28.x),
+loaded only when this backend opens. Missing `httpx` fails explicitly, without
+launching a CLI. Its client disables ambient proxy/netrc configuration.
+TypeScript uses the runtime's standard `fetch` API under Bun and packaged Node, without
+an OpenCode SDK dependency. Ordinary imports and capability queries do not
+connect to an endpoint or initialize upstream settings.
+
+`workdir` is a literal absolute POSIX **server-side** directory. Relative paths,
+dot segments and noncanonical separators reject; Harness does not resolve
+remote paths against its own cwd or filesystem. `GET /path?directory=...`
+must echo the selected directory. If the server resolves a symlink differently,
+opening fails with the returned canonical directory in the diagnostic; the
+caller must explicitly select that spelling. The created/resumed session's
+`directory` must also match: upstream session routes use the stored directory
+even when a different query was supplied.
+
+An OpenCode `SessionReference` contains the full native `sessionId`, null
+`sessionFile`, canonical `workdir`, and normalized `endpoint`. Python adds an
+optional `endpoint=None` field; TS adds optional `endpoint`. Pi/OMP references
+do not use it and reject endpoint-bearing resume references. OpenCode resume
+requires exact endpoint/workdir association and null `sessionFile`, verifies
+`GET /session/{id}`, and never creates a replacement when that lookup fails.
+No local session file, sqlite discovery, newest-session selection or history
+deletion is involved.
+
+Nonempty `env`, any `executable`, `instructions`, `ompSdk` / `omp_sdk`, and
+permission bypass are unsupported for this backend. No local instruction
+lease or projection is acquired. Optional `model` is a trimmed native
+`provider/model` selector; omission leaves the server's selection unchanged.
+No server config/provider/auth mutation, installation or server startup occurs.
+
+### Turns, correlation and bounded events
+
+The common serial `startTurn` / `start_turn`, events, result, interrupt and
+close operations remain. `getSessionCapabilities("opencode", "rpc")` reports
+events, interrupt, follow-up, resume and approval true; concurrent turns false.
+The caller must have exclusive write access to the selected native session.
+Upstream supplies no atomic cross-client lease; an idle status check is not a
+lock and an externally busy session is not silently joined.
+
+Opening subscribes to scoped `GET /event` and awaits `server.connected`, which
+the pinned server sends after registering its listener. A turn supplies a
+fresh `msg_...` ID to `POST /session/{id}/message`, with text parts and optional
+model. The synchronous route waits for the native run loop. The asynchronous
+`/prompt_async` route is not used: its 204 is only acceptance, not persistence
+or completion.
+
+Completion requires **both** the correlated synchronous HTTP response and an
+SSE `session.status` idle observed after this turn's user-message echo.
+Assistant `info.parentID` must equal the submitted message ID, and its
+`sessionID` must match. Busy/retry statuses, intermediate assistant/tool steps,
+an old idle event and an HTTP acknowledgement cannot settle the turn. Native
+`MessageAbortedError` means interrupted; other native assistant errors mean
+agent-error. Success requires completed assistant metadata and a nonempty
+`finish` other than `"tool-calls"` or `"unknown"`.
+
+This is deliberately strict correlation, not inferred ancestry. OpenCode's
+automatic context-overflow compaction, replay/continue prompts, or subtask
+paths can create another user message internally and return an assistant
+parented to it. Such a result is **unsupported** and fails with a correlation
+`protocol-error`, retaining its native payload. The same mismatch can arise
+from an external writer; Harness does not invent lineage or report success.
+Automatic compaction is therefore not qualified for long-context sessions.
+
+Events retain the complete native `{id?, type, properties}` payload and stream
+order, with `backend: "rpc", harness: "opencode"`. Native message/permission
+IDs provide `requestId` where available. Known current-turn messages feed the
+turn stream; historical/unassociated message updates feed `session.events`
+with null `turnId`. Explicitly foreign-session events are filtered. Unknown
+selected-session event types stay visible. Server connection/heartbeat events
+are idle events; `server.instance.disposed` is visible before disconnect.
+The caller must drain both bounded streams when retaining a long-lived handle.
+
+SSE accepts UTF-8, LF/CRLF framing, comments and multiline `data:` fields.
+Frames/partial input and HTTP JSON bodies are bounded to 1 MiB; identity and
+permission tracking are bounded too. Invalid UTF-8/JSON, invalid shapes,
+oversized frames/bodies and a partial final SSE frame fail as protocol-error.
+Clean EOF is disconnected. Queue overflow retains prior events and exposes
+`eventsTruncated`; no transparent reconnect, replay or silent loss occurs.
+Upstream emits no SSE replay cursor. Resume opens a fresh subscription and
+continues persisted session history, not missed event delivery.
+
+`result.raw` retains the authoritative native HTTP response when available;
+partial progress remains in queued events on failure. Usage/cost fields stay
+native: repeated cumulative snapshots must not be summed, zero is preserved,
+and no billing/price estimate is fabricated. There is no owned process, so
+`exitCode` and `signal` are null and stderr is empty with byte count zero.
+HTTP status failure during startup is `launch-failed`; successful responses
+with malformed/wrong identity are `protocol-error`. Native prompt HTTP errors
+are `agent-error`; redirects and unexpected 204 are protocol violations.
+
+### Approval, interruption and disposal
+
+`await session.respondApproval(requestId, response)` /
+`await session.respond_approval(request_id, response)` answers an observed
+outstanding `permission.asked` for this session through
+`POST /permission/{id}/reply?directory=...`, body `{reply: response}`.
+Only `"once"` and `"reject"` are supported; no automatic answer is sent.
+Upstream rejection can reject **all** outstanding permissions in the same
+session, and a model may recover from a rejected tool and finish successfully.
+The native `"always"` reply raises `unsupported-capability` before HTTP because
+it changes instance-wide allow rules shared with other clients.
+Stale/unknown IDs reject explicitly. Pi/OMP expose the same method but reject
+it as unsupported. Native question dialogs, arbitrary tools/commands, forks
+and broader approval/config controls have no Harness mapping.
+
+`interrupt()` explicitly sends `POST /session/{id}/abort`, requires true plus
+the turn's native settlement, and preserves follow-up. A normal completion
+racing abort remains completed. Request/interrupt deadlines are bounded;
+long-running prompt completion uses the turn deadline, not the short request
+deadline. An unanswered permission/question can reach that turn deadline.
+
+`close()` is idempotent and safe for concurrent callers. It settles an active
+turn as closed and cancels/closes only client requests, tasks and the SSE
+subscription. It **never** calls abort, instance/global dispose, history
+deletion or server shutdown. Timeout and protocol/transport failure likewise
+close local transport without claiming the server-side work stopped.
+Server-side work may continue; explicitly interrupt before closing when a
+confirmed stop is required. Python cancellation waits for shielded local
+cleanup. Neither language takes ownership of the caller's server or tools.
+
+### Qualification evidence
+
+`tests/opencode_cases.json`, the bounded synthetic HTTP/SSE peer, Python tests,
+Bun source tests and `node tests/node-opencode.mjs` exercise shared protocol
+and ownership scenarios. This is **mock-server conformance**, not an installed
+OpenCode run. No real credentials or conversations are in fixtures.
+
+- **Native-runtime synthetic-provider evidence: not run/unqualified.** OpenCode
+  1.18.29 is the source pin, not an installed-runtime result; no caller-supplied
+  real endpoint was available.
+- **Authenticated-provider evidence: not run/unqualified.** No real endpoint,
+  provider, model or credentials were selected. Generation, tool execution and
+  native cleanup have not been exercised. Fixture success does not fill this gap.
+
+Pinned sources:
+[OpenAPI schema](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/sdk/openapi.json),
+[session routes](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts),
+[SSE](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts),
+[runner](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/effect/runner.ts),
+[permission scope](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/permission/index.ts),
+[compaction](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/session/compaction.ts).
+
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC session implementation above and
-future backends. They replace the old SDK exclusion while keeping the common
-library small; they do not enable SDKs or additional native protocols by themselves.
+These requirements govern the shipped Pi RPC, OMP SDK and caller-owned OpenCode
+HTTP session implementations above and future backends. They keep the common library small; they do not
+enable additional SDKs or native protocols by themselves.
 
 - Backend selection is explicit and stable for a run/session. SDK dependencies
   are optional and lazy; importing or selecting CLI must not load/configure an
@@ -1236,8 +1815,9 @@ Not adopted: mandatory bypass, billing-tier inference from headless/live mode,
 historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
-now ships under the execution contract above; controlled Pi RPC sessions ship
-through their explicit API. Additional protocols and SDKs remain implementation-gated.
+now ships under the execution contract above; controlled Pi RPC and optional
+OMP SDK sessions ship through their explicit API. Additional protocols and
+SDKs remain implementation-gated.
 No package release is implied.
 
 ---
@@ -1251,7 +1831,7 @@ Registering the same class (Python) or object (TypeScript) again is idempotent;
 a different implementation under that name raises `duplicate-adapter`.
 
 ```
-["aider", "claude-code", "codex", "continue-cli", "copilot", "crush", "factory-droid", "gemini", "goose", "hermes", "kilo", "omp", "openclaude", "opencode", "pi", "qwen", "swe-agent"]
+["aider", "amp", "auggie", "claude-code", "cline", "codex", "continue-cli", "copilot", "crush", "cursor", "factory-droid", "gemini", "goose", "hermes", "kilo", "kimi-code", "kiro", "mini-swe-agent", "mistral-vibe", "omp", "openclaude", "opencode", "pi", "qoder", "qwen", "swe-agent"]
 ```
 
 (sorted, locale-independent)
@@ -1273,8 +1853,8 @@ Harness provides CLI command construction, output parsing and headless execution
 
 Optional agent SDK/protocol integrations are now in scope for the library.
 This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
-consumer-owned host/fleet boundary. There is no SDK backend implemented yet;
-its dependency and behavior requirements are defined in the implementation gates above. A raw model API,
+consumer-owned host/fleet boundary. The optional OMP SDK bridge implements the
+dependency and behavior requirements above. A raw model API,
 fleet manager, Linear engine or application is not an agent backend.
 
 ---
@@ -1295,7 +1875,7 @@ fleet manager, Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.8` and TypeScript `0.2.12`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+Current manifests record Python `0.3.16` and TypeScript `0.2.20`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

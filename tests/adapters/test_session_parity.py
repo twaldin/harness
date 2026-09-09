@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -42,36 +44,48 @@ def _setup_home_fixture(tmp_path: Path, adapter: str) -> tuple[Path, Path]:
     home.mkdir(parents=True, exist_ok=True)
     workdir.mkdir(parents=True, exist_ok=True)
     fixtures = Path(__file__).resolve().parents[1] / "fixtures" / "session-logs"
+    root = str(workdir.resolve())
+
+    def materialize(source: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        escaped = json.dumps(root, ensure_ascii=False)[1:-1]
+        text = source.read_text().replace("__WORKDIR__", escaped).replace("/Users/dev/repo.space_underé", escaped).replace("/workspace/repo", escaped)
+        destination.write_text(text.replace("__PROJECT_HASH__", hashlib.sha256(root.encode()).hexdigest()))
 
     if adapter == "continue-cli":
-        d = home / ".continue" / "sessions" / workdir.name
-        d.mkdir(parents=True, exist_ok=True)
-        shutil.copy(fixtures / "continue" / "session.json", d / "session.json")
+        source = fixtures / "continue" / "3b9e7d2c-5a1f-4e8b-9c6d-0f1a2b3c4d5e.json"
+        materialize(source, home / ".continue" / "sessions" / source.name)
     elif adapter == "factory-droid":
-        d = home / ".factory" / "sessions" / workdir.name
-        d.mkdir(parents=True, exist_ok=True)
-        shutil.copy(fixtures / "factory" / "session.json", d / "session.json")
-    elif adapter == "qwen":
-        d = home / ".qwen" / "tmp" / workdir.name
-        d.mkdir(parents=True, exist_ok=True)
-        shutil.copy(fixtures / "qwen" / "logs.json", d / "logs.json")
+        directory = home / ".factory" / "sessions" / ("-" + root.strip("/").replace("/", "-"))
+        for source in (fixtures / "factory").iterdir():
+            materialize(source, directory / source.name)
+    elif adapter in {"qwen", "gemini"}:
+        source_dir = fixtures / adapter
+        case = json.loads((source_dir / "discovery.json").read_text())["sessions"]["main"]
+        if adapter == "qwen":
+            directory = home / ".qwen" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", root) / "chats"
+        else:
+            materialize(source_dir / "projects.json", home / ".gemini" / "projects.json")
+            directory = home / ".gemini" / "tmp" / "repo" / "chats"
+        materialize(source_dir / case["file"], directory / Path(case["file"]).name)
     elif adapter in {"openclaude", "claude-code"}:
-        encoded = str(workdir).replace("/", "-").replace("_", "-")
-        d = home / ".claude" / "projects" / encoded
-        d.mkdir(parents=True, exist_ok=True)
-        src = fixtures / ("openclaude" if adapter == "openclaude" else "claude-code") / "session.jsonl"
-        shutil.copy(src, d / "session.jsonl")
+        encoded = re.sub(r"[^a-zA-Z0-9]", "-", root)
+        directory = home / (".openclaude" if adapter == "openclaude" else ".claude") / "projects" / encoded
+        materialize(fixtures / adapter / "session.jsonl", directory / "session.jsonl")
     return home, workdir
 
 
 def _setup_sqlite_fixture(tmp_path: Path, adapter: str) -> Path:
+    """Two sessions per DB: the run's own (`s1`) and a newer, fatter decoy the
+    old latest-row heuristics would have picked. Returns the DB path."""
     workdir = tmp_path / "repo"
     workdir.mkdir(parents=True, exist_ok=True)
 
     if adapter == "crush":
         d = workdir / ".harness" / "crush-data"
         d.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(d / "crush.db")
+        db_path = d / "crush.db"
+        db = sqlite3.connect(db_path)
         db.executescript(
             """
             CREATE TABLE sessions (
@@ -83,52 +97,69 @@ def _setup_sqlite_fixture(tmp_path: Path, adapter: str) -> Path:
                 updated_at INTEGER
             );
             CREATE TABLE messages (
-                id TEXT PRIMARY KEY, session_id TEXT, role TEXT, model TEXT, created_at INTEGER
+                id TEXT PRIMARY KEY, session_id TEXT, role TEXT, model TEXT, provider TEXT, created_at INTEGER
             );
             INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, updated_at)
             VALUES ('s1', NULL, 70, 11, 0.004, 1);
-            INSERT INTO messages VALUES ('m1', 's1', 'assistant', 'gpt-5.4', 1);
+            INSERT INTO sessions (id, parent_session_id, prompt_tokens, completion_tokens, cost, updated_at)
+            VALUES ('s2', NULL, 99999, 99999, 99.0, 2);
+            INSERT INTO messages VALUES ('m1', 's1', 'assistant', 'gpt-5.4', 'openai', 1);
+            INSERT INTO messages VALUES ('m2', 's2', 'assistant', 'gpt-5.4', 'openai', 2);
             """
         )
         db.commit()
         db.close()
-    elif adapter == "kilo":
+    else:
         d = workdir / ".harness" / "kilo"
         d.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(d / "kilo.db")
+        db_path = d / "kilo.db"
+        db = sqlite3.connect(db_path)
         db.executescript(
             """
             CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_updated INTEGER NOT NULL);
             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, data TEXT NOT NULL);
             INSERT INTO session (id, directory, time_updated) VALUES ('s1', '/tmp/repo', 1);
+            INSERT INTO session (id, directory, time_updated) VALUES ('s2', '/tmp/repo', 2);
             INSERT INTO message (id, session_id, data)
-            VALUES ('m1', 's1', '{"role":"assistant","tokens":{"input":90,"output":30},"cost":0.004}');
+            VALUES ('m1', 's1', '{"role":"assistant","providerID":"openai","modelID":"gpt-5.4","tokens":{"input":90,"output":30},"cost":0.004}');
+            INSERT INTO message (id, session_id, data)
+            VALUES ('m2', 's2', '{"role":"assistant","providerID":"openai","modelID":"gpt-5.4","tokens":{"input":99999,"output":99999},"cost":99.0}');
             """
         )
         db.commit()
         db.close()
-    return workdir
+    return db_path
 
 
-@pytest.mark.parametrize("adapter", ["continue-cli", "factory-droid", "qwen", "openclaude", "claude-code"])
+@pytest.mark.parametrize("adapter", ["continue-cli", "factory-droid", "qwen", "gemini", "openclaude", "claude-code"])
 def test_session_log_path_and_parse_parity_home(adapter: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     if shutil.which("bun") is None:
         pytest.skip("bun not available")
 
     home, workdir = _setup_home_fixture(tmp_path, adapter)
     monkeypatch.setenv("HOME", str(home))
+    for key in ("CLAUDE_CONFIG_DIR", "OPENCLAUDE_CONFIG_DIR", "GEMINI_CLI_HOME", "QWEN_HOME", "QWEN_RUNTIME_DIR", "FACTORY_HOME_OVERRIDE", "CONTINUE_GLOBAL_DIR"):
+        monkeypatch.delenv(key, raising=False)
 
     env = os.environ.copy()
     env["HOME"] = str(home)
 
     py_adapter = get_adapter(adapter)
     py_path = py_adapter.session_log_path(workdir)
+    assert py_path is not None
     ts_path = _ts_call(adapter, "sessionLogPath", str(workdir), env)
     assert py_path == ts_path
 
     py_parsed = _py_telemetry_dict(py_adapter.parse_session_log(py_path))
     ts_parsed = _ts_call(adapter, "parseSessionLog", py_path, env)
     assert py_parsed == ts_parsed
+    cutoff = Path(py_path).stat().st_mtime + 1
+    assert py_adapter.session_log_path(workdir, cutoff) is None
+    proc = subprocess.run(
+        ["bun", "ts/scripts/session-telemetry.ts", adapter, "sessionLogPath", str(workdir), str(cutoff * 1000)],
+        cwd=Path(__file__).resolve().parents[2], env=env, capture_output=True, text=True, check=True,
+    )
+    assert json.loads(proc.stdout) is None
 
 
 @pytest.mark.parametrize("adapter", ["crush", "kilo"])
@@ -136,7 +167,8 @@ def test_session_log_path_and_parse_parity_sqlite(adapter: str, tmp_path: Path, 
     if shutil.which("bun") is None:
         pytest.skip("bun not available")
 
-    workdir = _setup_sqlite_fixture(tmp_path, adapter)
+    db_path = _setup_sqlite_fixture(tmp_path, adapter)
+    workdir = db_path.parents[2]
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
@@ -144,17 +176,26 @@ def test_session_log_path_and_parse_parity_sqlite(adapter: str, tmp_path: Path, 
     env = os.environ.copy()
     env["HOME"] = str(home)
 
+    # The DB alone cannot identify a run's session: both runtimes decline to
+    # invent a path and only parse an explicit exact-ID selector.
     py_adapter = get_adapter(adapter)
-    py_path = py_adapter.session_log_path(workdir)
-    ts_path = _ts_call(adapter, "sessionLogPath", str(workdir), env)
-    assert py_path == ts_path
+    assert py_adapter.session_log_path(workdir) is None
+    assert _ts_call(adapter, "sessionLogPath", str(workdir), env) is None
 
-    py_parsed = _py_telemetry_dict(py_adapter.parse_session_log(py_path))
-    ts_parsed = _ts_call(adapter, "parseSessionLog", py_path, env)
+    selector = f"{db_path}#session=s1"
+    py_parsed = _py_telemetry_dict(py_adapter.parse_session_log(selector))
+    ts_parsed = _ts_call(adapter, "parseSessionLog", selector, env)
     assert py_parsed == ts_parsed
     expected_tokens = (70, 11) if adapter == "crush" else (90, 30)
     assert (py_parsed["tokensIn"], py_parsed["tokensOut"]) == expected_tokens
     assert py_parsed["costUsd"] == 0.004
+    assert py_parsed["model"] == "gpt-5.4"
+    assert py_parsed["raw"] == {"sessionID": "s1", "costSource": "reported"}
+
+    for stale in (str(db_path), f"{db_path}#session(repo)"):
+        py_stale = _py_telemetry_dict(py_adapter.parse_session_log(stale))
+        assert py_stale == _ts_call(adapter, "parseSessionLog", stale, env)
+        assert (py_stale["tokensIn"], py_stale["raw"]) == (None, None)
 
 
 @pytest.mark.parametrize(
@@ -187,3 +228,40 @@ def test_codex_rollout_model_pricing_parity(models, expected_model, expected_cos
         assert py_result["costUsd"] is None
     else:
         assert py_result["costUsd"] == pytest.approx(expected_cost)
+
+
+@pytest.mark.parametrize("case", json.loads(
+    (Path(__file__).resolve().parents[1] / "fixtures/session-logs/telemetry-cases.json").read_text()
+), ids=lambda case: case["name"])
+def test_native_telemetry_boundaries_in_both_runtimes(case: dict, tmp_path: Path):
+    if shutil.which("bun") is None:
+        pytest.skip("bun not available")
+    path = tmp_path / "session.jsonl"
+    text = case["text"] if "text" in case else "\n".join(json.dumps(record) for record in case["records"])
+    path.write_text(text + "\n")
+    for adapter in case["adapters"]:
+        py_result = _py_telemetry_dict(get_adapter(adapter).parse_session_log(str(path)))
+        ts_result = _ts_call(adapter, "parseSessionLog", str(path), os.environ.copy())
+        for result in (py_result, ts_result):
+            for key, expected in case["expected"].items():
+                assert result[key] == (pytest.approx(expected) if key == "costUsd" and expected is not None else expected)
+
+
+def test_telemetry_bridge_distinguishes_blank_from_missing_and_zero_cutoff(tmp_path: Path):
+    if shutil.which("bun") is None:
+        pytest.skip("bun not available")
+    artifact = tmp_path / ".harness" / "swe-traj.json"
+    artifact.parent.mkdir()
+    artifact.write_text("{}")
+    command = ["bun", "ts/scripts/session-telemetry.ts", "swe-agent", "sessionLogPath", str(tmp_path)]
+    for arguments, expected_status in (([], 0), (["0"], 0), ([""], 2), ([" \t "], 2)):
+        result = subprocess.run(
+            command + arguments, cwd=Path(__file__).resolve().parents[2],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == expected_status
+        if expected_status == 0:
+            assert json.loads(result.stdout) == str(artifact)
+        else:
+            assert result.stdout == ""
+            assert result.stderr

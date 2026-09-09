@@ -41,14 +41,21 @@ ErrorCode = Literal[
     "protocol-error",
     "session-closed",
 ]
-NativeOptionsKind = Literal["claude-code", "codex", "copilot"]
+NativeOptionsKind = Literal["claude-code", "codex", "cline", "copilot", "amp", "mistral-vibe", "kiro", "qoder"]
 ClaudeCodeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
+QoderPermissionMode = Literal["default", "accept_edits", "dont_ask"]
+#: Signal the runner sends the owned process group once before escalating to
+#: SIGKILL. SIGTERM is the default; adapters whose CLI only shuts down
+#: cleanly on SIGINT declare it through `Adapter.graceful_signal`.
+GracefulSignal = Literal["SIGTERM", "SIGINT"]
 
 BACKENDS: tuple[Backend, ...] = get_args(Backend)
 PERMISSION_POLICIES: tuple[PermissionPolicy, ...] = get_args(PermissionPolicy)
+GRACEFUL_SIGNALS: tuple[GracefulSignal, ...] = get_args(GracefulSignal)
 _CLAUDE_CODE_EFFORTS: tuple[str, ...] = get_args(ClaudeCodeEffort)
 _CODEX_SANDBOXES: tuple[str, ...] = get_args(CodexSandbox)
+_QODER_PERMISSION_MODES: tuple[str, ...] = get_args(QoderPermissionMode)
 
 
 class HarnessError(RuntimeError):
@@ -86,6 +93,22 @@ class CodexOptions:
 
 
 @dataclass(frozen=True)
+class ClineOptions:
+    """Typed `cline` CLI knobs. `provider` is emitted as `--provider <value>`
+    and `auto_approve` as `--auto-approve true|false`, in that order.
+
+    Both omitted: upstream configuration decides (no provider or approval
+    flags are injected). An explicit `auto_approve` combined with
+    `permission_policy="bypass"` is rejected: bypass is itself
+    `--auto-approve true`, so the two would either duplicate or contradict.
+    """
+
+    kind: Literal["cline"] = field(default="cline", init=False)
+    provider: str | None = None
+    auto_approve: bool | None = None
+
+
+@dataclass(frozen=True)
 class CopilotOptions:
     """Typed `copilot` CLI tool-permission rules.
 
@@ -103,7 +126,70 @@ class CopilotOptions:
     deny_tools: tuple[str, ...] | list[str] | None = None
 
 
-NativeOptions = ClaudeCodeOptions | CodexOptions | CopilotOptions
+@dataclass(frozen=True)
+class AmpOptions:
+    """Typed `amp` CLI knobs. `mode` is emitted as `--mode <value>`.
+
+    Amp resolves the value against its built-in and plugin agent modes at
+    runtime (key or label), so it is a non-blank, NUL-free string passed
+    through verbatim rather than an enum. Omitted: upstream config decides.
+    """
+
+    kind: Literal["amp"] = field(default="amp", init=False)
+    mode: str | None = None
+
+
+@dataclass(frozen=True)
+class VibeOptions:
+    """Typed `vibe` (Mistral Vibe) CLI knobs. `agent` is emitted as
+    `--agent=<name>` and `trust` as a bare `--trust` when True, in that order.
+
+    `trust` marks the workdir as a trusted workspace so `vibe` reads its
+    `AGENTS.md`; a non-empty `RunSpec.instructions` therefore requires
+    `trust=True` and is otherwise rejected with `unsupported-capability`
+    rather than projected silently. `trust=False` injects nothing.
+    """
+
+    kind: Literal["mistral-vibe"] = field(default="mistral-vibe", init=False)
+    agent: str | None = None
+    trust: bool | None = None
+
+
+@dataclass(frozen=True)
+class KiroOptions:
+    """Typed `kiro-cli chat` headless knobs. `trust_tools` is emitted as
+    `--trust-tools=<value>` and `require_mcp_startup` as a bare
+    `--require-mcp-startup` when True, in that order.
+
+    `trust_tools` is upstream's comma-separated tool-category list (e.g.
+    `"read,grep"`), passed through verbatim without NUL bytes. An empty string
+    explicitly trusts no tools; whitespace-only strings are invalid.
+    It conflicts with `permission_policy="bypass"` (`--trust-all-tools`) and
+    the pair is rejected with `invalid-options`. `require_mcp_startup=False`
+    injects nothing.
+    """
+
+    kind: Literal["kiro"] = field(default="kiro", init=False)
+    trust_tools: str | None = None
+    require_mcp_startup: bool | None = None
+
+
+@dataclass(frozen=True)
+class QoderOptions:
+    """Typed `qoder` print-mode knobs. `permission_mode` is emitted as
+    `--permission-mode <value>`.
+
+    Only the host-approval-free modes are accepted: `default`, `accept_edits`
+    and `dont_ask`. Upstream's `bypass_permissions` and `auto` are rejected
+    with `invalid-options`; the harness declares no bypass mapping for qoder.
+    Omitted: upstream configuration decides (no permission flag is injected).
+    """
+
+    kind: Literal["qoder"] = field(default="qoder", init=False)
+    permission_mode: QoderPermissionMode | None = None
+
+
+NativeOptions = ClaudeCodeOptions | CodexOptions | ClineOptions | CopilotOptions | AmpOptions | VibeOptions | KiroOptions | QoderOptions
 
 
 @dataclass
@@ -137,7 +223,9 @@ class RunSpec:
                       rejected with `unsupported-capability` when the adapter
                       has no such mapping.
     `native_options` — typed, adapter-specific knobs (`ClaudeCodeOptions`,
-                      `CodexOptions`, `CopilotOptions`). The kind must match `harness`.
+                      `CodexOptions`, `ClineOptions`, `CopilotOptions`,
+                      `AmpOptions`, `VibeOptions`, `KiroOptions`,
+                      `QoderOptions`). The kind must match `harness`.
     `executable`    — overrides the adapter's default program: a bare binary
                       name resolved on PATH or an absolute path. Relative
                       paths containing separators are rejected.
@@ -212,6 +300,10 @@ class BuildCommand:
     #: the adapter default; None when selection is delegated to a
     #: caller-supplied config file.
     model: str | None = None
+    #: Signal the runner sends the owned process group once before its
+    #: SIGKILL escalation (see `Adapter.graceful_signal`); None keeps the
+    #: default SIGTERM.
+    graceful_signal: GracefulSignal | None = None
 
 
 class ParsedOutput(TypedDict):
@@ -452,6 +544,12 @@ class Adapter(ABC):
     #: None: `RunSpec.config_file` is rejected.
     config_file_flag: str | None = None
 
+    #: Signal the runner sends this CLI's process group once when a run must
+    #: stop (timeout, cancellation, leftover cleanup) before the bounded
+    #: SIGKILL escalation. None: the default SIGTERM. Declare "SIGINT" only
+    #: when the CLI shuts down cleanly on SIGINT but not on SIGTERM.
+    graceful_signal: GracefulSignal | None = None
+
     #: Scroll-key routing policy for terminal multiplexer integrations
     #: (for example flt's TUI). Consumers can use this to decide whether
     #: scroll-direction keys (j/k, ctrl-u/d, etc.) should be forwarded
@@ -540,9 +638,9 @@ class Adapter(ABC):
         _validate_run_io(spec)
 
     def _validate_native_options(self, spec: RunSpec, native: object) -> None:
-        if type(native) not in (ClaudeCodeOptions, CodexOptions, CopilotOptions):
+        if type(native) not in (ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions, QoderOptions):
             raise HarnessError(
-                f"native_options must be ClaudeCodeOptions, CodexOptions or CopilotOptions, got {type(native).__name__}",
+                f"native_options must be ClaudeCodeOptions, CodexOptions, ClineOptions, CopilotOptions, AmpOptions, VibeOptions, KiroOptions or QoderOptions, got {type(native).__name__}",
                 code="invalid-options",
             )
         if native.kind != spec.harness or native.kind != self.native_options_kind:
@@ -559,7 +657,7 @@ class Adapter(ABC):
         elif isinstance(native, CopilotOptions):
             _validate_tool_rules("allow_tools", native.allow_tools)
             _validate_tool_rules("deny_tools", native.deny_tools)
-        else:
+        elif isinstance(native, CodexOptions):
             if native.sandbox is not None and native.sandbox not in _CODEX_SANDBOXES:
                 raise HarnessError(
                     f"invalid codex sandbox {native.sandbox!r}; expected one of {', '.join(_CODEX_SANDBOXES)}",
@@ -568,6 +666,57 @@ class Adapter(ABC):
             if native.sandbox is not None and spec.permission_policy == "bypass":
                 raise HarnessError(
                     "codex sandbox conflicts with permission_policy='bypass' (the bypass flag disables the sandbox); choose one",
+                    code="invalid-options",
+                )
+        elif isinstance(native, ClineOptions):
+            provider = native.provider
+            if provider is not None and (not isinstance(provider, str) or not provider or "\0" in provider):
+                raise HarnessError("cline provider must be None or a non-empty string without NUL bytes", code="invalid-options")
+            auto_approve = native.auto_approve
+            if auto_approve is not None and type(auto_approve) is not bool:
+                raise HarnessError(
+                    f"cline auto_approve must be None or a bool, got {type(auto_approve).__name__}",
+                    code="invalid-options",
+                )
+            if auto_approve is not None and spec.permission_policy == "bypass":
+                raise HarnessError(
+                    "cline auto_approve conflicts with permission_policy='bypass' (bypass is --auto-approve true); choose one",
+                    code="invalid-options",
+                )
+        elif isinstance(native, AmpOptions):
+            mode = native.mode
+            if mode is not None and (not isinstance(mode, str) or not mode.strip() or "\0" in mode):
+                raise HarnessError("amp mode must be None or a non-blank string without NUL bytes", code="invalid-options")
+        elif isinstance(native, VibeOptions):
+            agent = native.agent
+            if agent is not None and (not isinstance(agent, str) or not agent.strip() or "\0" in agent):
+                raise HarnessError("mistral-vibe agent must be None or a non-blank string without NUL bytes", code="invalid-options")
+            trust = native.trust
+            if trust is not None and type(trust) is not bool:
+                raise HarnessError(
+                    f"mistral-vibe trust must be None or a bool, got {type(trust).__name__}",
+                    code="invalid-options",
+                )
+        elif isinstance(native, KiroOptions):
+            trust_tools = native.trust_tools
+            if trust_tools is not None and (not isinstance(trust_tools, str) or (trust_tools != "" and not trust_tools.strip()) or "\0" in trust_tools):
+                raise HarnessError("kiro trust_tools must be None, empty (trust none), or a non-blank string without NUL bytes", code="invalid-options")
+            if trust_tools is not None and spec.permission_policy == "bypass":
+                raise HarnessError(
+                    "kiro trust_tools conflicts with permission_policy='bypass' (bypass is --trust-all-tools); choose one",
+                    code="invalid-options",
+                )
+            require_mcp_startup = native.require_mcp_startup
+            if require_mcp_startup is not None and type(require_mcp_startup) is not bool:
+                raise HarnessError(
+                    f"kiro require_mcp_startup must be None or a bool, got {type(require_mcp_startup).__name__}",
+                    code="invalid-options",
+                )
+        elif isinstance(native, QoderOptions):
+            mode = native.permission_mode
+            if mode is not None and (not isinstance(mode, str) or mode not in _QODER_PERMISSION_MODES):
+                raise HarnessError(
+                    f"invalid qoder permission_mode {mode!r}; expected one of {', '.join(_QODER_PERMISSION_MODES)}",
                     code="invalid-options",
                 )
 
@@ -587,11 +736,30 @@ class Adapter(ABC):
             native_args = ("--effort", native.effort)
         elif isinstance(native, CodexOptions) and native.sandbox is not None:
             native_args = ("--sandbox", native.sandbox)
+        elif isinstance(native, ClineOptions):
+            if native.provider is not None:
+                native_args += ("--provider", native.provider)
+            if native.auto_approve is not None:
+                native_args += ("--auto-approve", "true" if native.auto_approve else "false")
         elif isinstance(native, CopilotOptions):
             native_args = (
                 *(f"--allow-tool={rule}" for rule in native.allow_tools or ()),
                 *(f"--deny-tool={rule}" for rule in native.deny_tools or ()),
             )
+        elif isinstance(native, AmpOptions) and native.mode is not None:
+            native_args = ("--mode", native.mode)
+        elif isinstance(native, VibeOptions):
+            if native.agent is not None:
+                native_args += (f"--agent={native.agent}",)
+            if native.trust is True:
+                native_args += ("--trust",)
+        elif isinstance(native, KiroOptions):
+            if native.trust_tools is not None:
+                native_args += (f"--trust-tools={native.trust_tools}",)
+            if native.require_mcp_startup is True:
+                native_args += ("--require-mcp-startup",)
+        elif isinstance(native, QoderOptions) and native.permission_mode is not None:
+            native_args = ("--permission-mode", native.permission_mode)
         config_args: tuple[str, ...] = ()
         if spec.config_file is not None:
             config_args = (self.config_file_flag, str(Path(spec.config_file)))  # type: ignore[assignment]
@@ -618,20 +786,28 @@ class Adapter(ABC):
         args: list[str],
         env: dict[str, str] | None = None,
         directories: tuple[Path, ...] = (),
+        graceful_signal: GracefulSignal | None = None,
     ) -> BuildCommand:
         """Assemble the `BuildCommand` every builder returns. Pure.
 
         Applies `spec.executable`, the absolute cwd, env layering
         (adapter additions, then `spec.env`, then the config-home variable),
-        the planned instructions projection, artifact directories and the
-        reported model. Idempotent, so registry entrypoints re-apply it to
-        third-party output.
+        the planned instructions projection, artifact directories, the
+        reported model and the graceful signal (`graceful_signal` when given,
+        else this adapter's declaration). Idempotent, so registry entrypoints
+        re-apply it to third-party output.
         """
         cwd = absolute_workdir(spec.workdir)
         merged = {**(env or {}), **spec.env}
         if spec.config_home is not None and self.config_home_env is not None:
             merged[self.config_home_env] = str(Path(spec.config_home))
         instructions_file = self.planned_instructions_file(spec)
+        signal_name = self.graceful_signal if graceful_signal is None else graceful_signal
+        if signal_name is not None and signal_name not in GRACEFUL_SIGNALS:
+            raise HarnessError(
+                f"harness {self.name!r} declares graceful_signal {signal_name!r}; expected one of {', '.join(GRACEFUL_SIGNALS)}",
+                code="adapter-error",
+            )
         return BuildCommand(
             cmd=spec.executable or cmd,
             args=list(args),
@@ -641,6 +817,7 @@ class Adapter(ABC):
             instruction_content=spec.instructions if instructions_file is not None else None,
             directories=tuple(cwd / d for d in directories),
             model=self.reported_model(spec),
+            graceful_signal=signal_name,
         )
 
     # ---- headless contract ----------------------------------------------
@@ -675,7 +852,10 @@ class Adapter(ABC):
 
     def _finalized(self, spec: RunSpec, built: BuildCommand) -> BuildCommand:
         """Re-apply the finalizer to any builder output (no-op for built-ins)."""
-        return self.finalize_command(spec, cmd=built.cmd, args=built.args, env=built.env, directories=built.directories)
+        return self.finalize_command(
+            spec, cmd=built.cmd, args=built.args, env=built.env, directories=built.directories,
+            graceful_signal=built.graceful_signal,
+        )
 
     def run(self, spec: RunSpec) -> RunResult:
         """Full headless invocation: build_command + prepare + exec + parse_output + cleanup."""
@@ -699,6 +879,7 @@ class Adapter(ABC):
                     inactivity_timeout_seconds=spec.inactivity_timeout_seconds,
                     max_output_bytes=spec.max_output_bytes,
                     cancel=spec.cancel,
+                    graceful_signal=bc.graceful_signal or "SIGTERM",
                 )
             except (ValueError, NotImplementedError, KeyboardInterrupt, SystemExit):
                 # Validation precedes launch; control-flow exceptions follow teardown.
@@ -732,6 +913,7 @@ class Adapter(ABC):
                     inactivity_timeout_seconds=spec.inactivity_timeout_seconds,
                     max_output_bytes=spec.max_output_bytes,
                     cancel=spec.cancel,
+                    graceful_signal=bc.graceful_signal or "SIGTERM",
                 )
             except asyncio.CancelledError as error:
                 # The engine chains a teardown failure as the cancellation's cause.

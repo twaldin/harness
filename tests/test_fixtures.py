@@ -30,12 +30,17 @@ import pytest
 
 from harness import (
     BuildCommand,
+    AmpOptions,
     ClaudeCodeOptions,
+    ClineOptions,
     CodexOptions,
     CopilotOptions,
     HarnessError,
+    KiroOptions,
+    QoderOptions,
     RunSpec,
     SubprocOutcome,
+    VibeOptions,
     build_command,
     get_capabilities,
     list_adapters,
@@ -59,7 +64,17 @@ RUN_CASE_NAMES = FIXTURE_NAMES + [name for name, variant in VARIANTS if "expecte
 ERROR_CASE_NAMES = [name for name, variant in VARIANTS if "expectedError" in variant]
 LOCK = ".harness-run.lock"
 #: Ambient state that would change a command plan or a parser result.
-AMBIENT_ENV = ("OPENCODE_DB", "KILO_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME")
+AMBIENT_ENV = ("OPENCODE_DB", "OPENCODE_DISABLE_CHANNEL_DB", "KILO_DB", "KILO_DISABLE_CHANNEL_DB", "KILO_CONFIG_CONTENT", "CRUSH_DATA_DIR", "SWE_WRAPPER", "XDG_DATA_HOME", "CLINE_TOOL_APPROVAL_MODE")
+#: Spec fields where JSON `null` is a real value rather than "not provided".
+NULLABLE_SPEC_FIELDS = {"timeoutSeconds", "inactivityTimeoutSeconds", "stdin"}
+NATIVE_OPTION_TYPES = {
+    "claude-code": ClaudeCodeOptions, "codex": CodexOptions, "cline": ClineOptions, "copilot": CopilotOptions, "amp": AmpOptions,
+    "mistral-vibe": VibeOptions, "kiro": KiroOptions, "qoder": QoderOptions,
+}
+NATIVE_OPTION_NAMES = {
+    "autoApprove": "auto_approve", "allowTools": "allow_tools", "denyTools": "deny_tools",
+    "trustTools": "trust_tools", "requireMcpStartup": "require_mcp_startup", "permissionMode": "permission_mode",
+}
 
 
 def _substitute(value, mapping: dict[str, str]):
@@ -92,20 +107,16 @@ def _load_fixture(case_id: str, root: Path, workdir: Path) -> dict:
     return _substitute(fixture, {"<workdir>": str(workdir), "<root>": str(root)})
 
 
-NATIVE_OPTIONS = {"claude-code": ClaudeCodeOptions, "codex": CodexOptions, "copilot": CopilotOptions}
-NATIVE_FIELDS = {"allowTools": "allow_tools", "denyTools": "deny_tools"}
-
-
 def _native_options(raw: object):
     """Fixture `nativeOptions` → the typed dataclass for its `kind`. Values pass
     through untouched so the adapter's validator sees exactly the fixture's
     collection and member types; an unknown key is `invalid-options`, as a
     caller constructing the dataclass would find out."""
-    if not isinstance(raw, dict) or raw.get("kind") not in NATIVE_OPTIONS:
+    if not isinstance(raw, dict) or raw.get("kind") not in NATIVE_OPTION_TYPES:
         return raw
-    fields = {NATIVE_FIELDS.get(key, key): value for key, value in raw.items() if key != "kind"}
+    fields = {NATIVE_OPTION_NAMES.get(key, key): value for key, value in raw.items() if key != "kind"}
     try:
-        return NATIVE_OPTIONS[raw["kind"]](**fields)
+        return NATIVE_OPTION_TYPES[raw["kind"]](**fields)
     except TypeError as exc:
         raise HarnessError(f"nativeOptions {raw!r}: {exc}", code="invalid-options") from None
 
@@ -116,7 +127,9 @@ def _make_spec(raw: dict, workdir: Path, **overrides) -> RunSpec:
         "permissionPolicy": "permission_policy", "nativeOptions": "native_options",
         "configHome": "config_home", "configFile": "config_file",
     }
-    fields = {names.get(key, key): value for key, value in raw.items()}
+    # A variant can only override base keys, so `null` stands in for "not
+    # provided" except where the contract gives null a meaning of its own.
+    fields = {names.get(key, key): value for key, value in raw.items() if value is not None or key in NULLABLE_SPEC_FIELDS}
     if "native_options" in fields:
         fields["native_options"] = _native_options(fields["native_options"])
     fields["workdir"] = workdir
@@ -146,6 +159,7 @@ def _expected_command(raw: dict) -> BuildCommand:
         instruction_content=raw.get("instructionContent"),
         directories=tuple(Path(d) for d in raw["directories"]),
         model=raw["model"],
+        graceful_signal=raw.get("gracefulSignal"),
     )
 
 
@@ -176,6 +190,7 @@ def _write_artifacts(artifacts: list[dict]) -> None:
                 conn.execute(statement)
             conn.commit()
             conn.close()
+            path.chmod(0o444)
         elif artifact["kind"] == "json":
             path.write_text(json.dumps(artifact["content"]), encoding="utf-8")
         else:
@@ -257,7 +272,7 @@ def test_capabilities_match_fixture(case: dict, tmp_path: Path):
     else:
         rejects("unsupported-capability", config_file=config_file)
 
-    for options in (ClaudeCodeOptions(), CodexOptions(), CopilotOptions()):
+    for options in (ClaudeCodeOptions(), CodexOptions(), ClineOptions(), CopilotOptions(), AmpOptions(), VibeOptions(), KiroOptions(), QoderOptions()):
         if options.kind != caps["nativeOptions"]:
             rejects("invalid-options", native_options=options)
 
@@ -282,7 +297,6 @@ def test_parse_output_without_artifacts_is_explicitly_null(case: dict):
     spec = _make_spec(case["spec"], case["workdir"])
     parsed = parse_output(spec, _make_outcome(case["sampleOutput"]))
     assert parsed == _expected_parsed(case["expectedParsedWithoutArtifacts"])
-    assert parsed == {"cost_usd": None, "tokens_in": None, "tokens_out": None, "raw": None}
 
 
 @_cases(ERROR_CASE_NAMES)

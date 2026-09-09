@@ -1,15 +1,20 @@
 import '../src/adapters/index.js'
 import { getAdapter } from '../src/registry.js'
 
-const [adapterName, method, arg] = process.argv.slice(2)
+const [adapterName, method, arg, cutoff] = process.argv.slice(2)
 if (!adapterName || !method || !arg) {
-  console.error('usage: bun ts/scripts/session-telemetry.ts <adapter> <sessionLogPath|parseSessionLog> <arg>')
+  console.error('usage: bun ts/scripts/session-telemetry.ts <adapter> <sessionLogPath|parseSessionLog> <arg> [cutoff-ms]')
   process.exit(2)
 }
 
 const adapter = getAdapter(adapterName)
 if (method === 'sessionLogPath') {
-  const out = adapter.sessionLogPath?.(arg) ?? null
+  const cutoffMs = cutoff === undefined ? undefined : (cutoff.trim() === '' ? NaN : Number(cutoff))
+  if (cutoffMs !== undefined && !Number.isFinite(cutoffMs)) {
+    console.error('cutoff-ms must be a finite number')
+    process.exit(2)
+  }
+  const out = adapter.sessionLogPath?.(arg, cutoffMs) ?? null
   console.log(JSON.stringify(out))
   process.exit(0)
 }

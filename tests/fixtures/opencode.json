@@ -13,6 +13,8 @@
     "cmd": "opencode",
     "args": [
       "run",
+      "--format",
+      "json",
       "--dir",
       "<workdir>",
       "--model",
@@ -43,14 +45,17 @@
     "exitCode": 0,
     "durationSeconds": 30.0,
     "timedOut": false,
-    "stdout": "done",
+    "stdout": "{\"type\":\"step_finish\",\"timestamp\":1788868800000,\"sessionID\":\"ses_fixture_owned\",\"part\":{\"id\":\"prt_fixture\",\"sessionID\":\"ses_fixture_owned\",\"messageID\":\"msg_fixture\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.0123,\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n",
     "stderr": ""
   },
   "expectedParsed": {
     "costUsd": 0.0123,
     "tokensIn": 823,
     "tokensOut": 210,
-    "raw": null
+    "raw": {
+      "sessionID": "ses_fixture_owned",
+      "costSource": "reported"
+    }
   },
   "artifacts": [
     {
@@ -61,30 +66,47 @@
         "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
         "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
         "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
-        "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
-        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'latest', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
-        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
-        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'latest', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
+        "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+        "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
       ]
     }
   ],
   "expectedParsedWithoutArtifacts": {
-    "costUsd": null,
     "tokensIn": null,
     "tokensOut": null,
-    "raw": null
+    "costUsd": null,
+    "raw": {
+      "sessionID": "ses_fixture_owned",
+      "costSource": "unavailable"
+    }
   },
   "cases": [
     {
       "name": "caller-home-selects-db",
       "spec": {
-        "env": {"HOME": "<root>/selected-home"}
+        "env": {
+          "HOME": "<root>/selected-home"
+        }
       },
       "expectedCommand": {
         "cmd": "opencode",
-        "args": ["run", "--dir", "<workdir>", "--model", "openai/gpt-5.4", "split the big function"],
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
         "cwd": "<workdir>",
-        "env": {"HOME": "<root>/selected-home"},
+        "env": {
+          "HOME": "<root>/selected-home"
+        },
         "instructionsFile": "<workdir>/AGENTS.md",
         "directories": [],
         "model": "gpt-5.4"
@@ -96,8 +118,8 @@
           "sql": [
             "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
             "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
-            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
-            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0123}')"
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0123}')"
           ]
         }
       ]
@@ -113,6 +135,8 @@
         "cmd": "opencode",
         "args": [
           "run",
+          "--format",
+          "json",
           "--dir",
           "<workdir>",
           "--model",
@@ -134,9 +158,9 @@
           "sql": [
             "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
             "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
-            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
-            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
-            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'latest', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
           ]
         }
       ]
@@ -153,6 +177,8 @@
         "cmd": "opencode",
         "args": [
           "run",
+          "--format",
+          "json",
           "--dir",
           "<workdir>",
           "--model",
@@ -175,9 +201,9 @@
           "sql": [
             "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
             "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
-            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('latest', 'proj', NULL, 'latest', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
-            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'latest', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
-            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'latest', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')"
           ]
         },
         {
@@ -191,6 +217,730 @@
           ]
         }
       ]
+    },
+    {
+      "name": "missing-native-identity",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 30.0,
+        "timedOut": false,
+        "stdout": "done\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "conflicting-native-identities",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 30.0,
+        "timedOut": false,
+        "stdout": "{\"type\":\"step_finish\",\"timestamp\":1788868800000,\"sessionID\":\"ses_fixture_owned\",\"part\":{\"id\":\"prt_fixture\",\"sessionID\":\"ses_fixture_owned\",\"messageID\":\"msg_fixture\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.0123,\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n{\"type\":\"step_finish\",\"timestamp\":1788868800000,\"sessionID\":\"ses_unrelated\",\"part\":{\"id\":\"prt_fixture\",\"sessionID\":\"ses_unrelated\",\"messageID\":\"msg_fixture\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.0123,\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "native-part-identity-conflict",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 30.0,
+        "timedOut": false,
+        "stdout": "{\"type\":\"step_finish\",\"timestamp\":1788868800000,\"sessionID\":\"ses_fixture_owned\",\"part\":{\"id\":\"prt_fixture\",\"sessionID\":\"ses_unrelated\",\"messageID\":\"msg_fixture\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.0123,\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "observed-session-missing",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 30.0,
+        "timedOut": false,
+        "stdout": "{\"type\":\"step_finish\",\"timestamp\":1788868800000,\"sessionID\":\"ses_absent\",\"part\":{\"id\":\"prt_fixture\",\"sessionID\":\"ses_absent\",\"messageID\":\"msg_fixture\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.0123,\"tokens\":{\"input\":823,\"output\":210,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": {
+          "sessionID": "ses_absent",
+          "costSource": "unavailable"
+        }
+      }
+    },
+    {
+      "name": "reported-zero-cost",
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'",
+            "UPDATE message SET data=json_set(data, '$.cost', 0) WHERE session_id='ses_fixture_owned' AND json_extract(data,'$.role')='assistant'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "tokensIn": 823,
+        "tokensOut": 210,
+        "costUsd": 0,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "reported"
+        }
+      }
+    },
+    {
+      "name": "missing-cost",
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'",
+            "UPDATE message SET data=json_remove(data, '$.cost') WHERE session_id='ses_fixture_owned' AND json_extract(data,'$.role')='assistant'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "tokensIn": 823,
+        "tokensOut": 210,
+        "costUsd": null,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "unavailable"
+        }
+      }
+    },
+    {
+      "name": "partial-cost-is-unavailable",
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'",
+            "UPDATE message SET data=json_remove(data, '$.cost') WHERE id='latest-2'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "tokensIn": 823,
+        "tokensOut": 210,
+        "costUsd": null,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "unavailable"
+        }
+      }
+    },
+    {
+      "name": "mixed-model-reported-cost",
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'",
+            "UPDATE message SET data=json_set(data, '$.modelID', 'claude-sonnet-4-6', '$.providerID', 'anthropic') WHERE id='latest-2'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "costUsd": 0.0123,
+        "tokensIn": 823,
+        "tokensOut": 210,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "reported"
+        }
+      }
+    },
+    {
+      "name": "cache-counts-not-added-to-input",
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'",
+            "UPDATE message SET data=json_set(data, '$.tokens.cache.read', 1000, '$.tokens.cache.write', 500, '$.tokens.reasoning', 100) WHERE session_id='ses_fixture_owned' AND json_extract(data,'$.role')='assistant'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "costUsd": 0.0123,
+        "tokensIn": 823,
+        "tokensOut": 210,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "reported"
+        }
+      }
+    },
+    {
+      "name": "relative-db-under-data-home",
+      "spec": {
+        "env": {
+          "OPENCODE_DB": "nested/selected.db",
+          "XDG_DATA_HOME": "<root>/xdg"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "OPENCODE_DB": "nested/selected.db",
+          "XDG_DATA_HOME": "<root>/xdg"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/nested/selected.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "literal-tilde-db-override",
+      "spec": {
+        "env": {
+          "OPENCODE_DB": "~/selected.db",
+          "XDG_DATA_HOME": "<root>/xdg"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "OPENCODE_DB": "~/selected.db",
+          "XDG_DATA_HOME": "<root>/xdg"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/~/selected.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "release-channel-native-id-discovery",
+      "spec": {
+        "env": {
+          "XDG_DATA_HOME": "<root>/xdg"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "XDG_DATA_HOME": "<root>/xdg"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode-feature-a.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        },
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode-unrelated.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_unrelated', 'proj', NULL, 'ses_unrelated', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_unrelated', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_unrelated', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_unrelated', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "duplicate-id-across-channel-databases",
+      "spec": {
+        "env": {
+          "XDG_DATA_HOME": "<root>/xdg"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "XDG_DATA_HOME": "<root>/xdg"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode-feature-a.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        },
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode-feature-b.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "unavailable"
+        }
+      }
+    },
+    {
+      "name": "relative-xdg-follows-child-cwd",
+      "spec": {
+        "env": {
+          "HOME": "<root>/home",
+          "XDG_DATA_HOME": "relative-xdg"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "HOME": "<root>/home",
+          "XDG_DATA_HOME": "relative-xdg"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<workdir>/relative-xdg/opencode/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "disabled-channel-database",
+      "spec": {
+        "env": {
+          "XDG_DATA_HOME": "<root>/xdg",
+          "OPENCODE_DISABLE_CHANNEL_DB": "1"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "XDG_DATA_HOME": "<root>/xdg",
+          "OPENCODE_DISABLE_CHANNEL_DB": "1"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        },
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode-unrelated.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_unrelated', 'proj', NULL, 'ses_unrelated', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_unrelated', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_unrelated', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_unrelated', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "memory-db-never-falls-back",
+      "spec": {
+        "env": {
+          "OPENCODE_DB": ":memory:",
+          "XDG_DATA_HOME": "<root>/xdg"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "OPENCODE_DB": ":memory:",
+          "XDG_DATA_HOME": "<root>/xdg"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "unavailable"
+        }
+      }
+    },
+    {
+      "name": "empty-db-selects-native-channel-storage",
+      "spec": {
+        "env": {
+          "OPENCODE_DB": "",
+          "XDG_DATA_HOME": "<root>/xdg"
+        }
+      },
+      "expectedCommand": {
+        "cmd": "opencode",
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--dir",
+          "<workdir>",
+          "--model",
+          "openai/gpt-5.4",
+          "split the big function"
+        ],
+        "cwd": "<workdir>",
+        "env": {
+          "OPENCODE_DB": "",
+          "XDG_DATA_HOME": "<root>/xdg"
+        },
+        "instructionsFile": "<workdir>/AGENTS.md",
+        "directories": [],
+        "model": "gpt-5.4"
+      },
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/xdg/opencode/opencode-local.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "part-only-is-not-envelope-identity",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 30.0,
+        "timedOut": false,
+        "stdout": "{\"type\": \"step_finish\", \"timestamp\": 1788868800000, \"part\": {\"id\": \"prt_fixture\", \"sessionID\": \"ses_fixture_owned\", \"messageID\": \"msg_fixture\", \"type\": \"step-finish\", \"reason\": \"stop\", \"cost\": 0.0123, \"tokens\": {\"input\": 823, \"output\": 210, \"reasoning\": 0, \"cache\": {\"read\": 0, \"write\": 0}}}}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "unknown-event-type-is-not-identity",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 30.0,
+        "timedOut": false,
+        "stdout": "{\"type\": \"constructor\", \"sessionID\": \"ses_fixture_owned\"}\n",
+        "stderr": ""
+      },
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": null,
+        "costUsd": null,
+        "raw": null
+      }
+    },
+    {
+      "name": "boolean-is-not-numeric-usage",
+      "artifacts": [
+        {
+          "kind": "sqlite",
+          "path": "<root>/opencode.db",
+          "sql": [
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('stale', 'proj', NULL, 'stale', '<workdir>', 'stale', '1.14.46', 9, 10)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('stale-1', 'stale', 10, 10, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":99999,\"output\":99999,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":99.0}')",
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_fixture_owned', 'proj', NULL, 'ses_fixture_owned', '<workdir>', 'split the big function', '1.14.46', 199, 200)",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-0', 'ses_fixture_owned', 199, 199, '{\"role\":\"user\",\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\"}}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-1', 'ses_fixture_owned', 200, 200, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":523,\"output\":140,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.008}')",
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('latest-2', 'ses_fixture_owned', 201, 201, '{\"role\":\"assistant\",\"providerID\":\"openai\",\"modelID\":\"gpt-5.4\",\"tokens\":{\"input\":300,\"output\":70,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"cost\":0.0043}')",
+            "UPDATE session SET directory='<root>/other/repo', time_updated=999999 WHERE id='stale'",
+            "UPDATE message SET data=json_set(data, '$.tokens.input', json('true'), '$.cost', json('false')) WHERE id='latest-1'"
+          ]
+        }
+      ],
+      "expectedParsed": {
+        "tokensIn": null,
+        "tokensOut": 210,
+        "costUsd": null,
+        "raw": {
+          "sessionID": "ses_fixture_owned",
+          "costSource": "unavailable"
+        }
+      }
+    },
+    {
+      "name": "unicode-separator-inside-json-event",
+      "sampleOutput": {
+        "exitCode": 0,
+        "durationSeconds": 30.0,
+        "timedOut": false,
+        "stdout": "{\"type\": \"step_finish\", \"timestamp\": 1788868800000, \"sessionID\": \"ses_fixture_owned\", \"part\": {\"id\": \"prt_fixture\", \"sessionID\": \"ses_fixture_owned\", \"messageID\": \"msg_fixture\", \"type\": \"step-finish\", \"reason\": \"stop\", \"cost\": 0.0123, \"tokens\": {\"input\": 823, \"output\": 210, \"reasoning\": 0, \"cache\": {\"read\": 0, \"write\": 0}}, \"text\": \"first\u2028second\"}}\n",
+        "stderr": ""
+      }
     }
   ]
 }

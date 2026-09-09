@@ -172,7 +172,7 @@ describe('shared SDK scenarios', () => {
   for (const scenario of FIXTURE.cases) {
     test(`${scenario.name}: "${scenario.prompt}" → ${scenario.status}`, async () => {
       const box = sandbox()
-      const session = await open(box)
+      const session = await open(box, { requestTimeoutSeconds: 3 })
       expect(session.reference).toEqual({ sessionId: THREAD, sessionFile: null, workdir: box.workdir, endpoint: ENDPOINT })
       const turn = session.startTurn(scenario.prompt)
       const events = await collect(turn)
@@ -188,7 +188,7 @@ describe('shared SDK scenarios', () => {
       if (scenario.status !== 'protocol-error') expect(session.active).toBeNull()
       await session.close()
       expectOwnedResourcesReleased(box)
-    })
+    }, 10_000)
   }
 })
 

@@ -129,7 +129,6 @@ _OPENCODE_SESSION_ID = re.compile(r"ses_[0-9A-Za-z]+")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 #: Amp thread identity: `T-` plus a canonical lowercase UUID, never a prefix.
 _AMP_SESSION_ID = re.compile(r"T-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-AmpExecutor = Literal["local"]
 AmpEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 AmpVisibility = Literal["private", "unlisted", "workspace", "group"]
 _AMP_EFFORTS: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
@@ -231,7 +230,7 @@ class AmpSdkOptions:
 
     package_root: Path
     cli_path: Path
-    executor: AmpExecutor
+    executor: Literal["local"]
     mode: str
     effort: AmpEffort | None = None
     visibility: AmpVisibility | None = None
@@ -1744,7 +1743,6 @@ async def _await_startup(session: LiveSession, startup: Coroutine[object, object
 
 __all__ = [
     "AmpEffort",
-    "AmpExecutor",
     "AmpSdkOptions",
     "AmpVisibility",
     "LiveSession",

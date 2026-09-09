@@ -14,8 +14,8 @@ const CLI_VERSION = '0.0.1788883237-g0b98e3'
 const MAX_BYTES = 1_048_576
 const THREAD_ID = /^T-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const nativeSpawn = childProcess.spawn
-const text = error => error instanceof Error ? error.message : String(error)
-const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+const errorText = error => error instanceof Error ? error.message : String(error)
+const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 let selectedChild
 let protocolError = null
 
@@ -45,7 +45,7 @@ class NativeOutput extends Transform {
   #total = 0
   #jsonl
   constructor(jsonl) { super(); this.#jsonl = jsonl }
-  reject(error, callback) { protocolError ??= text(error); callback(error) }
+  reject(error, callback) { protocolError ??= errorText(error); callback(error) }
   _transform(chunk, _encoding, callback) {
     try {
       if (!this.#jsonl) {
@@ -67,7 +67,7 @@ class NativeOutput extends Transform {
         const decoded = new TextDecoder('utf-8', { fatal: true }).decode(line)
         if (!decoded.trim()) throw new Error('native SDK emitted an empty frame')
         const frame = JSON.parse(decoded)
-        if (!object(frame) || typeof frame.type !== 'string' || !frame.type) throw new Error('native SDK frame requires an object and type')
+        if (!isObject(frame) || typeof frame.type !== 'string' || !frame.type) throw new Error('native SDK frame requires an object and type')
         this.push(line)
         this.push(Buffer.from('\n'))
         this.#parts = []
@@ -87,7 +87,7 @@ function cliCommand(cliPath) {
   return /\.(m?js|cjs)$/.test(cliPath) ? { command: process.execPath, args: [cliPath] } : { command: cliPath, args: [] }
 }
 
-async function version(cliPath) {
+async function assertCliVersion(cliPath) {
   const launch = cliCommand(cliPath)
   const proc = nativeSpawn(launch.command, [...launch.args, '--version'], { stdio: ['ignore', 'pipe', 'pipe'] })
   let output = ''
@@ -177,7 +177,7 @@ async function main() {
   try {
     options = await request()
     if (process.versions.bun || Number(process.versions.node.split('.')[0]) < 22) throw new Error('Amp SDK worker requires Node >=22')
-    if (!object(options) || !['open', 'turn'].includes(options.operation) || options.executor !== 'local') throw new Error('invalid Amp SDK operation or executor')
+    if (!isObject(options) || !['open', 'turn'].includes(options.operation) || options.executor !== 'local') throw new Error('invalid Amp SDK operation or executor')
     if (options.sessionId !== null && !THREAD_ID.test(options.sessionId)) throw new Error('Amp SDK requires a full explicit thread ID')
     if (new URL(options.endpoint).origin !== options.endpoint) throw new Error('Amp endpoint must be a normalized origin')
     if (realpathSync(options.cwd) !== realpathSync(process.cwd())) throw new Error('Amp SDK worker cwd does not match request')
@@ -189,14 +189,14 @@ async function main() {
     process.env.AMP_CLI_PATH = options.cliPath
     process.env.AMP_URL = options.endpoint
     if (options.settingsFile !== undefined) process.env.AMP_SETTINGS_FILE = options.settingsFile
-    await version(options.cliPath)
+    await assertCliVersion(options.cliPath)
     guardSdkChildren(options)
     const entry = metadata.exports?.['.']?.import ?? metadata.main
     if (typeof entry !== 'string') throw new Error('Amp SDK has no import entry point')
     sdk = await import(pathToFileURL(join(options.packageRoot, entry)).href)
     if (typeof sdk.execute !== 'function' || typeof sdk.threads?.new !== 'function' || typeof sdk.threads?.markdown !== 'function') throw new Error('Amp SDK is missing its qualified API')
   } catch (error) {
-    await send({ type: 'amp_error', code: 'launch-failed', error: text(error) })
+    await send({ type: 'amp_error', code: 'launch-failed', error: errorText(error) })
     return
   }
   let lastResult = null
@@ -215,7 +215,7 @@ async function main() {
         ...(options.effort === undefined ? {} : { effort: options.effort }),
         ...(options.settingsFile === undefined ? {} : { settingsFile: options.settingsFile }) }
       for await (const event of sdk.execute({ prompt: options.prompt, options: nativeOptions })) {
-        if (!object(event) || typeof event.type !== 'string' || !event.type) throw new Error('Amp SDK yielded an invalid native event')
+        if (!isObject(event) || typeof event.type !== 'string' || !event.type) throw new Error('Amp SDK yielded an invalid native event')
         if (event.session_id !== undefined && event.session_id !== options.sessionId) throw new Error('Amp SDK returned a different thread ID')
         if (event.type === 'system' && event.subtype === 'init') {
           if (initialized || event.session_id !== options.sessionId || typeof event.cwd !== 'string' || realpathSync(event.cwd) !== realpathSync(options.cwd)) throw new Error('Amp SDK init identity/workdir mismatch')
@@ -230,9 +230,9 @@ async function main() {
       }
       if (!initialized || !lastResult) throw new Error('Amp SDK ended without init and terminal result')
     }
-  } catch (error) { failure = text(error) }
+  } catch (error) { failure = errorText(error) }
   if (selectedChild && !failure) {
-    try { await selectedChild.closed } catch (error) { failure ??= text(error) }
+    try { await selectedChild.closed } catch (error) { failure ??= errorText(error) }
   }
   const exitCode = selectedChild?.exitCode ?? null
   const signal = selectedChild?.signal ?? null
@@ -242,5 +242,5 @@ async function main() {
 
 main().then(
   () => process.stdout.end(() => process.stderr.end(() => process.exit(0))),
-  error => { process.stderr.end(`Amp SDK worker: ${text(error)}\n`, () => process.exit(1)) },
+  error => { process.stderr.end(`Amp SDK worker: ${errorText(error)}\n`, () => process.exit(1)) },
 )

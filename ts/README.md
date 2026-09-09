@@ -263,6 +263,9 @@ Copilot also reports null token/USD totals, retaining its native JSONL events in
 `raw`. It uses `@github/copilot`, not `gh copilot`, and exposes explicit
 `{kind: 'copilot', allowTools: ['shell(git status)'], denyTools: ['write']}`.
 See [setup and coverage](../ADAPTER-MATRIX.md#copilot).
+The optional Copilot SDK backend is **deferred/unsupported** after native
+forced-cleanup qualification; the CLI adapter remains shipped. See the
+[SDK finding and version limits](../ADAPTER-MATRIX.md#copilot-sdk-unsupported-after-qualification).
 
 Amp runs local execute mode, not remote orbs. Omit `model`; use
 `{kind: 'amp', mode: 'low'}` for upstream mode selection and `configFile` for

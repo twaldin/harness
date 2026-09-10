@@ -59,6 +59,9 @@ from harness._instructions import (
 )
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.sessions import (
+    FactoryDroidAutonomy,
+    FactoryDroidCallback,
+    FactoryDroidOptions,
     LiveSession,
     OmpSdkOptions,
     OpenCodeApprovalResponse,
@@ -90,8 +93,10 @@ __all__ = [
     "CodexOptions",
     "CopilotOptions",
     "ErrorCode",
+    "FactoryDroidAutonomy",
+    "FactoryDroidCallback",
+    "FactoryDroidOptions",
     "GracefulSignal",
-    "HarnessError",
     "InstallMeta",
     "InstructionProjection",
     "KiroOptions",

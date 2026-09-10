@@ -64,9 +64,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 }
 
-/** `<FACTORY_HOME_OVERRIDE or ~>/.factory/sessions`; the override replaces `~`, not `~/.factory`. */
-export function factorySessionsDir(): string {
-  return join(process.env['FACTORY_HOME_OVERRIDE'] || process.env['HOME'] || homedir(), '.factory', 'sessions')
+/** `<FACTORY_HOME_OVERRIDE or ~>/.factory/sessions` under `env` (the caller's process env by default); the override replaces `~`, not `~/.factory`. */
+export function factorySessionsDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(env['FACTORY_HOME_OVERRIDE'] || env['HOME'] || homedir(), '.factory', 'sessions')
 }
 
 /** `-` + cwd without leading/trailing slashes and every `/` run replaced by `-` (POSIX rule). */

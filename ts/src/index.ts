@@ -10,7 +10,8 @@ export type {
 export type { InstructionProjection, ProjectInstructionsOptions, PreparedCommand } from './instructions.js'
 export type { RunSubprocessOptions } from './subproc.js'
 export type {
-  SessionBackend, JsonObject, SessionReference, OmpSdkOptions, OpenCodeOptions, OpenCodeAuth, OpenCodeApprovalResponse, SessionSpec,
+  SessionBackend, JsonObject, SessionReference, OmpSdkOptions, OpenCodeOptions, OpenCodeAuth, OpenCodeApprovalResponse,
+  FactoryDroidOptions, FactoryDroidCallback, FactoryDroidAutonomy, SessionSpec,
   SessionCapabilities, SessionTurnStatus, SessionEvent, SessionTurnResult, SessionTurn,
 } from './sessions.js'
 export { HarnessError, validateRunSpec } from './base.js'

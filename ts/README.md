@@ -102,6 +102,20 @@ provider; those checks have not run. See the
 [full contract](../SPEC.md#caller-owned-opencode-http-sessions), including
 single-writer and auto-compaction limits.
 
+## Optional Factory Droid SDK backend
+
+Install the optional peer `@factory/droid-sdk@0.9.1`, select an installed
+**Droid 0.213.0** CLI and supply your selected `FACTORY_API_KEY`.
+`openSession({ harness: 'factory-droid', backend: 'sdk', workdir })` owns one
+local CLI through the native SDK's public transport API under Node or Bun.
+It does not use the OMP bridge, install a CLI or change global configuration.
+
+`factoryDroid` exposes native autonomy, disabled tools and permission/question
+callbacks. Follow-up, exact resume and explicit interruption are supported;
+breaking event iteration does not cancel a turn. See the
+[paired examples](../README.md#optional-factory-droid-sdk-sessions) and
+[contract and qualification limits](../SPEC.md#optional-factory-droid-sdk-sessions).
+
 ## API reference
 
 ### `run(spec: RunSpec): Promise<RunResult>`

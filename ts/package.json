@@ -1,6 +1,6 @@
 {
   "name": "@twaldin/harness-ts",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "type": "module",
   "description": "Harness: CLI command construction and output parsing for AI coding agents",
   "main": "./dist/index.js",
@@ -17,7 +17,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=node && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && tsc -p tsconfig.build.json",
+    "build": "bun build src/index.ts --outdir=dist --target=node --external @factory/droid-sdk/node && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && tsc -p tsconfig.build.json",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test"
@@ -25,7 +25,14 @@
   "dependencies": {
     "better-sqlite3": "^12.0.0"
   },
+  "peerDependencies": {
+    "@factory/droid-sdk": "0.9.1"
+  },
+  "peerDependenciesMeta": {
+    "@factory/droid-sdk": { "optional": true }
+  },
   "devDependencies": {
+    "@factory/droid-sdk": "0.9.1",
     "@types/better-sqlite3": "^7.6.0",
     "@types/bun": "latest",
     "typescript": "^5.0.0"

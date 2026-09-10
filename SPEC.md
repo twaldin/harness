@@ -1335,6 +1335,15 @@ Other pairings reject with `unsupported-backend`, except the separately
 documented OMP/Amp/Claude/Cline/Factory Droid SDK and caller-owned OpenCode/OpenHands sessions below. Unknown
 names still produce `unknown-harness`.
 
+Pi's optional SDK backend is **deferred/unsupported** in both languages:
+`get_session_capabilities("pi", "sdk")` / `getSessionCapabilities("pi", "sdk")`
+and SDK session opens reject with `unsupported-backend`. No SDK dependency
+or Python SDK bridge is enabled. The
+[Pi SDK qualification finding](ADAPTER-MATRIX.md#pi-sdk-unsupported-after-qualification)
+records the 0.85.1 native-tool forced-cleanup failure and its platform/provider
+limits. This does not alter CLI compatibility, RPC literal-text semantics or
+the cleanup contract. Findings completion is not SDK availability.
+
 ### Session inputs and capabilities
 
 `SessionSpec` requires `harness`, `workdir` and explicit `backend: "rpc"`.

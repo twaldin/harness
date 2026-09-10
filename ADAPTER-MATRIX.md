@@ -830,6 +830,52 @@ The adapter prefers each `agent_end.messages` snapshot over that cycle's per-mes
 
 Full event reference: [Pi JSON event contract](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md). `--mode json` is noninteractive; no built-in permission popup/sandbox is implied. Project trust is a separate upstream setting, not Harness bypass.
 
+### Pi SDK: unsupported after qualification
+
+**Decision — [TWA-84](https://linear.app/twaldin/issue/TWA-84), September 10,
+2026:** defer the optional Pi SDK backend rather than weaken owned-tool cleanup.
+The existing Pi CLI and controlled RPC paths remain shipped and unchanged.
+Both languages reject `harness="pi", backend="sdk"` with `unsupported-backend`;
+no SDK dependency, embedding API or Python SDK bridge is enabled.
+
+The inspected and tested SDK is **`@earendil-works/pi-coding-agent` 0.85.1**,
+whose [package metadata](https://registry.npmjs.org/@earendil-works/pi-coding-agent/0.85.1)
+requires **Node >=22.19.0**. This is a qualification pin, not a supported
+Harness SDK version range. The [official SDK](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md)
+is a JavaScript/TypeScript interface; no native Python SDK is claimed.
+Any future Python integration would need a separately qualified bridge with
+equivalent semantics or explicit unsupported capabilities.
+
+**Native-tool evidence:** on **macOS arm64 / Node 26.6.0**, an isolated install
+with disposable configuration exercised the unmodified exported
+`createBashTool` directly. It launched a finite synthetic command in a separate
+process group. After STOP of the SDK host, TERM of its owned group, a
+**600 ms** grace and KILL, the host exited by SIGKILL but the tool completed a
+delayed write. The command did not detach itself. All recorded probe processes
+subsequently exited and were verified absent; raw operational evidence stays
+private.
+
+At the npm release's source revision, the
+[native bash tool](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/src/core/tools/bash.ts)
+uses detached process creation;
+[shell cleanup](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/coding-agent/src/utils/shell.ts)
+tracks those children inside the SDK process. That tracking cannot run after
+the host is killed. The general
+[process-group boundary](SPEC.md#ownership-and-execution) is unchanged; it is
+not used to waive native-tool containment for a new SDK backend.
+
+**Not qualified:** a full Harness SDK session, Python/Bun/packaged-Node SDK
+conformance, Linux, the Node 22 runtime floor, other SDK versions, SDK
+events/identity/resume or successful native abort/dispose. No model/provider
+request or credentials were used. Existing CLI/RPC synthetic-provider evidence
+above and in the [RPC contract](SPEC.md#controlled-rpc-sessions) is separate.
+
+Reconsider only after reliable native containment satisfies the
+[session implementation gates](SPEC.md#backend-and-session-implementation-gates).
+Harness-owned execution replacement, disabled native tools, or weaker cleanup
+are not enabled by this finding. Completion of TWA-84 records this unsupported
+qualification; it does not make SDK support available to downstream consumers.
+
 ---
 
 ## crush

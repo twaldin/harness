@@ -6,6 +6,18 @@ protocol integration paths. CLI discovery was checked **2026-09-07**; the
 **2026-09-08**. Source qualification is not installed-runtime or authenticated
 provider success; each section states its evidence boundary.
 
+**Reconciliation note (2026-09-10).** The [SDK/protocol survey](#sdk-and-protocol-backends)
+below is a dated snapshot, not a support list, and several paths it scoped have
+since landed: OMP, Claude Code, Amp, Cline and Factory Droid SDK sessions plus
+caller-owned OpenCode and OpenHands server sessions. Codex app-server, Copilot
+SDK and Pi SDK were qualified and are **unsupported**. Shipped backends, with
+their pinned versions, optional installs, auth prerequisites and evidence
+ceilings, are catalogued in
+[ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-session-backends);
+[SPEC](SPEC.md#backend-and-session-implementation-gates) stays authoritative.
+Entries below are preserved as intake evidence and never promote a candidate
+by themselves.
+
 ## Qualification policy
 
 - Prefer maintained agents with a documented noninteractive executable. Record
@@ -32,6 +44,13 @@ See [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md#shipped-versus-planned) for their actu
 commands, metrics and known language skew. Fixtures do not establish current
 upstream compatibility.
 
+Shipped live-session backends are likewise **not** wanted work. Eight
+`(harness, backend)` pairs ship: `pi` rpc; `omp`, `claude-code`, `amp`,
+`cline` and `factory-droid` sdk; `opencode` rpc; and the session-only
+`openhands` rpc, which registers no CLI adapter and therefore does not change
+the twenty-six names above. See the
+[session-backend catalog](ADAPTER-MATRIX.md#shipped-session-backends).
+
 - `qwen`, `continue-cli`, `pi`, `factory-droid`, `kilo`, `crush` and `openclaude`
   have shipped alongside the original six; do not create duplicate additions.
 - `crush` already constructs `crush run` and reads SQLite metrics. The old
@@ -56,8 +75,11 @@ upstream compatibility.
   Pi CLI and controlled RPC now use `@earendil-works/pi-coding-agent`; see
   [current qualification](SPEC.md#controlled-rpc-sessions). Historical Pi
   compatibility remains with [TWA-71](https://linear.app/twaldin/issue/TWA-71);
-  Pi SDK [TWA-84](https://linear.app/twaldin/issue/TWA-84) stays deferred behind
-  that unanswered decision. Do not create another Pi owner.
+  Pi SDK [TWA-84](https://linear.app/twaldin/issue/TWA-84) was qualified on
+  September 10, 2026 and is **unsupported**: native bash tools survived owned
+  teardown, so `backend="sdk"` rejects in both languages. See the
+  [qualification record](ADAPTER-MATRIX.md#pi-sdk-unsupported-after-qualification).
+  Do not create another Pi owner.
 - Oh My Pi (`omp`) now ships in both languages through [TWA-70](https://linear.app/twaldin/issue/TWA-70).
   See [its adapter reference](ADAPTER-MATRIX.md#omp-oh-my-pi) for current
   installation, headless behavior and qualification limits. Optional SDK sessions
@@ -66,14 +88,20 @@ upstream compatibility.
   OMP RPC remains unsupported.
 - Cline CLI now ships in both languages through [TWA-75](https://linear.app/twaldin/issue/TWA-75).
   See [setup, local ownership and qualification limits](ADAPTER-MATRIX.md#cline).
-  It uses standalone foreground JSON and SIGINT teardown; controlled sessions,
-  detached hub execution and optional SDK qualification (TWA-86) remain separate.
+  It uses standalone foreground JSON and SIGINT teardown. Local Cline **SDK**
+  sessions have since shipped separately through the owned Node >=22.14 bridge
+  ([contract](SPEC.md#optional-cline-sdk-sessions)); detached hub execution and
+  native ACP remain unsupported.
 - GitHub Copilot CLI now ships in both languages through [TWA-76](https://linear.app/twaldin/issue/TWA-76).
   See [setup, native permissions and dated coverage](ADAPTER-MATRIX.md#copilot);
   this is the current `@github/copilot` agent, not the old `gh copilot` helper.
+  The Copilot **SDK** was qualified and is unsupported; see the
+  [containment record](ADAPTER-MATRIX.md#copilot-sdk-unsupported-after-qualification).
 - Amp local execute mode now ships in both languages through [TWA-78](https://linear.app/twaldin/issue/TWA-78).
   See [setup, model limitations and dated coverage](ADAPTER-MATRIX.md#amp);
-  remote orbs and runners are not exposed.
+  remote orbs and runners are not exposed. Amp **SDK** thread sessions have
+  since shipped through one isolated Node >=22 worker per operation
+  ([contract](SPEC.md#optional-amp-sdk-sessions)).
 - Cursor CLI now ships in both languages through [TWA-77](https://linear.app/twaldin/issue/TWA-77).
   See [setup, permissions and dated qualification](ADAPTER-MATRIX.md#cursor).
   Cloud workers, persist/resume, ACP and SDK execution remain unsupported.
@@ -140,6 +168,14 @@ SDK/API behavior, full Canvas startup or provider success. The maintained
 [SDK and Agent Server](https://docs.openhands.dev/sdk/getting-started) are
 evaluated below; connecting to a caller-owned server never grants ownership
 of that server or its containers.
+
+**Superseded in part (2026-09-10):** the Agent Server path evaluated below has
+since shipped as the session-only `openhands` / `rpc` backend against a
+caller-owned 1.45.0 deployment. That does not revive the legacy CLI or Canvas:
+no `openhands` CLI adapter exists, `getAdapter("openhands")` remains
+`unknown-harness`, and Harness still never provisions, starts, deletes or
+shuts down the caller's server or its containers. See the
+[session contract](SPEC.md#caller-owned-openhands-agent-server-sessions).
 
 ## New source-qualified discoveries
 
@@ -233,6 +269,17 @@ version. This dated survey is not a current support list; later qualification
 decisions are recorded below, and [SPEC](SPEC.md#backend-and-session-implementation-gates)
 defines shipped backends. CLI behavior stays separate.
 
+**What has since landed (2026-09-10).** The prediction held — every shipped
+backend needed exactly the session/permission mapping, bounded disposal and
+cross-language qualification described here — but this is no longer a list of
+future work. OMP, Claude Code, Amp, Cline and Factory Droid SDK sessions and
+caller-owned OpenCode and OpenHands server sessions now ship with pinned
+versions and explicit options; Codex app-server, Copilot SDK and Pi SDK were
+qualified and rejected. Read
+[the shipped catalog](ADAPTER-MATRIX.md#shipped-session-backends) for what is
+supported today; the rows and analysis below remain the original intake
+evidence for how each was scoped.
+
 The [implementation gates](SPEC.md#backend-and-session-implementation-gates)
 remain authoritative. An SDK may wrap a subprocess, embed an agent, or only
 connect to a server; these are not interchangeable. A protocol library is not
@@ -258,6 +305,16 @@ selected server, not in the caller's local `workdir`.
 | `opencode`: [JS/TS SDK](https://opencode.ai/docs/sdk/), [HTTP/OpenAPI server](https://opencode.ai/docs/server/) | `@opencode-ai/sdk` source manifest **1.18.29**; JS/TS client with `fetch`; no native Python SDK qualified | Small generated client plus cross-spawn, but a full agent server is still required. `createOpencode()` starts a server; `createOpencodeClient({baseUrl})` only attaches. Direct HTTP/SSE can provide Python parity without a JS bridge. Client runtime floor must be qualified at implementation. |
 | `factory-droid`: [Python SDK](https://docs.factory.ai/sdk/python.md), [TS SDK](https://docs.factory.ai/sdk/typescript.md) | `droid-sdk` Python source **0.4.0**, Python >=3.10; published `@factory/droid-sdk` **0.9.1**, Node >=18 | Local CLI process in both; TS also has daemon/browser clients. Python core uses Pydantic; TS adds MCP, WebSocket, Zod and OpenTelemetry dependencies. Optional in-process MCP servers add resources. The TS examples repository still pins **0.7.0**: not the current published version. |
 | `amp`: [SDK docs](https://ampcode.com/docs/sdk), [npm metadata](https://registry.npmjs.org/@ampcode/sdk/latest) | Docs offer Python and TS; TS npm **0.1.0-20260823161614-g3631dc6**, Node >=18. Current Python release/runtime floor not qualified. | SDK drives the CLI; TS depends on Zod and `@ampcode/cli: latest`. Docs describe Neo, but observed npm metadata declares `releaseTag: legacy`: resolve channel compatibility before implementation. Remote orb/runner execution is excluded. |
+
+**Row status as of 2026-09-10** (versions in the table stay as observed on
+September 8, and a shipped pin can differ from them): `claude-code`, `amp`,
+`cline` and `factory-droid` SDK sessions ship, as do caller-owned `opencode`
+HTTP sessions and OpenHands Agent Server sessions — the latter over the direct
+server protocol, not the alpha TypeScript client. Codex (both SDK and
+app-server) and Copilot SDK are qualified and unsupported. OpenHands never
+became a CLI adapter identity. The
+[catalog](ADAPTER-MATRIX.md#shipped-session-backends) carries the versions,
+runtimes and optional installs actually qualified.
 
 Package/version anchors for Claude:
 [TS 0.3.263](https://github.com/anthropics/claude-agent-sdk-typescript/releases/tag/v0.3.263),
@@ -446,9 +503,23 @@ Python/TypeScript behavior in one PR and the common identity/permissions/cleanup
 | [TWA-99](https://linear.app/twaldin/issue/TWA-99) | Factory Droid: local SDK runtime pair, permission/result and iterator-cleanup parity; no Computers/Missions. |
 | [TWA-97](https://linear.app/twaldin/issue/TWA-97) | Amp: resolve release-channel/runtime parity first; local executor only. |
 
-Pi SDK [TWA-84](https://linear.app/twaldin/issue/TWA-84) remains deferred behind
-TWA-71's compatibility decision. OMP SDK [TWA-85](https://linear.app/twaldin/issue/TWA-85)
-retains its existing owner. Their native SDKs are TypeScript agent runtimes
+**Landed since that snapshot (2026-09-10):** the Amp, OpenCode, Factory Droid,
+Claude Agent SDK, Cline and OpenHands rows above describe backends that now
+ship, each with its own contract and dated evidence in
+[SPEC](SPEC.md#backend-and-session-implementation-gates) and the
+[catalog](ADAPTER-MATRIX.md#shipped-session-backends). They stay here as the
+bounded decisions that scoped that work, not as open intake. The Codex
+(TWA-103, deferred to TWA-107) and Copilot (TWA-105) rows remain deferred
+behind their unsupported-qualification records.
+
+Pi SDK [TWA-84](https://linear.app/twaldin/issue/TWA-84) was qualified on
+September 10, 2026 and is **unsupported after qualification**, not open intake;
+see the [record](ADAPTER-MATRIX.md#pi-sdk-unsupported-after-qualification).
+Reliable native containment remains deferred in undispatched Backlog
+[TWA-108](https://linear.app/twaldin/issue/TWA-108); completing TWA-84 did not
+dispatch that follow-up or enable Pi SDK support.
+OMP SDK [TWA-85](https://linear.app/twaldin/issue/TWA-85) has since shipped
+through the owned Bun bridge worker. Their native SDKs are TypeScript agent runtimes
 ([Pi SDK](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md),
 [OMP SDK](https://github.com/can1357/oh-my-pi/blob/main/docs/sdk.md)); Python is
 a separately qualified bridge/protocol path, not a native SDK. Neither is

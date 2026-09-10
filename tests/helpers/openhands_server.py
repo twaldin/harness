@@ -8,6 +8,7 @@ session_socket.py, event_service.py, models.py, conversation/state.py at
 49ea74587c376b90700f6eff128c3d9b57585d27); only stdlib is used.
 
 stdin bytes: 0x01 = "partial output consumed" (races), 0x02 = release hanging runs.
+0x03 = "terminal state consumed" before a deliberately failed interrupt request.
 """
 from __future__ import annotations
 
@@ -123,6 +124,7 @@ class Peer:
         self.partial_consumed = asyncio.Event()
         self.terminal_consumed = asyncio.Event()
         self.release = asyncio.Event()
+        self.closing = False
 
     # ---- HTTP -----------------------------------------------------------------
 
@@ -381,8 +383,16 @@ class Peer:
 
     # ---- routing --------------------------------------------------------------
 
-    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    def accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        # StreamReaderProtocol calls this synchronously; an async callback can
+        # start after EOF shutdown has already snapshotted the owned writers.
+        if self.closing:
+            writer.close()
+            return
         self.connections.add(writer)
+        self.spawn(self.handle(reader, writer))
+
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
             raw = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
             lines = raw.decode("latin-1").split("\r\n")
@@ -580,7 +590,7 @@ async def main():
     if not 0 < args.lifetime <= 120:
         parser.error("lifetime must be within (0, 120] seconds")
     peer = Peer(args.variant, args.trace)
-    server = await asyncio.start_server(peer.handle, "127.0.0.1", 0)
+    server = await asyncio.start_server(peer.accept, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     print(f"http://127.0.0.1:{port}", flush=True)
     eof = asyncio.Event()
@@ -606,14 +616,12 @@ async def main():
         pass
     finally:
         loop.remove_reader(sys.stdin.fileno())
+        peer.closing = True
         server.close()
-        for task in tuple(peer.tasks):
+        tasks = tuple(peer.tasks)
+        for task in tasks:
             task.cancel()
-        for task in tuple(peer.tasks):
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
+        await asyncio.gather(*tasks, return_exceptions=True)
         for writer in tuple(peer.connections):
             writer.close()
         for writer in tuple(peer.connections):

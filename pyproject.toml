@@ -1,6 +1,6 @@
 [project]
 name = "harness-cli"
-version = "0.3.18"
+version = "0.3.19"
 description = "Unified Python interface for invoking AI coding-agent CLIs (claude-code, opencode, codex, gemini, aider, swe-agent) as subprocesses."
 requires-python = ">=3.10"
 authors = [{ name = "Tim Waldin" }]
@@ -12,11 +12,13 @@ dependencies = [
 
 [project.optional-dependencies]
 opencode = ["httpx>=0.28,<0.29"]
+claude-sdk = ["claude-agent-sdk==0.2.152"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.21",
     "pytest-mock>=3.10",
     "httpx>=0.28,<0.29",
+    "claude-agent-sdk==0.2.152",
 ]
 
 [project.scripts]

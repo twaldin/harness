@@ -79,6 +79,11 @@ ownership, errors, telemetry and session/backend requirements. These APIs
 describe the source tree; published packages are not updated by a documentation
 or implementation merge.
 
+Codex app-server sessions remain **deferred/unsupported** after native
+tool-containment qualification; the existing Codex CLI adapter is unchanged.
+Neither official Codex SDK is enabled as a Harness session backend. See the
+[qualification finding and version limits](ADAPTER-MATRIX.md#codex-app-server-unsupported-after-qualification).
+
 ### Subprocess lifecycle
 
 Python `run()` blocks; Python `run_async()` and TypeScript `run()` / `runAsync()`
@@ -243,6 +248,86 @@ and exact native resume; concurrent turns and approval responses are unsupported
 No package/binary/backend fallback occurs. See the
 [full SDK contract](SPEC.md#optional-omp-sdk-sessions) for configuration
 precedence, disposal bounds, native event semantics and qualification limits.
+
+### Optional Claude Agent SDK sessions
+
+Select `harness="claude-code", backend="sdk"` explicitly. Python uses
+**`claude-agent-sdk==0.2.152` with Claude Code 2.1.259**; TypeScript uses
+**`@anthropic-ai/claude-agent-sdk@0.3.263` with Claude Code 2.1.263**.
+Install the Python `harness-cli[claude-sdk]` extra or the TypeScript SDK
+separately. Harness checks these exact pairs and never installs or falls back.
+Ordinary CLI imports and capability queries do not load either SDK.
+
+```python
+from harness import ClaudeSdkOptions, SessionSpec, open_session
+
+async def review(workdir, package_root, cli_path, config_dir):
+    session = await open_session(SessionSpec(
+        harness="claude-code", backend="sdk", workdir=workdir,
+        model="claude-sonnet-4-6",
+        claude_sdk=ClaudeSdkOptions(
+            package_root=package_root, cli_path=cli_path,
+            config_dir=config_dir, setting_sources=(),
+        ),
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            if event.type == "claude_permission":
+                await session.respond_approval(event.request_id, "reject")
+            print(event.type)
+        print((await turn.result).status)
+        return session.reference
+    finally:
+        await session.close()
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+async function review(workdir: string, packageRoot: string, cliPath: string, configDir: string) {
+  const session = await openSession({
+    harness: 'claude-code', backend: 'sdk', workdir,
+    model: 'claude-sonnet-4-6',
+    claudeSdk: { packageRoot, cliPath, configDir, settingSources: [] },
+  })
+  try {
+    const turn = session.startTurn('Review this repository without editing files.')
+    for await (const event of turn.events) {
+      if (event.type === 'claude_permission') {
+        await session.respondApproval(event.requestId!, 'reject')
+      }
+      console.log(event.type)
+    }
+    console.log((await turn.result).status)
+    return session.reference
+  } finally {
+    await session.close()
+  }
+}
+```
+
+All four paths are absolute. `packageRoot` is the SDK package directory, not
+its parent: Python `site-packages/claude_agent_sdk`, TypeScript
+`node_modules/@anthropic-ai/claude-agent-sdk`. `cliPath` selects the native CLI;
+`executable` instead selects the worker interpreter (Python's current interpreter,
+or TypeScript's current Node/Bun runtime by default).
+
+`settingSources` explicitly selects native `user`, `project`, `local` settings;
+empty does not disable managed policy or all native configuration/authentication.
+`settingsFile` optionally selects native `--settings`. Projected `instructions`
+require the `project` source. These options and the no-edit prompt are **not a
+sandbox**; existing native permission rules remain authoritative. Only
+`"once"` / `"reject"` replies are supported; no implicit permission bypass.
+
+Follow-up, interrupt receipts and exact transcript-path resume use the shared
+session API. The UUID is selected at open; the native transcript path remains
+null until a hook reports it, and persistence may be lazy. Native result errors,
+unknown events and fields remain in `raw`. Cumulative `modelUsage` and
+`total_cost_usd` estimates must not be summed across results or labelled billed
+cost. See the [full Claude SDK contract](SPEC.md#optional-claude-agent-sdk-sessions)
+for the intentional Python internal-protocol dependency, disposal bounds,
+unsupported native features and separate synthetic/native/provider evidence.
 
 ### Optional Amp SDK sessions
 
@@ -677,6 +762,7 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 - `cline` uses the standalone npm `cline` CLI, not the VS Code extension or background hub. It selects the local runtime and SIGINT teardown, uses caller-selected provider/model settings, and parses terminal JSON usage. Upstream defaults to auto-approval; `ClineOptions(auto_approve=False)` / `{ kind: 'cline', autoApprove: false }` explicitly requires approval, which is denied with stdin closed. See [setup, capabilities and qualification limits](ADAPTER-MATRIX.md#cline).
 - `goose` uses the official native CLI's `run --quiet --output-format stream-json`. Model/provider/extensions remain caller-selected; explicit bypass sets child `GOOSE_MODE=auto`. Usage comes from the final `complete` event, and provider errors can still exit zero. Configured stdio MCP extensions use separate process groups and can survive cancellation on macOS; see [setup and qualification limits](ADAPTER-MATRIX.md#goose).
 - `copilot` uses the current official `@github/copilot` CLI, not `gh copilot`. It preserves native model/auth selection and JSONL events, supports explicit `CopilotOptions` tool allow/deny rules, and leaves token/USD totals null. See [setup, subscription requirements and qualification limits](ADAPTER-MATRIX.md#copilot).
+  The optional Copilot SDK backend is **deferred/unsupported** after native forced-cleanup qualification; this does not remove the CLI adapter. See the [SDK finding and version limits](ADAPTER-MATRIX.md#copilot-sdk-unsupported-after-qualification).
 - `amp` runs local execute mode with JSONL events, not remote orbs. Direct model selection rejects; `AmpOptions.mode` selects an upstream mode and `configFile` selects user settings. Thread identity and native failures stay in raw; provider errors can exit zero. See [permissions, accounting and coverage](ADAPTER-MATRIX.md#amp).
 - `mistral-vibe` uses official Python package `mistral-vibe`, executable `vibe`, with completed-history JSONL output. Models remain native config aliases, and workspace trust is explicit via `VibeOptions`; instructions require that opt-in. See [setup, permissions and coverage](ADAPTER-MATRIX.md#mistral-vibe).
 - `cursor` uses the standalone Cursor `agent` CLI in print/stream-JSON mode, not the editor's `cursor` launcher. Model/auth/config remain native; only explicit bypass adds `--force`. See [permissions, optional usage and qualification limits](ADAPTER-MATRIX.md#cursor).

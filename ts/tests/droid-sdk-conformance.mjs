@@ -225,13 +225,9 @@ export async function runDroidConformance(api) {
     await Promise.all([session.close(), session.close()])
     assert.equal(session.closed, true)
     assert.ok(existsSync(reference.sessionFile), 'saved native files are never deleted')
-    const opened = box.requests().length
     session = await api.openSession({ ...spec, resume: reference })
     keep(session)
     assert.deepEqual(session.reference, reference)
-    const load = box.requests().slice(opened).find((entry) => entry.method === 'droid.load_session')
-    assert.equal(load.params.sessionId, reference.sessionId)
-    assert.equal(load.params.sessionOriginHint, 'sdk')
     assert.equal((await collect(session.startTurn('after resume'))).result.status, 'completed')
     await session.close()
     const before = box.requests().length

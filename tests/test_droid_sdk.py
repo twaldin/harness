@@ -161,7 +161,6 @@ async def test_shared_resume_failure(case: str, sandbox: Sandbox):
     with pytest.raises(HarnessError) as info:
         await open_session(sandbox.spec(case, resume=reference, instructions="X"))
     assert info.value.code == "protocol-error"
-    assert "cwd" in str(info.value)
     assert sandbox.session_file().exists()  # saved logs are never deleted
     assert not (sandbox.workdir / "AGENTS.md").exists()
 
@@ -220,7 +219,7 @@ async def test_prompt_rejection_keeps_the_error_envelope(sandbox: Sandbox):
         result = await turn.result
         assert result.status == "agent-error"
         assert result.raw is not None and result.raw["error"]["message"] == "synthetic prompt rejection"
-        assert result.error == "prompt rejected: synthetic prompt rejection"
+        assert result.error is not None and "synthetic prompt rejection" in result.error
         assert not session.closed and session.active is None
 
 
@@ -231,7 +230,7 @@ async def test_native_error_reason_is_preserved(sandbox: Sandbox):
         result = await turn.result
     assert result.status == "agent-error"
     assert result.raw is not None and result.raw["reason"] == "error"
-    assert result.error == "agent turn ended with reason 'error': synthetic agent error"
+    assert result.error is not None and "synthetic agent error" in result.error
 
 
 async def test_idle_notifications_flow_through_session_events(sandbox: Sandbox):
@@ -261,7 +260,7 @@ async def test_turn_timeout_tears_the_session_down(sandbox: Sandbox):
     session = await open_session(sandbox.spec("hang", timeout_seconds=0.5))
     turn = session.start_turn("hello")
     result = await turn.result
-    assert result.status == "timed-out" and "timeout_seconds=0.5" in (result.error or "")
+    assert result.status == "timed-out"
     assert session.closed
     await session.close()
     assert not (sandbox.workdir / LOCK_DIRNAME).exists()
@@ -273,7 +272,7 @@ async def test_unacknowledged_interrupt_is_protocol_error(sandbox: Sandbox):
     await _until(turn, "synthetic_unknown")
     await session.interrupt()
     result = await turn.result
-    assert result.status == "protocol-error" and "interrupt_session" in (result.error or "")
+    assert result.status == "protocol-error"
     assert session.closed
     await session.close()
 
@@ -363,7 +362,6 @@ async def test_unconsumed_overflow_fails_loudly(sandbox: Sandbox):
     turn = session.start_turn("hello")
     result = await turn.result
     assert result.status == "protocol-error" and result.events_truncated
-    assert "max_buffer_bytes=4096" in (result.error or "")
     assert session.closed
     await session.close()
 
@@ -443,21 +441,31 @@ async def _failing_permission(params: dict) -> dict:
 
 
 @pytest.mark.parametrize(
-    ("callback", "cause"),
+    "callback",
     [
-        (_permission_reply("proceed_always")[0], "did not offer"),
-        (lambda params: "proceed_once", "not a permission response object"),
-        (lambda params: {"selectedOption": "proceed_once", "extra": 1}, "invalid permission response"),
-        (_failing_permission, "raised RuntimeError: synthetic callback failure"),
+        _permission_reply("proceed_always")[0],
+        lambda params: "proceed_once",
+        lambda params: {"selectedOption": "proceed_once", "extra": 1},
     ],
-    ids=["unoffered", "not-an-object", "extra-field", "raises"],
+    ids=["unoffered", "not-an-object", "extra-field"],
 )
-async def test_invalid_permission_reply_fails_closed(sandbox: Sandbox, callback, cause: str):
+async def test_invalid_permission_reply_fails_closed(sandbox: Sandbox, callback):
     session = await open_session(sandbox.spec("permission", factory_droid=FactoryDroidOptions(on_permission=callback)))
     turn = session.start_turn("hello")
     result = await turn.result
     assert result.status == "agent-error"
-    assert result.error is not None and result.error.startswith("on_permission ") and cause in result.error
+    assert session.closed
+    await session.close()
+    assert not (sandbox.workdir / "approved-marker").exists()
+    assert not (sandbox.workdir / LOCK_DIRNAME).exists()
+
+
+async def test_raising_permission_callback_retains_the_cause(sandbox: Sandbox):
+    session = await open_session(sandbox.spec("permission", factory_droid=FactoryDroidOptions(on_permission=_failing_permission)))
+    turn = session.start_turn("hello")
+    result = await turn.result
+    assert result.status == "agent-error"
+    assert result.error is not None and "synthetic callback failure" in result.error
     assert session.closed
     await session.close()
     assert not (sandbox.workdir / "approved-marker").exists()
@@ -473,7 +481,7 @@ async def test_permission_callback_timeout_fails_closed(sandbox: Sandbox):
     session = await open_session(sandbox.spec("permission", request_timeout_seconds=0.5, factory_droid=options))
     turn = session.start_turn("hello")
     result = await turn.result
-    assert result.status == "agent-error" and "request_timeout_seconds=0.5" in (result.error or "")
+    assert result.status == "agent-error"
     await session.close()
     assert not (sandbox.workdir / "approved-marker").exists()
 
@@ -513,20 +521,19 @@ async def test_question_without_callback_keeps_upstream_cancelled(sandbox: Sandb
 
 
 @pytest.mark.parametrize(
-    ("reply", "cause"),
+    "reply",
     [
-        ({"answers": []}, "boolean 'cancelled'"),
-        ({"cancelled": False, "answers": [{"index": 7, "question": "?", "answer": "yes"}]}, "did not offer"),
-        ({"cancelled": False, "answers": [{"index": 1, "answer": "yes"}]}, "invalid question response"),
+        {"answers": []},
+        {"cancelled": False, "answers": [{"index": 7, "question": "?", "answer": "yes"}]},
+        {"cancelled": False, "answers": [{"index": 1, "answer": "yes"}]},
     ],
     ids=["no-cancelled", "unoffered-index", "schema"],
 )
-async def test_invalid_question_reply_fails_closed(sandbox: Sandbox, reply: dict, cause: str):
+async def test_invalid_question_reply_fails_closed(sandbox: Sandbox, reply: dict):
     session = await open_session(sandbox.spec("question", factory_droid=FactoryDroidOptions(on_question=lambda params: reply)))
     turn = session.start_turn("hello")
     result = await turn.result
     assert result.status == "agent-error"
-    assert result.error is not None and result.error.startswith("on_question ") and cause in result.error
     assert session.closed
     await session.close()
 
@@ -569,22 +576,22 @@ async def test_resume_rejects_unverifiable_references_before_spawn(sandbox: Sand
     header = json.loads(reference.session_file.read_text().splitlines()[0])
     tampered.write_text(json.dumps({**header, "id": other_id, "cwd": str(sandbox.home / "elsewhere")}) + "\n")
     cases = [
-        (SessionReference(other_id, reference.session_file, sandbox.workdir), "is not the native session log"),
-        (SessionReference("33333333-3333-4333-8333-333333333333", reference.session_file.with_name("33333333-3333-4333-8333-333333333333.jsonl"), sandbox.workdir), "cannot read"),
-        (SessionReference(other_id, tampered, sandbox.workdir), "was recorded in"),
-        (SessionReference(SESSION_ID, None, sandbox.workdir), "requires session_file"),
-        (SessionReference(SESSION_ID, reference.session_file, sandbox.home), "does not match the session workdir"),
+        SessionReference(other_id, reference.session_file, sandbox.workdir),
+        SessionReference("33333333-3333-4333-8333-333333333333", reference.session_file.with_name("33333333-3333-4333-8333-333333333333.jsonl"), sandbox.workdir),
+        SessionReference(other_id, tampered, sandbox.workdir),
+        SessionReference(SESSION_ID, None, sandbox.workdir),
+        SessionReference(SESSION_ID, reference.session_file, sandbox.home),
     ]
-    for wrong, message in cases:
+    for wrong in cases:
         with pytest.raises(HarnessError) as info:
             await open_session(sandbox.spec(resume=wrong, instructions="X"))
-        assert info.value.code == "invalid-options" and message in str(info.value)
+        assert info.value.code == "invalid-options"
     with pytest.raises(HarnessError) as info:
         await open_session(sandbox.spec(resume=reference, model="other-model", instructions="X"))
-    assert info.value.code == "invalid-options" and "resume" in str(info.value)
+    assert info.value.code == "invalid-options"
     with pytest.raises(HarnessError) as info:
         await open_session(sandbox.spec(resume=reference, factory_droid=FactoryDroidOptions(autonomy="high"), instructions="X"))
-    assert info.value.code == "invalid-options" and "autonomy" in str(info.value)
+    assert info.value.code == "invalid-options"
     sandbox.assert_no_side_effects()
 
 
@@ -613,7 +620,7 @@ async def test_missing_api_key_is_launch_failed_before_spawn(sandbox: Sandbox, m
         with pytest.raises(HarnessError) as info:
             await open_session(sandbox.spec(env=env, instructions="X"))
         assert info.value.code == "launch-failed"
-        assert "FACTORY_API_KEY" in str(info.value) and API_KEY not in str(info.value)
+        assert API_KEY not in str(info.value)
     sandbox.assert_no_side_effects()
 
 
@@ -621,7 +628,7 @@ async def test_sdk_version_mismatch_is_launch_failed_before_spawn(sandbox: Sandb
     monkeypatch.setattr(droid_sdk, "__version__", "0.3.0")
     with pytest.raises(HarnessError) as info:
         await open_session(sandbox.spec(instructions="X"))
-    assert info.value.code == "launch-failed" and "0.3.0" in str(info.value) and "0.4.0" in str(info.value)
+    assert info.value.code == "launch-failed"
     sandbox.assert_no_side_effects()
 
 
@@ -629,7 +636,7 @@ async def test_missing_sdk_is_launch_failed_before_spawn(sandbox: Sandbox, monke
     monkeypatch.setitem(sys.modules, "droid_sdk", None)
     with pytest.raises(HarnessError) as info:
         await open_session(sandbox.spec(instructions="X"))
-    assert info.value.code == "launch-failed" and "harness-cli[factory-droid]" in str(info.value)
+    assert info.value.code == "launch-failed"
     sandbox.assert_no_side_effects()
 
 

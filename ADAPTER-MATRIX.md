@@ -59,7 +59,7 @@ versions below are dated observations, not a supported version range.
 | kilo | [`@kilocode/cli`; CLI reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference) (7.5.15) | not on PATH | Source-checked; assistant DB model key repaired to `modelID`. Without `--auto`, headless permission requests are rejected; this is upstream policy, not implicit bypass. |
 | openclaude | [`@gitlawb/openclaude`; upstream](https://github.com/Gitlawb/openclaude) (0.30.0) | 0.6.0, prior off-PATH probe | Current config cutover and provider model namespaces source-checked; discovery now uses only OpenClaude state. No current binary/provider/pane capture. npm `openclaude` is an unrelated reservation. |
 | opencode | [`opencode-ai`; CLI reference](https://opencode.ai/docs/cli/) (1.18.29) | 1.14.46, off PATH | Help-checked; source-shaped DB regression replaces `session.model` with assistant `modelID`. New docs use `--auto`; installed help uses `--dangerously-skip-permissions`. No version-independent bypass mapping added. |
-| pi | [`@earendil-works/pi-coding-agent`; upstream](https://github.com/earendil-works/pi) (0.85.1) | not on PATH | Source-checked CLI JSON contract; old `@mariozechner/pi-coding-agent` 0.73.1 is explicitly deprecated. Install metadata corrected; runtime/RPC acceptance remains TWA-71. |
+| pi | [`@earendil-works/pi-coding-agent`; upstream](https://github.com/earendil-works/pi) (0.85.1) | isolated 0.85.1 and deprecated `@mariozechner/pi-coding-agent` 0.73.1; not on PATH | Both real CLIs exercised through Python/Bun against a synthetic localhost provider: tool turn, success, native error, timeout with partial usage. RPC 0.85.1 already qualified by TWA-69; no authenticated provider coverage. |
 | qwen | [`@qwen-code/qwen-code`; headless source](https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/headless.md) (0.23.0) | not on PATH | Source-checked flags/result array and current project/session JSONL layout below. Existing default `qwen3-coder` is not provider-qualified; current upstream also uses `coder-model`. |
 | swe-agent | [`mini-swe-agent`; native CLI docs](https://mini-swe-agent.com/latest/usage/mini/) (registry 2.4.6) plus a **consumer-supplied wrapper** | dependency 2.2.8; wrapper help checked | Wrapper-only, not native SWE-agent/mini support. `mini --version` fails; metadata now queries the dependency via the wrapper's `python3`. Installing the dependency does not install the wrapper. Native mini is TWA-82. |
 | cline | [`cline`; standalone CLI](https://docs.cline.bot/cli/cli-reference), pinned [cli-v3.0.61](https://github.com/cline/cline/tree/cli-v3.0.61/apps/cli) | 3.0.61, isolated npm prefix | Help/version and real-CLI loopback protocol checked; JSON differs from docs. SIGINT stops ordinary shell tools; SIGTERM does not. Real Cline provider smoke failed without authentication; no successful real-provider coverage. |
@@ -195,6 +195,21 @@ OMP SDK sessions use `getSessionCapabilities("omp", "sdk")` /
 `get_session_capabilities("omp", "sdk")`, qualified for the optional 18.1.14
 package on Bun >=1.3.14. Python and Node use the same owned bridge worker;
 ordinary CLI imports have no SDK dependency.
+Claude SDK sessions use `getSessionCapabilities("claude-code", "sdk")` /
+`get_session_capabilities("claude-code", "sdk")`. Python hosts its native
+0.2.152 SDK/2.1.259 CLI through a pinned raw `Transport`; TypeScript hosts its
+native 0.3.263 SDK/2.1.263 CLI under Node/Bun. Both preserve raw events,
+follow-up, exact transcript resume, interrupt receipts and one-shot permission
+replies. Actual native pairs passed local synthetic-provider lifecycle checks;
+authenticated-provider generation is not claimed. See the
+[Claude SDK configuration, internal dependency and limits](SPEC.md#optional-claude-agent-sdk-sessions).
+Amp SDK sessions use `getSessionCapabilities("amp", "sdk")` /
+`get_session_capabilities("amp", "sdk")` with an explicit local executor, mode,
+SDK package and pinned Neo CLI. Both languages use one isolated Node >=22
+worker per operation. Exact thread resume and interruption preserve the native
+thread; approval replies and bypass are unsupported. Local execution still
+requires the native Amp thread service. See the
+[Amp SDK contract and separate qualification evidence](SPEC.md#optional-amp-sdk-sessions).
 OpenCode HTTP sessions use `getSessionCapabilities("opencode", "rpc")` /
 `get_session_capabilities("opencode", "rpc")` against an explicitly selected
 caller-owned 1.18.29 endpoint. Both languages implement native HTTP/SSE,
@@ -513,6 +528,56 @@ synthetic success fixtures do not fill that gap.
 ...
 ```
 
+### Codex app-server: unsupported after qualification
+
+**Decision — [TWA-103](https://linear.app/twaldin/issue/TWA-103), September 10,
+2026:** defer Codex app-server sessions rather than accept surviving native
+tools after owned teardown. The CLI adapter above remains shipped and unchanged;
+no Codex RPC/SDK session backend or dependency is enabled. Implementation is
+deferred to [TWA-107](https://linear.app/twaldin/issue/TWA-107), not dispatched.
+
+The tested runtime is **Codex CLI 0.153.4**, launched directly as
+`codex app-server --listen stdio://`. This is a qualification pin, **not a
+supported Harness session version range**. Upstream labels app-server
+[experimental and unsupported for production workloads](https://developers.openai.com/codex/app-server/).
+The official SDKs are not equivalent execution models: at the
+[`rust-v0.153.4` source tag, TypeScript](https://github.com/openai/codex/blob/rust-v0.153.4/sdk/typescript/src/exec.ts)
+spawns `exec --experimental-json` per run; the
+[Python SDK](https://developers.openai.com/codex/sdk/) controls app-server,
+and its [manifest at that tag](https://github.com/openai/codex/blob/rust-v0.153.4/sdk/python/pyproject.toml)
+pins `openai-codex-cli-bin==0.147.0`. Neither SDK was substituted for the tested
+direct-stdio runtime.
+
+**Native-runtime synthetic-provider evidence:** macOS arm64, **Python 3.14.3**,
+**Bun 1.3.14**, **Node 26.6.0**, disposable configuration and an owned loopback
+Responses provider. The finite tool used `workspace-write` sandboxing and an
+explicit `never` approval policy; this is not permission-enforcement coverage.
+
+| Scenario | Observed result |
+|---|---|
+| Startup and turn request, all three runtimes | Native thread/turn IDs returned; `turn/start` acknowledged an in-progress turn, not completion. |
+| Native interruption, all three runtimes | Empty-object `turn/interrupt` acknowledgement, then distinct `turn/completed` with `interrupted`; the tool stopped. |
+| Stdin close plus TERM, and stopped-leader TERM → 500 ms → KILL attempt, all three runtimes | App-server exited by SIGTERM; ordinary `exec_command` tool survived in its own process group until its finite self-exit. No turn-completion event was received. |
+| Cooperative EOF-only shutdown, Python | App-server exited 0 and the tool stopped; this does not cover a dead/unresponsive server. |
+
+The synthetic tool did not detach itself. Codex's
+[native pipe execution](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/utils/pty/src/pipe.rs)
+creates a new session via
+[`setsid`; parent-death signalling is Linux-only](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/utils/pty/src/process_group.rs).
+Cooperative cleanup is not proof of containment after server failure. All
+probe children subsequently stopped and owned listeners closed; raw logs remain
+private. The general [process-group boundary](SPEC.md#ownership-and-execution)
+still excludes detached descendants; that exclusion is not used to waive the
+native-tool containment requirement for this proposed backend.
+
+**Not qualified:** Linux or other CLI versions, authenticated-provider execution,
+Harness app-server conformance or packaged-Node app-server support, follow-up/
+resume, approval rejection, full protocol/error/partial-output coverage or token
+accounting. Existing CLI provider evidence in the ledger is separate.
+Reconsider only when reliable native containment satisfies the shared session
+gates, with Python/TypeScript parity and separately recorded provider evidence.
+No daemon, remote-listener or hosted Code Mode replacement is enabled.
+
 ---
 
 ## gemini
@@ -735,9 +800,12 @@ Parsing is fallback-tolerant: try whole-stdout as JSON first, then scan each `[`
 - **Instructions file**: `AGENTS.md` (pi also auto-reads `CLAUDE.md` via context-file discovery)
 - **Default model**: `sonnet`
 - **Command**: `pi --mode json --no-session --model <model> <prompt>`
-- **Token source**: JSON event stream on stdout → find the last `agent_end` event, sum `messages[*].usage.input` / `.output` across assistant messages. Falls back to summing `turn_end.message.usage` events if the stream is truncated.
+- **Token source**: JSON event stream on stdout → sum assistant usage across **all agent cycles**. Each `agent_end.messages` replaces that cycle's incremental messages; completed `message_end` / `turn_end` records survive an interrupted final cycle. Cumulative `message_update.usage` is ignored; terminal snapshots replace rather than duplicate per-turn usage.
 - **Cost source**: same path, summed from `usage.cost.total`
 - **Env**: provider-specific API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) set by the consumer; harness does not inject them
+- **Qualification (September 8, 2026)**: isolated npm installs with `--ignore-scripts`; macOS arm64, Node 26.6.0, Bun 1.3.14. Both language APIs exercised Pi 0.85.1 and legacy 0.73.1 with an explicit `executable`, isolated home and synthetic localhost provider, including a real `read` tool turn. Custom provider IDs used `modelNoResolve` / `model_no_resolve` to bypass the existing provider inference. No external provider, OAuth, default `sonnet` model or Linux native-runtime coverage is claimed by this smoke.
+- **Native error semantics**: both checked CLIs can exit **0** in JSON mode after an assistant message with `stopReason: "error"`. Harness preserves the process exit code and the error in `raw`; exit 0 alone is not model-turn success. Controlled RPC provides a separately classified turn outcome.
+- **Argument compatibility**: positional prompts retain upstream parsing. Flag-shaped text can select CLI options; `@`-leading text selects file attachments. Pi 0.85.1 recognizes `--` but still expands `@` after it; legacy 0.73.1 rejects the separator with `Unknown option: --` before prompting. Do not assume OMP's literal-prompt semantics apply. The controlled RPC API carries prompt text in JSON instead.
 
 ### Output shape
 pi emits one JSON object per stdout line:
@@ -750,7 +818,7 @@ pi emits one JSON object per stdout line:
 {"type":"agent_end","messages":[{"role":"user","content":"..."},{"role":"assistant","usage":{...}}]}
 ```
 
-The adapter prefers `agent_end.messages` (authoritative final state) over per-turn events.
+The adapter prefers each `agent_end.messages` snapshot over that cycle's per-message/per-turn events. Retries and compaction continuations can emit another agent cycle; an earlier cycle's usage must not be discarded. CLI metrics are totals from captured complete records, not a sum of every usage-bearing event. Controlled RPC deliberately forwards native usage without inventing aggregate metrics; see [its usage contract](SPEC.md#controlled-rpc-sessions).
 
 Full event reference: [Pi JSON event contract](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md). `--mode json` is noninteractive; no built-in permission popup/sandbox is implied. Project trust is a separate upstream setting, not Harness bypass.
 
@@ -883,6 +951,47 @@ files. Node `runAsync` cancellation restored the same files. Separate explicit
 that model unavailable; Harness did not substitute another model.
 
 Shared fixtures are synthetic and exercise both public run paths, exact argv, permissions, validation, native success/failure and interrupted output. Full coding tasks, MCP/subagent/extension descendants, BYOK/offline providers, remote sessions, Linux/Windows provider execution and every subscription/model combination remain untested. Deliberately detached or remote work is outside the shared POSIX process-group cleanup guarantee.
+
+### Copilot SDK: unsupported after qualification
+
+**Decision — [TWA-104](https://linear.app/twaldin/issue/TWA-104), September 9,
+2026:** defer the optional Copilot SDK backend rather than weaken owned-tool
+cleanup. The CLI adapter above remains shipped; no Copilot SDK session API,
+dependency or external-server alternative is enabled in Harness.
+
+The qualified pair is official Python `github-copilot-sdk` and TypeScript
+`@github/copilot-sdk` **1.0.13**, with explicitly selected, already-installed
+CLI **1.0.83** (protocol **3**). These are qualification limits, not a supported
+Harness SDK version range. The [Python package](https://pypi.org/project/github-copilot-sdk/1.0.13/)
+requires **Python >=3.11**; Harness's base requirement remains **>=3.10**.
+The [TS package](https://registry.npmjs.org/@github/copilot-sdk/1.0.13) declares
+Node **`^20.19.0 || >=22.12.0`**. Any future integration must keep dependencies
+optional and lazy, select the installed runtime explicitly, and prevent
+first-use runtime download/cache staging. Experimental in-process FFI remains
+excluded.
+
+Native SDK probes on macOS arm64 passed startup, synthetic-provider generation,
+follow-up, disconnect and exact-ID resume under **Python 3.11.15**, **Bun
+1.3.14** and **Node 26.6.0**. They did not establish Harness session conformance
+or packaged-Node SDK support. A separate selected-environment authentication
+probe was unauthenticated; no authenticated SDK provider request was attempted
+or succeeded. The CLI provider evidence above is separate.
+
+Forced containment failed in all three runtimes: an ordinary native `bash`
+tool with `detach:false` ran in a separate process group. After deliberately
+stalling the CLI, TERM → 500 ms → KILL reaped the SDK worker/CLI group, but the
+finite tool's heartbeat continued after group exit. A graceful Bun control
+stopped the tool. All probe tools were subsequently released and verified
+stopped. This matches the upstream [shell-group design](https://github.com/github/copilot-sdk/blob/v1.0.13/nodejs/src/generated/rpc.ts#L26207-L26225);
+native disposal needs a responsive runtime, and post-spawn task PID snapshots
+do not establish complete ownership across tool creation and runtime stalls.
+
+Reconsider SDK support only with reliable native containment that preserves
+the existing cleanup guarantee, including forced disposal. Process-discovery
+heuristics, disabling native tools or silently substituting external transport
+do not satisfy that gate. This finding does not extend the CLI's no-tool
+qualification to attached tool descendants or weaken its documented
+process-group boundary.
 
 ---
 

@@ -39,6 +39,12 @@
 // Droid CLI 0.213.0 advertises protocol 1.204.0. The published SDK advertises
 // an older protocol, so compatibility is gated against the qualified CLI,
 // not by requiring the client and server version strings to be identical.
+//
+// Startup version gates: the handshake response must advertise the qualified
+// CLI's `factoryProtocolVersion` 1.204.0 (checked here) and the legacy
+// `factoryApiVersion` 1.0.0 the SDK's own envelope schema requires of every
+// frame it parses. Either mismatch, and a native error response to
+// `initialize_session` / `load_session`, fails the open as `protocol-error`.
 import { randomUUID } from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
@@ -471,7 +477,7 @@ export class FactoryDroidSession extends LiveSession {
     }
   }
 
-  /** Classify an SDK handshake rejection: a native error response is `launch-failed`, anything else broke the protocol. */
+  /** Classify an SDK handshake rejection: a native `initialize_session` / `load_session` error response and every other broken handshake are `protocol-error`; only the process's own ending (exit / signal / lost transport) keeps its status. */
   #startupFailure(err: unknown): HarnessError {
     if (err instanceof HarnessError) return err
     const response = this.#handshakeResponse
@@ -479,7 +485,7 @@ export class FactoryDroidSession extends LiveSession {
     const excerpt = this.#child.stderr.text.trim().slice(0, STDERR_EXCERPT)
     const tail = excerpt === '' ? '' : `; stderr: ${excerpt}`
     if (native !== null) {
-      return new HarnessError(`droid rejected the ${this.spec.resume === null ? 'initialize_session' : 'load_session'} request: ${native}${tail}`, 'launch-failed')
+      return new HarnessError(`droid rejected the ${this.spec.resume === null ? 'initialize_session' : 'load_session'} request: ${native}${tail}`, 'protocol-error')
     }
     return new HarnessError(`droid handshake failed: ${describeError(err)}${tail}`, 'protocol-error')
   }

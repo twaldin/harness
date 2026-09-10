@@ -28,6 +28,8 @@
   "startup": [
     {"name": "bad_state", "code": "protocol-error"},
     {"name": "bad_protocol", "code": "protocol-error"},
+    {"name": "bad_api", "code": "protocol-error"},
+    {"name": "init_error", "code": "protocol-error"},
     {"name": "startup_hang", "code": "protocol-error"}
   ],
   "resume_failures": ["wrong_resume_cwd", "missing_cwd"],

@@ -59,6 +59,11 @@ from harness._instructions import (
 )
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.sessions import (
+    AmpEffort,
+    AmpSdkOptions,
+    AmpVisibility,
+    ClaudeSdkOptions,
+    ClaudeSettingSource,
     FactoryDroidAutonomy,
     FactoryDroidCallback,
     FactoryDroidOptions,
@@ -84,11 +89,16 @@ import harness.adapters  # noqa: E402,F401 — registers the shipped adapters
 __all__ = [
     "Adapter",
     "AgentStatus",
+    "AmpEffort",
     "AmpOptions",
+    "AmpSdkOptions",
+    "AmpVisibility",
     "Backend",
     "BuildCommand",
     "Capabilities",
     "ClaudeCodeOptions",
+    "ClaudeSdkOptions",
+    "ClaudeSettingSource",
     "ClineOptions",
     "CodexOptions",
     "CopilotOptions",
@@ -97,6 +107,7 @@ __all__ = [
     "FactoryDroidCallback",
     "FactoryDroidOptions",
     "GracefulSignal",
+    "HarnessError",
     "InstallMeta",
     "InstructionProjection",
     "KiroOptions",
@@ -153,4 +164,4 @@ __all__ = [
     "strip_ansi",
     "write_instructions",
 ]
-__version__ = "0.3.17"
+__version__ = "0.3.19"

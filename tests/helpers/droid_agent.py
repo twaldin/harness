@@ -49,7 +49,7 @@ def emit(frame: object, fragmented: bool = False) -> None:
 
 
 def envelope(kind: str, **fields: object) -> dict:
-    return {"jsonrpc": "2.0", "factoryApiVersion": "1.0.0", "factoryProtocolVersion": PROTOCOL, "type": kind, **fields}
+    return {"jsonrpc": "2.0", "factoryApiVersion": "0.0.0" if CASE == "bad_api" else "1.0.0", "factoryProtocolVersion": PROTOCOL, "type": kind, **fields}
 
 
 def response(request: dict, result: object = None, error: dict | None = None) -> None:
@@ -131,6 +131,9 @@ for line in sys.stdin.buffer:
     trace("request", method=method, params=params)
     if method in ("droid.initialize_session", "droid.load_session"):
         if CASE == "startup_hang":
+            continue
+        if CASE == "init_error":
+            response(request, error={"code": -32000, "message": "synthetic initialization rejected"})
             continue
         if method == "droid.initialize_session":
             SID = params.get("sessionId") or SID

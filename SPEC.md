@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP and Factory Droid SDK sessions, caller-owned OpenCode HTTP sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp SDK bridge sessions, native Claude and Factory Droid SDK sessions, caller-owned OpenCode HTTP sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -1328,7 +1328,7 @@ explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
 Other pairings reject with `unsupported-backend`, except the separately
-documented OMP SDK, Factory Droid SDK and caller-owned OpenCode HTTP sessions below. Unknown
+documented OMP/Amp/Claude/Factory Droid SDK and caller-owned OpenCode HTTP sessions below. Unknown
 names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
@@ -1481,7 +1481,7 @@ state and register CLI-oriented signal handlers; process isolation prevents
 these from changing the caller's OMP settings, environment, cwd or listeners.
 The worker owns its own termination handlers and calls native SDK disposal.
 
-`SessionSpec.omp_sdk` / `ompSdk` is required for OMP SDK and rejected for Pi RPC.
+`SessionSpec.omp_sdk` / `ompSdk` is required only for OMP SDK and rejected for other backends.
 The exported `OmpSdkOptions` has three required fields:
 
 | TypeScript / Python | meaning |
@@ -1561,6 +1561,265 @@ Sources refreshed September 8:
 [18.1.14 package metadata](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent/v/18.1.14),
 [native environment](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/utils/src/env.ts),
 [SDK session lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/coding-agent/src/session/agent-session.ts).
+
+## Optional Claude Agent SDK sessions
+
+Select `harness: "claude-code", backend: "sdk"` through `open_session` /
+`openSession`, not a new adapter or one-shot `RunSpec`. The existing serial
+turns, bounded events, deadlines, instruction lease and owned process lifecycle
+apply. No SDK, binary, backend or model fallback is added.
+
+### Pinned native dependencies
+
+| Host | SDK package | Native Claude Code |
+|---|---|---|
+| Python >=3.10 | `claude-agent-sdk==0.2.152` | **2.1.259** |
+| TypeScript, Node or Bun | `@anthropic-ai/claude-agent-sdk@0.3.263` | **2.1.263** |
+
+These exact pairs are required at startup; the two SDK releases bundle different
+CLI versions. Missing packages, wrong versions or an unusable executable fail
+with `launch-failed`, never installation or discovery. Python offers the
+optional `harness-cli[claude-sdk]` extra; TypeScript callers install the SDK
+separately. Ordinary imports, CLI calls and capability queries do not import it.
+
+Each implementation hosts its **own language's SDK in an owned worker**.
+Python retains `ClaudeSDKClient` for native control routing and permissions.
+Its implementation of the exported `Transport` interface reproduces the pinned
+SDK's private `SubprocessCLITransport` argv/environment and depends on the native
+internal JSONL/control protocol. It does not import private SDK modules.
+Strict raw retention runs before the lossy SDK dataclass parser; interrupt
+control receipts are captured before the SDK discards their return value.
+This internal protocol dependency is intentional, not a cross-version guarantee.
+The SDK also labels its exported `Transport` interface internal and changeable
+in any release; the exact pin is required for both interface and wire behavior.
+TypeScript uses `query` with streaming input and its supported
+`spawnClaudeCodeProcess` hook to retain and validate raw native messages before
+SDK iteration. Deprecated/removed V2 session-preview APIs are not used.
+
+### Explicit configuration and permissions
+
+`SessionSpec.claude_sdk` / `claudeSdk` is required for this pairing and rejected
+elsewhere. Both roots export `ClaudeSdkOptions` and `ClaudeSettingSource`:
+
+| TypeScript / Python | meaning |
+|---|---|
+| `packageRoot` / `package_root` | required absolute SDK package directory: Python's `site-packages/claude_agent_sdk`, or TypeScript's `node_modules/@anthropic-ai/claude-agent-sdk` |
+| `cliPath` / `cli_path` | required absolute executable for the pinned native CLI; independent of the worker runtime |
+| `configDir` / `config_dir` | required absolute `CLAUDE_CONFIG_DIR` selection |
+| `settingSources` / `setting_sources` | required sequence of `user`, `project`, `local`; empty is allowed, duplicates are invalid |
+| `settingsFile` / `settings_file` | optional absolute native JSON settings file (`--settings`) |
+
+`executable` selects the worker runtime: default `sys.executable` in Python,
+`process.execPath` in TypeScript. The Python interpreter must contain the SDK's
+dependencies; selecting another package root does not install them. Bun named
+`bun` receives `--no-env-file`; Node does not. `model` is trimmed but otherwise
+passed unchanged; omission delegates to native configuration.
+
+The inherited environment plus explicit `env` overlay is preserved, with
+`CLAUDE_CONFIG_DIR` pinned to `configDir`. A conflicting explicit entry rejects.
+`settingSources: []` disables those filesystem settings sources, **not** managed
+policy, credential/environment resolution, global configuration or auto-memory.
+The settings file and native settings precedence remain upstream behavior.
+Use trusted directories and explicitly select child `HOME` when needed;
+these options are not an authentication sandbox or promise of zero native writes.
+`instructions` uses the owned `CLAUDE.md` projection and requires `project` in
+`settingSources`; otherwise it rejects before preparation rather than being ignored.
+
+Capabilities report events, interruption, follow-up, resume and approval true;
+concurrent turns false. `permissionPolicy: "bypass"` is unsupported. Native
+permission defaults and existing allow/deny rules remain authoritative: the SDK
+callback is not invoked for every tool. An interactive native permission request
+becomes `claude_permission`, retaining tool name, input, tool-use ID and
+serializable native callback context in `raw`. Its `requestId` is explicitly a
+**bridge-local approval ID**, not an invented native control request ID.
+Reply with `respond_approval` / `respondApproval(id, "once" | "reject")`.
+`once` allows only the original input; `reject` denies it. No persistent rules,
+rewritten tool input or `"always"` approval are exposed. Unknown, duplicate and
+cancelled IDs reject; native cancellation emits `claude_permission_cancelled`.
+
+### Native identity, result and disposal
+
+Fresh open selects an explicit UUID through the native session-ID option.
+The returned ID is **selected**, not evidence a native session event has already
+been observed. No bootstrap prompt is sent. `sessionFile` stays null until a
+native identity hook supplies an absolute transcript path. The `Stop` hook
+supplies this in both languages; Python does not support `SessionStart`.
+Hook inputs remain visible as `claude_session_hook`. Reported IDs and hook cwd
+must match the selected reference; identity changes fail, never silently fork.
+
+Resume requires the exact UUID, existing absolute transcript file and matching
+workdir. A bounded scan of native Claude JSONL identity/cwd records validates the
+reference; it is not a Pi session header. The **absolute transcript path** is
+passed to native resume, and subsequent hooks must confirm that same path.
+No newest-file lookup, encoded-directory heuristic or partial-ID resolution is used.
+
+Every ordinary native message, including unknown types, unknown content blocks
+and unknown assistant/result fields, remains intact in `SessionEvent.raw`.
+Valid lines preceding malformed output remain observable. Native control frames
+stay with the SDK; bridge command responses use bridge IDs. Partial native
+messages are enabled. Result settlement requires prompt acknowledgement plus
+exactly one native `result` with the selected session ID. `raw` is that complete
+result, not a projection through SDK message dataclasses.
+`terminal_reason` of `aborted_streaming` / `aborted_tools` means `interrupted`
+even when `is_error` is true. Otherwise `is_error` or a non-`success` subtype
+means `agent-error`; errors and successful native results remain distinguishable.
+Missing/duplicate results and malformed/oversized/partial JSONL fail explicitly.
+
+`interrupt()` requires the native `interrupt_receipt_v1` receipt and settlement.
+`claude_interrupt.raw.receipt` preserves `still_queued`; an absent or refused
+receipt fails explicitly rather than fabricating an acknowledgement. A completed
+result racing an interrupt stays `completed`. Follow-up retains the same session.
+`total_cost_usd` and cumulative `modelUsage` are native **estimates/snapshots**:
+do not sum repeated results or label them billed cost. Harness adds no totals.
+
+Close, timeout and cancellation dispose the SDK and the owned worker/native
+process group within the existing 500 ms TERM / KILL / 1000 ms drain bounds.
+Pending approvals are released and still-owned instructions restored; history
+is retained. Native exit/disconnect diagnostics live in an explicit
+`sdk_failure` bridge frame in result `raw`; common `exitCode` / `signal` describe
+the owned worker, not a fabricated native child exit. Disposal failures raise.
+
+No raw SDK method/options escape hatch, custom tools/MCP objects, arbitrary
+hooks, fork/clear, concurrent or queued turns, steering, session discovery or
+permission-mode widening is exposed. Native features that change session identity
+are unsupported; use the native SDK directly when these operations are required.
+
+### Qualification
+
+`tests/claude_sdk_cases.json` and a finite synthetic CLI exercise the **real
+optional SDKs** in Python, Bun and packaged Node. This checks raw retention,
+identity/follow-up/resume, native errors, partial/framing failures, interruption
+receipts and races, permission allow/reject, deadlines and disposal without a
+provider. Dependency installation is separate; tests never invoke a bundled CLI.
+
+Actual SDK/CLI qualification uses isolated temporary home/config/workdirs and a
+local synthetic Anthropic SSE provider. This is native-runtime evidence, not
+authenticated model generation. Successful authenticated-provider generation is
+not claimed; no credentials or private conversations appear in fixtures.
+
+Sources refreshed September 9:
+[Python reference](https://platform.claude.com/docs/en/agent-sdk/python),
+[TypeScript reference](https://platform.claude.com/docs/en/agent-sdk/typescript),
+[native settings and hook compatibility](https://code.claude.com/docs/en/agent-sdk/claude-code-features),
+[Python SDK source](https://github.com/anthropics/claude-agent-sdk-python).
+
+## Optional Amp SDK sessions
+
+`open_session` / `openSession` accept `harness: "amp", backend: "sdk"`.
+Both languages use the same isolated **Node >=22** worker and the official
+TypeScript SDK. Python is an explicit bridge, not the native `amp-sdk` Python
+package: the latter filters unknown events and usage fields and can discard a
+nonzero native exit after a result. Bun callers also launch Node for this worker.
+The one-shot API remains CLI-only. No dependency, executable or backend fallback
+occurs; ordinary imports and capability queries do not load the optional SDK.
+
+### Pinned dependencies and native configuration
+
+The supported pair is **`@ampcode/sdk@0.1.0-20260823161614-g3631dc6`** and
+**Amp Neo CLI `0.0.1788883237-g0b98e3`**. Different package names, versions,
+CLI versions or worker runtimes fail explicitly at startup. Install both
+separately in caller-owned locations; Harness never installs or upgrades them.
+The SDK's package metadata says `releaseTag: legacy`, but its CLI dependency
+is the floating `latest` selector rather than a numeric compatibility floor.
+Neither that tag nor the SDK's version check qualifies an arbitrary local CLI.
+
+`SessionSpec.amp_sdk` / `ampSdk` is required only for this pairing.
+The exported `AmpSdkOptions` contains:
+
+| TypeScript / Python | requirement and meaning |
+|---|---|
+| `packageRoot` / `package_root` | required absolute SDK package directory containing `package.json` |
+| `cliPath` / `cli_path` | required absolute path to the pinned CLI |
+| `executor` | required literal `"local"`; remote executors/orbs/projects are unsupported |
+| `mode` | required nonblank native mode, trimmed, e.g. `"low"`; explicit selection avoids the SDK's silent `"medium"` default |
+| `effort` | optional `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` or `"max"`; native mode support remains upstream |
+| `visibility` | optional `"private"`, `"unlisted"`, `"workspace"` or `"group"` for creation only; rejected on resume |
+| `settingsFile` / `settings_file` | optional absolute caller-selected settings file |
+
+`SessionSpec.executable` selects **Node**, default `node`, not the Amp CLI.
+Common `model`, permission bypass, other backend option bags and unknown Amp
+fields reject before preparation. There is no invented model-to-mode mapping,
+approval-response channel, arbitrary SDK-object injection or raw CLI argument
+channel. Native plugins, tools, permissions, settings and authentication remain
+upstream behavior; this is not a sandbox.
+
+`AMP_URL` uses the explicit environment overlay, then inherited environment,
+then `https://ampcode.com`; it must identify an HTTP(S) origin without
+credentials, path, query or fragment. The normalized origin becomes part of
+the reference. The selected CLI and optional settings file override the
+worker's `AMP_CLI_PATH` and `AMP_SETTINGS_FILE`; other environment/configuration
+is inherited as usual. `AMP_SKIP_UPDATE_CHECK=1` is forced; an explicit
+conflicting value rejects. Native state/tool writes are still possible.
+Use trusted configuration and explicit disposable child HOME/XDG directories
+when ambient settings must not be read.
+
+The SDK prefers a local `@ampcode/cli` dependency over `AMP_CLI_PATH`.
+The worker rejects a conflicting installed CLI instead of silently redirecting
+it. Only inside its isolated process, it guards the SDK's spawn call, verifies
+the selected executable, and adds the pinned SDK's omitted `--executor local`
+flag. The SDK still owns `threads.new`, `threads.markdown` and `execute`; this
+is not a substitute direct-CLI transport. Local selects **tool execution**:
+Neo still uses the selected Amp service for its thread actor and authentication.
+
+### Identity, events and owned lifecycle
+
+Capabilities report events, interrupt, follow-up and resume true; concurrent
+turns and approval false. They do not probe installation or authentication.
+A reference contains the complete native `T-UUID`, `sessionFile: null`,
+workdir and normalized endpoint. Creation retains the native ID returned by
+`threads.new`; resume verifies that exact ID through `threads.markdown`.
+Workdir and endpoint must match. No latest-thread selection, partial ID,
+local-file discovery, silent new thread, fork or remote-history deletion occurs.
+
+Each open/resume or turn is one finite SDK-worker process group, supervised by
+the shared subprocess engine. The public session retains its instruction lease
+across operations. Turns call `execute` with a finite string prompt, explicit
+thread ID, mode and local executor. A native `system/init` must verify the
+thread/workdir within the request deadline. Follow-up uses the same exact
+thread, not a long-lived SDK input iterator or a guessed `end_turn` boundary.
+
+Events carry `backend: "sdk", harness: "amp"` and preserve each complete
+native JSON object in `raw`, including unknown types, permission errors, null
+usage and provider-specific usage fields. Transport envelopes are not events.
+No common token/cost totals are invented. Completion requires a valid native
+terminal `result`, SDK iterator completion, native process exit and owned group
+cleanup. The result remains in `SessionTurnResult.raw`; `is_error` gives
+`agent-error`, while a later nonzero native exit remains `exited` with the
+native exit code. Partial assistant output is not success.
+
+Malformed/invalid-UTF-8 JSONL, partial final frames, duplicate results and
+identity changes fail with `protocol-error`. Each native frame and worker
+envelope is bounded to 1 MiB; pending event streams and retained stderr use
+`maxBufferBytes`. Native stderr is drained concurrently with stdout; only a
+bounded prefix is replayed to the SDK's error parser.
+
+Interrupt cancels and reaps the **current operation**, not the native thread.
+The next turn may continue that exact thread after cleanup. A terminal
+completion already observed before the interrupt wins the race. Close,
+timeout, protocol failure and event overflow invalidate the public handle and
+perform shared bounded TERM/KILL/drain cleanup before releasing its lease.
+Close does not claim the SDK has a reusable in-process abort or erase native
+history. Native failures before init remain failures without a fabricated
+successful handshake.
+
+### Qualification boundary
+
+`tests/amp_sdk_cases.json` drives synthetic SDK/native-child cases in Python,
+Bun and packaged Node. Separate qualification uses the unmodified pinned npm
+SDK with a synthetic CLI: native event/usage preservation, exact continuation,
+nonzero exit after result and strict framing are distinct from provider success.
+The pinned Neo executable recognizes the local executor and reports its native
+thread-actor connection failure and a finite loopback peer's HTTP 401 rejection
+through the real SDK without fallback. Unauthenticated creation can wait until
+the request deadline. No authenticated provider success, native successful model
+turn or offline native-thread creation is claimed: no real `AMP_API_KEY` was
+available. The loopback probe used a synthetic key and disposable HOME/XDG
+directories. No real credentials or transcripts are included in fixtures.
+
+Sources refreshed September 9:
+[SDK overview](https://ampcode.com/docs/sdk),
+[pinned SDK package](https://www.npmjs.com/package/@ampcode/sdk/v/0.1.0-20260823161614-g3631dc6),
+[pinned CLI package](https://www.npmjs.com/package/@ampcode/cli/v/0.0.1788883237-g0b98e3).
 
 ## Caller-owned OpenCode HTTP sessions
 
@@ -1751,8 +2010,9 @@ Harness supplies a local stdio transport through each SDK's public
 `DroidClient` injection API. The SDK handles native requests, schemas and
 callback replies; Harness owns exactly one local child and observes its native
 frames. This is not a Python-to-JavaScript bridge. The qualified CLI is **Droid
-0.213.0**, whose observed protocol is **1.204.0**; incompatible protocol
-handshakes fail closed. Harness never downloads a CLI. `executable` selects
+0.213.0**, whose observed protocol is **1.204.0** and API version **1.0.0**;
+incompatible handshakes and native initialization/load rejections fail with
+`protocol-error`. Harness never downloads a CLI. `executable` selects
 the caller's installed binary, default `droid`, invoked as
 `droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc`.
 POSIX process-group ownership is required; Windows is unsupported.
@@ -1862,7 +2122,7 @@ The one-shot Factory CLI adapter remains independent of this optional backend.
 
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC, OMP SDK, Factory Droid SDK and
+These requirements govern the shipped Pi RPC, OMP/Amp SDK, Claude SDK, Factory Droid SDK and
 caller-owned OpenCode HTTP session implementations above and future backends. They keep the common library small; they do not
 enable additional SDKs or native protocols by themselves.
 
@@ -1923,6 +2183,25 @@ Primary sources refreshed for this contract:
 Installed help was inspected for Claude Code 2.1.220 and Codex 0.153.4,
 including effort, sandbox and bypass options; this was not a provider smoke.
 
+### Codex app-server qualification outcome
+
+Codex app-server sessions are **deferred/unsupported**, not shipped experimental
+support. Qualification of direct stdio CLI **0.153.4** found ordinary native tools
+surviving app-server-group teardown on macOS under Python, Bun and Node.
+Cooperative interruption and EOF shutdown do not establish forced containment.
+The [qualification record](ADAPTER-MATRIX.md#codex-app-server-unsupported-after-qualification)
+preserves exact versions, SDK execution-model differences and evidence limits.
+
+`get_session_capabilities("codex", "rpc")` / `getSessionCapabilities("codex", "rpc")`
+and Codex `open_session` / `openSession` on `rpc` or `sdk` still raise
+`unsupported-backend`. CLI behavior, imports, dependencies, permissions and the
+documented process-group boundary are unchanged. Completing
+[TWA-103](https://linear.app/twaldin/issue/TWA-103) means unsupported qualification
+documentation, not satisfying the implementation gates above. Future support
+is deferred to [TWA-107](https://linear.app/twaldin/issue/TWA-107); it must first
+establish reliable native-tool containment, then meet the full dual-language
+session acceptance. No backend fallback or weaker cleanup contract is enabled.
+
 ### Reconciliation of the live-session proposals
 
 The three local May 13 `harness-live-{design,dogfood,use-cases-audit}.md`
@@ -1937,7 +2216,7 @@ historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
 now ships under the execution contract above; controlled Pi RPC and optional
-OMP SDK, Factory Droid SDK and caller-owned OpenCode HTTP sessions ship through
+OMP/Amp SDK, Claude SDK, Factory Droid SDK and caller-owned OpenCode HTTP sessions ship through
 their explicit APIs. Additional protocols and SDKs remain implementation-gated.
 No package release is implied.
 
@@ -1974,7 +2253,7 @@ Harness provides CLI command construction, output parsing and headless execution
 
 Optional agent SDK/protocol integrations are now in scope for the library.
 This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
-consumer-owned host/fleet boundary. The optional OMP SDK bridge implements the
+consumer-owned host/fleet boundary. The optional OMP/Amp SDK bridges and native Claude SDK sessions implement the
 dependency and behavior requirements above. A raw model API,
 fleet manager, Linear engine or application is not an agent backend.
 

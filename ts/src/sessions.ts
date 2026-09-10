@@ -2085,8 +2085,7 @@ class ProcessSession extends LiveSession {
       } else if (reason === 'aborted') {
         this.#finishTurn(turn, 'interrupted', result, null)
       } else if (reason === 'max_iterations' || reason === 'mistake_limit' || reason === 'error') {
-        const text = result.errorMessage
-        this.#finishTurn(turn, 'agent-error', result, typeof text === 'string' && text !== '' ? text : `native run finished with reason ${JSON.stringify(reason)}`)
+        this.#finishTurn(turn, 'agent-error', result, `native run finished with reason ${reason}`)
       } else {
         // The native reason set is qualified; an unknown one is a protocol violation, never a guessed status.
         void this.#invalidate('protocol-error', `sdk_settled result has unknown finishReason ${JSON.stringify(reason)}`, result)

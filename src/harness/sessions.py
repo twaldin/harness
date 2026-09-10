@@ -2530,13 +2530,6 @@ def _classify_cline_result(result: dict[str, object]) -> tuple[SessionTurnStatus
     status = _CLINE_FINISH_REASONS[reason]
     if status != "agent-error":
         return status, None
-    error = result.get("error")
-    if isinstance(error, str) and error.strip():
-        return status, error.strip()
-    if isinstance(error, dict):
-        message = error.get("message")
-        if isinstance(message, str) and message.strip():
-            return status, message.strip()
     return status, f"native run finished with reason {reason}"
 
 
@@ -2593,7 +2586,7 @@ def _command_cleanup_error(jobs: list[_ShellJob]) -> str | None:
 async def open_session(spec: SessionSpec) -> LiveSession:
     """Open the live session for `spec`: spawn the session child (`pi --mode
     rpc`, the OMP Bun bridge, or the native Python Claude SDK worker),
-    connect to the caller-owned OpenCode server, or open the Amp Node worker.
+    connect to the caller-owned OpenCode server, or open the Amp/Cline Node worker.
     Each backend verifies its explicit native identity before accepting turns.
 
     Validation (harness, backend, options, resume header) happens before any

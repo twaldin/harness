@@ -61,6 +61,9 @@ from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_asyn
 from harness.sessions import (
     ClaudeSdkOptions,
     ClaudeSettingSource,
+    AmpEffort,
+    AmpSdkOptions,
+    AmpVisibility,
     LiveSession,
     OmpSdkOptions,
     OpenCodeApprovalResponse,
@@ -83,7 +86,10 @@ import harness.adapters  # noqa: E402,F401 — registers the shipped adapters
 __all__ = [
     "Adapter",
     "AgentStatus",
+    "AmpEffort",
     "AmpOptions",
+    "AmpSdkOptions",
+    "AmpVisibility",
     "Backend",
     "BuildCommand",
     "Capabilities",
@@ -152,4 +158,4 @@ __all__ = [
     "strip_ansi",
     "write_instructions",
 ]
-__version__ = "0.3.18"
+__version__ = "0.3.19"

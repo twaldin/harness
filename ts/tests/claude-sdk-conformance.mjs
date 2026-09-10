@@ -29,7 +29,7 @@ export async function claudeConformance(api) {
   let session
   try {
     for (const scenario of cases) {
-      session = await openSession({ ...spec, ...(scenario.max_buffer_bytes ? { maxBufferBytes: scenario.max_buffer_bytes } : {}) })
+      session = await openSession(spec)
       try {
         const turn = session.startTurn(scenario.prompt)
         const events = await collect(turn)

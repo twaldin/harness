@@ -60,10 +60,7 @@ async def collect(turn):
 
 @pytest.mark.parametrize("case", CASES, ids=[case["prompt"] for case in CASES])
 async def test_shared_native_sdk_cases(spec: SessionSpec, case: dict):
-    selected = replace(
-        spec, max_buffer_bytes=case.get("max_buffer_bytes", spec.max_buffer_bytes)
-    )
-    session = await open_session(selected)
+    session = await open_session(spec)
     try:
         turn = session.start_turn(case["prompt"])
         events = await collect(turn)

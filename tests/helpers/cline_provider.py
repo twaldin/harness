@@ -5,9 +5,10 @@ owned peer; the independent deadline also bounds a caller that disappears.
 """
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
+from socketserver import ThreadingTCPServer
 import sys
 import threading
 
@@ -53,7 +54,8 @@ class Provider(BaseHTTPRequestHandler):
             pass
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+# HTTPServer performs reverse DNS during bind; this loopback peer needs none.
+server = ThreadingTCPServer(("127.0.0.1", 0), Provider)
 server.daemon_threads = True
 finished = threading.Event()
 
@@ -67,7 +69,7 @@ reader = threading.Thread(target=stop_on_eof, daemon=True)
 serving = threading.Thread(target=server.serve_forever)
 reader.start()
 serving.start()
-print(json.dumps({"endpoint": f"http://127.0.0.1:{server.server_port}/v1"}), flush=True)
+print(json.dumps({"endpoint": f"http://127.0.0.1:{server.server_address[1]}/v1"}), flush=True)
 try:
     finished.wait(60)
 finally:

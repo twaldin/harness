@@ -13,9 +13,9 @@ const cases = JSON.parse(await readFile(join(root, 'tests/cline_sdk_cases.json')
 const collect = async turn => { const events = []; for await (const event of turn.events) events.push(event); return events }
 const missing = path => assert.rejects(access(path), { code: 'ENOENT' })
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
-async function within(promise, ms) {
+async function within(promise, ms, phase) {
   let timer
-  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('synthetic peer deadline')), ms) })]) }
+  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`synthetic peer ${phase} deadline`)), ms) })]) }
   finally { clearTimeout(timer) }
 }
 
@@ -26,18 +26,20 @@ async function configure(directory, scenario) {
   await Promise.all([mkdir(workdir, { recursive: true }), mkdir(home, { recursive: true }), mkdir(join(configDir, 'data/settings'), { recursive: true })])
   const provider = spawn(process.env.PYTHON ?? 'python3', [join(root, 'tests/helpers/cline_provider.py'), workdir, scenario], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
   const exit = new Promise((resolve, reject) => { provider.once('exit', resolve); provider.once('error', reject) })
+  let stderr = ''
+  provider.stderr.setEncoding('utf8').on('data', chunk => { stderr = (stderr + chunk).slice(-8192) })
   const lines = createInterface({ input: provider.stdout })
   const stop = async () => {
     provider.stdin.end()
-    try { await within(exit, 5000) }
+    try { await within(exit, 5000, 'EOF shutdown') }
     catch (error) {
       if (provider.pid && provider.exitCode === null && provider.signalCode === null) process.kill(-provider.pid, 'SIGKILL')
-      await within(exit, 2000)
-      throw error
+      await within(exit, 2000, 'forced shutdown')
+      throw new Error(`synthetic peer ${scenario} shutdown failed; stderr=${stderr}`, { cause: error })
     } finally { lines.close(); provider.stderr.destroy() }
   }
   try {
-    const next = await within(lines[Symbol.asyncIterator]().next(), 5000)
+    const next = await within(lines[Symbol.asyncIterator]().next(), 5000, 'readiness')
     const { endpoint } = JSON.parse(next.value)
     await writeFile(join(configDir, 'data/settings/providers.json'), JSON.stringify({ version: 1, modes: {}, lastUsedProvider: 'openai-compatible', providers: {
       'openai-compatible': { settings: { provider: 'openai-compatible', model: 'synthetic', apiKey: 'synthetic', baseUrl: endpoint }, updatedAt: '2026-09-10T00:00:00Z', tokenSource: 'manual' },
@@ -47,7 +49,11 @@ async function configure(directory, scenario) {
       env: { HOME: home, NODE_OPTIONS: `--import=${pathToFileURL(join(root, 'tests/helpers/cline_faults.mjs')).href}`, HARNESS_TEST_CLINE_PACKAGE_ROOT: packageRoot, HARNESS_TEST_CLINE_SCENARIO: scenario },
       clineSdk: { packageRoot, configDir, provider: 'openai-compatible', features: 'builtin-only', approval: 'callback' },
     } }
-  } catch (error) { await stop(); throw error }
+  } catch (error) {
+    try { await stop() }
+    catch (cleanup) { throw new AggregateError([error, cleanup], `synthetic peer ${scenario} startup/cleanup failed; stderr=${stderr}`) }
+    throw new Error(`synthetic peer ${scenario} startup failed; stderr=${stderr}`, { cause: error })
+  }
 }
 
 export async function clineConformance(api) {

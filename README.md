@@ -942,9 +942,12 @@ and [example commands](examples/README.md). No package publication is required.
 The Python distribution is `harness-cli`, imported as `harness`; TypeScript
 imports `@twaldin/harness-ts`. Current manifest versions are **0.3.22** and
 **0.2.27**, respectively. This recorded skew is not a compatibility or release
-policy change; Python's historical `harness.__version__` also differs from its
-distribution metadata. Use installed distribution metadata and the selected
-commit to identify what you are testing, not that constant.
+policy change. Python's `harness.__version__` reads the installed `harness-cli`
+distribution metadata, whose maintained version source is `pyproject.toml`.
+Editable installs report that installed metadata too; reinstall after changing
+the manifest version. Direct source-tree imports without distribution metadata
+remain supported and report `0+unknown`, not a release version. Record the
+selected commit alongside the version when testing an exact source build.
 
 Harness does not install agents, log in, select accounts or copy credentials.
 Configure authentication with the upstream tool in caller-owned locations.

@@ -61,9 +61,10 @@ Material qualifications:
   host load, reporting disposal failure and forced worker teardown. Sequential
   runs closed cleanly. This is not a claim that disposal always succeeds under
   load.
-- Python's historical `harness.__version__` remains `0.3.19`; use distribution
-  metadata. [TWA-109](https://linear.app/twaldin/issue/TWA-109) tracks that
-  duplicate-version-source repair, not a release-policy change.
+- Python's `harness.__version__` reported the stale `0.3.19` during TWA-89.
+  [TWA-109](https://linear.app/twaldin/issue/TWA-109) repairs that duplicate
+  version source: installed imports now read distribution metadata; uninstalled
+  source imports report `0+unknown`. This does not change release policy.
 - Other CLI and session-native/provider combinations were not repeated by this
   bounded matrix; their earlier evidence and limitations remain below.
   OpenCode/OpenHands retain mock-server-only qualification. No Linux native

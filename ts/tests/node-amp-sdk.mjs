@@ -39,10 +39,14 @@ try {
   assert.equal(reference.sessionFile, null)
   assert.equal(reference.endpoint, 'https://ampcode.com')
   let turns = 0
+  let mode = spec.ampSdk.mode
   for (const scenario of fixture.cases) {
-    // Native protocol violations invalidate the session: resume the exact thread for the next case.
-    if (session.closed) {
-      session = await openSession({ ...spec, resume: reference })
+    // Resume the exact thread after protocol failure or a caller mode change.
+    const nextMode = scenario.mode ?? spec.ampSdk.mode
+    if (session.closed || nextMode !== mode) {
+      await session.close()
+      mode = nextMode
+      session = await openSession({ ...spec, ampSdk: { ...spec.ampSdk, mode }, resume: reference })
       assert.deepEqual(session.reference, reference)
     }
     const turn = session.startTurn(scenario.prompt)
@@ -62,7 +66,7 @@ try {
     if (scenario.rawType !== undefined) assert.equal(result.raw?.type, scenario.rawType, scenario.name)
     if (scenario.status === 'completed') {
       assert.deepEqual(events, ['system', 'assistant', 'future_event', 'result'])
-      assert.equal(result.raw.result, `synthetic turn ${turns}`)
+      assert.equal(result.raw.result, scenario.result ?? `synthetic turn ${turns}`)
       assert.deepEqual(result.raw.usage, { input_tokens: null, output_tokens: 2, max_tokens: 123, cache_creation: { ephemeral_5m_input_tokens: 4 } })
     }
     if (scenario.prompt === 'permission-rejection') assert.deepEqual(result.raw.permission_denials, ['synthetic-tool'])

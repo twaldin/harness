@@ -15,6 +15,7 @@ import pytest
 from harness import (
     ClaudeSdkOptions,
     HarnessError,
+    SessionReference,
     SessionSpec,
     get_session_capabilities,
     open_session,
@@ -116,6 +117,28 @@ async def test_follow_up_exact_resume_and_cumulative_cost(spec: SessionSpec):
     wrong = replace(reference, session_id="00000000-0000-4000-8000-000000000000")
     with pytest.raises(HarnessError):
         await open_session(replace(spec, resume=wrong))
+    assert not (spec.workdir / ".harness-run.lock").exists()
+
+
+async def test_resume_preserves_uppercase_native_uuid(spec: SessionSpec):
+    session_id = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+    transcript = spec.workdir / "uppercase-native.jsonl"
+    transcript.write_text(
+        json.dumps({"type": "user", "sessionId": session_id, "cwd": str(spec.workdir)})
+        + "\n"
+    )
+    reference = SessionReference(session_id, transcript, spec.workdir)
+    async with await open_session(replace(spec, resume=reference)) as resumed:
+        turn = resumed.start_turn("success")
+        await collect(turn)
+        result = await turn.result
+        assert result.status == "completed"
+        assert result.session_id == session_id
+        assert resumed.reference == reference
+    with pytest.raises(HarnessError):
+        await open_session(
+            replace(spec, resume=replace(reference, session_id=session_id.lower()))
+        )
     assert not (spec.workdir / ".harness-run.lock").exists()
 
 

@@ -215,20 +215,31 @@ async function main() {
         ...(options.effort === undefined ? {} : { effort: options.effort }),
         ...(options.settingsFile === undefined ? {} : { settingsFile: options.settingsFile }) }
       for await (const event of sdk.execute({ prompt: options.prompt, options: nativeOptions })) {
-        if (!isObject(event) || typeof event.type !== 'string' || !event.type) throw new Error('Amp SDK yielded an invalid native event')
-        if (event.session_id !== undefined && event.session_id !== options.sessionId) throw new Error('Amp SDK returned a different thread ID')
-        if (event.type === 'system' && event.subtype === 'init') {
-          if (initialized || event.session_id !== options.sessionId || typeof event.cwd !== 'string' || realpathSync(event.cwd) !== realpathSync(options.cwd)) throw new Error('Amp SDK init identity/workdir mismatch')
-          initialized = true
-          await send({ type: 'amp_open', sessionId: options.sessionId, workdir: options.cwd, endpoint: options.endpoint })
+        try {
+          if (!isObject(event) || typeof event.type !== 'string' || !event.type) throw new Error('Amp SDK yielded an invalid native event')
+          if (event.session_id !== undefined && event.session_id !== options.sessionId) throw new Error('Amp SDK returned a different thread ID')
+          if (event.type === 'system' && event.subtype === 'init') {
+            if (initialized || event.session_id !== options.sessionId || typeof event.cwd !== 'string' || realpathSync(event.cwd) !== realpathSync(options.cwd)) throw new Error('Amp SDK init identity/workdir mismatch')
+            initialized = true
+            await send({ type: 'amp_open', sessionId: options.sessionId, workdir: options.cwd, endpoint: options.endpoint })
+          }
+          if (event.type === 'result') {
+            if (!initialized || lastResult || typeof event.is_error !== 'boolean') throw new Error('Amp SDK emitted an invalid or duplicate terminal result')
+            lastResult = event
+          }
+          await send({ type: 'amp_event', event })
+        } catch (error) {
+          // Worker validation outranks native exit metadata, which the SDK may
+          // observe before delivering buffered events. SDK iterator exceptions
+          // stay outside this catch so genuine native exits retain their status.
+          protocolError ??= errorText(error)
+          throw error
         }
-        if (event.type === 'result') {
-          if (!initialized || lastResult || typeof event.is_error !== 'boolean') throw new Error('Amp SDK emitted an invalid or duplicate terminal result')
-          lastResult = event
-        }
-        await send({ type: 'amp_event', event })
       }
-      if (!initialized || !lastResult) throw new Error('Amp SDK ended without init and terminal result')
+      if (!initialized || !lastResult) {
+        protocolError ??= 'Amp SDK ended without init and terminal result'
+        throw new Error(protocolError)
+      }
     }
   } catch (error) { failure = errorText(error) }
   if (selectedChild && !failure) {

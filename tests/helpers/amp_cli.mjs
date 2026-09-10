@@ -40,11 +40,12 @@ if (args.includes('--version')) {
     await new Promise(resolve => process.stdout.write(JSON.stringify({ type: 'error', session_id: id, error: 'synthetic pre-init rejection' }) + '\n', resolve))
     process.exit(3)
   }
-  const sessionId = prompt === 'wrong-id' ? otherId : id
+  const sessionId = prompt === 'wrong-id' || prompt === 'wrong-id-exit' ? otherId : id
   emit({ type: 'system', subtype: 'init', session_id: sessionId, cwd: prompt === 'wrong-cwd' ? '/' : process.cwd(), tools: [], mcp_servers: [] })
   const assistant = { type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'text', text: 'synthetic partial' }], stop_reason: 'end_turn' } }
   emit(assistant)
   const result = { type: 'result', subtype: 'success', is_error: false, session_id: id, result: `synthetic turn ${saved.turns}`, duration_ms: 1, num_turns: 1, usage: { input_tokens: null, output_tokens: 2, max_tokens: 123, cache_creation: { ephemeral_5m_input_tokens: 4 } } }
+  if (prompt === 'report-mode') result.result = args[args.indexOf('--mode') + 1]
   if (prompt === 'hang' || prompt === 'child-hang') {
     if (prompt === 'child-hang') {
       const child = spawn(process.execPath, [process.argv[1], '--owned-child'], { stdio: 'ignore' })
@@ -73,6 +74,6 @@ if (args.includes('--version')) {
     if (prompt === 'stderr') process.stderr.write('synthetic-stderr\n'.repeat(100))
     emit(result)
     if (prompt === 'duplicate-result') emit(result)
-    if (prompt === 'exit-after-result') process.exitCode = 3
+    if (prompt === 'exit-after-result' || prompt === 'wrong-id-exit') process.exitCode = 3
   }
 }

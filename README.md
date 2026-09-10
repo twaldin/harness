@@ -79,6 +79,11 @@ ownership, errors, telemetry and session/backend requirements. These APIs
 describe the source tree; published packages are not updated by a documentation
 or implementation merge.
 
+Codex app-server sessions remain **deferred/unsupported** after native
+tool-containment qualification; the existing Codex CLI adapter is unchanged.
+Neither official Codex SDK is enabled as a Harness session backend. See the
+[qualification finding and version limits](ADAPTER-MATRIX.md#codex-app-server-unsupported-after-qualification).
+
 ### Subprocess lifecycle
 
 Python `run()` blocks; Python `run_async()` and TypeScript `run()` / `runAsync()`

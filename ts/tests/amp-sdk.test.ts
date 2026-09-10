@@ -28,12 +28,12 @@ interface SharedCase {
   status: SessionTurnStatus
   exitCode?: number
   rawType?: string
+  mode?: string
+  result?: string
 }
 
 interface Fixture {
   sessionId: string
-  sdkVersion: string
-  cliVersion: string
   cases: SharedCase[]
 }
 
@@ -172,7 +172,7 @@ describe('shared SDK scenarios', () => {
   for (const scenario of FIXTURE.cases) {
     test(`${scenario.name}: "${scenario.prompt}" → ${scenario.status}`, async () => {
       const box = sandbox()
-      const session = await open(box, { requestTimeoutSeconds: 3 })
+      const session = await open(box, { requestTimeoutSeconds: 3, ampSdk: options({ mode: scenario.mode ?? 'low' }) })
       expect(session.reference).toEqual({ sessionId: THREAD, sessionFile: null, workdir: box.workdir, endpoint: ENDPOINT })
       const turn = session.startTurn(scenario.prompt)
       const events = await collect(turn)
@@ -182,6 +182,7 @@ describe('shared SDK scenarios', () => {
       expect(result.turnId).toBe(turn.id)
       if (scenario.exitCode !== undefined) expect(result.exitCode).toBe(scenario.exitCode)
       if (scenario.rawType !== undefined) expect(result.raw?.type).toBe(scenario.rawType)
+      if (scenario.result !== undefined) expect(result.raw?.result).toBe(scenario.result)
       expectNativeEvents(events, turn.id)
       // Native protocol violations invalidate the session; native completion, agent errors and CLI exits settle the turn only.
       expect(session.closed).toBe(scenario.status === 'protocol-error')

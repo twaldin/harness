@@ -1,6 +1,6 @@
 # Contributing to harness
 
-Harness is a small library for uniform coding-agent integration. CLI execution, controlled Pi RPC sessions, optional OMP/Amp SDK bridges, optional native Claude SDK sessions and caller-owned OpenCode HTTP/SSE sessions ship today; additional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
+Harness is a small library for uniform coding-agent integration. CLI execution, controlled Pi RPC sessions, optional OMP/Amp/Cline SDK bridges, optional native Claude SDK sessions and caller-owned OpenCode HTTP/SSE sessions ship today; additional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
 
 ## Before you open a PR
 
@@ -22,6 +22,10 @@ PYTHONPATH=src uv run pytest tests/
 cd ts && bun test
 ```
 
+Install TypeScript development dependencies (`bun install` from `ts/`) before
+the Python suite as well: both language Cline cases use its optional pinned
+`@cline/sdk` package with a finite synthetic loopback provider.
+
 All tests must pass in both. If you add a fixture, both impls must parse it.
 
 ### Offline conformance versus live smoke
@@ -37,8 +41,8 @@ The `subprocess lifecycle` workflow gates macOS and Linux (GitHub
 `macos-latest` / `ubuntu-latest`) with Python 3.10, Bun 1.3.14 and Node 22.
 After `bun run build`, run `node tests/node-lifecycle.mjs` and
 `node tests/node-sessions.mjs`, `node tests/node-omp-sdk.mjs`,
-`node tests/node-claude-sdk.mjs`, `node tests/node-amp-sdk.mjs` and
-`node tests/node-opencode.mjs` from `ts/` to check packaged subprocess, RPC,
+`node tests/node-claude-sdk.mjs`, `node tests/node-amp-sdk.mjs`,
+`node tests/node-cline-sdk.mjs` and `node tests/node-opencode.mjs` from `ts/` to check packaged subprocess, RPC,
 optional SDK and HTTP/SSE behavior under Node as well as source under Bun.
 OMP uses the real Bun worker with a synthetic SDK; Amp uses the real Node
 worker with a synthetic SDK and finite native CLI fixture; neither requires an
@@ -46,6 +50,11 @@ installed provider or account. Claude cases use the pinned real SDK packages
 from development dependencies plus a finite synthetic CLI, never a bundled CLI
 or provider. Install Python development dependencies with `uv sync --extra dev`
 before running these cases. No Windows lifecycle support is claimed.
+Cline uses the pinned real SDK in a Node >=22.14 worker for Python, Bun and
+packaged Node. `tests/cline_sdk_cases.json` shares expected outcomes; its
+provider peer is finite and synthetic. Test-only event/failure injection is
+separate from private unmodified native-runtime and authenticated-provider
+qualification.
 The HTTP cases share `tests/opencode_cases.json` and an isolated synthetic peer
 with a finite lifetime and handle-owned cleanup. They are not native OpenCode
 or authenticated-provider qualification; keep those evidence categories separate.
@@ -204,7 +213,7 @@ Add a row to [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) covering: CLI binary name, i
 Streaming, controlled sessions and optional agent SDK integrations are eligible
 when they implement the [SPEC gates](SPEC.md#backend-and-session-implementation-gates)
 in both languages. This supersedes the historical blanket SDK exclusion.
-Pi RPC, the OMP/Amp SDK bridges, native Claude SDK sessions and caller-owned
+Pi RPC, the OMP/Amp/Cline SDK bridges, native Claude SDK sessions and caller-owned
 OpenCode HTTP/SSE are implemented;
 other protocols/SDKs need qualification.
 Keep optional SDK loading isolated from ordinary CLI imports and preserve

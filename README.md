@@ -394,6 +394,75 @@ that operation before allowing follow-up in the same thread. Native events,
 usage and terminal results stay verbatim. See the
 [Amp dependency, lifecycle and qualification contract](SPEC.md#optional-amp-sdk-sessions).
 
+### Optional Cline SDK sessions
+
+Select `harness="cline", backend="sdk"` with the official
+`@cline/sdk@0.0.82` installed separately. Python and TypeScript use the same
+**Node >=22.14 bridge**, not a native Python SDK or the Cline CLI.
+
+```python
+from pathlib import Path
+from harness import ClineSdkOptions, SessionSpec, open_session
+
+async def review(workdir: Path, sdk_package: Path, profile: Path):
+    session = await open_session(SessionSpec(
+        harness="cline", backend="sdk", workdir=workdir,
+        cline_sdk=ClineSdkOptions(
+            package_root=sdk_package, config_dir=profile,
+            provider="openai-compatible", features="builtin-only",
+            approval="callback",
+        ),
+    ))
+    try:
+        turn = session.start_turn("Review the repository without editing files.")
+        async for event in turn.events:
+            if event.type == "cline_permission":
+                await session.respond_approval(event.raw["id"], "reject")
+        return await turn.result
+    finally:
+        await session.close()
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+async function review(workdir: string, packageRoot: string, configDir: string) {
+  const session = await openSession({
+    harness: 'cline', backend: 'sdk', workdir,
+    clineSdk: {
+      packageRoot, configDir, provider: 'openai-compatible',
+      features: 'builtin-only', approval: 'callback',
+    },
+  })
+  try {
+    const turn = session.startTurn('Review the repository without editing files.')
+    for await (const event of turn.events) {
+      if (event.type === 'cline_permission' && typeof event.raw.id === 'string') {
+        await session.respondApproval(event.raw.id, 'reject')
+      }
+    }
+    return await turn.result
+  } finally {
+    await session.close()
+  }
+}
+```
+
+Use absolute paths and a dedicated writable Cline profile with the selected
+provider/model configured. Explicit `model` overrides that profile's model;
+`executable` selects Node. The SDK remains local: no hub attachment/startup.
+`features: "builtin-only"` deliberately excludes hooks, plugins, MCP,
+subagents and other unqualified native extensions. Harness owns command
+execution through the public bash hook and cancels command groups even when
+the SDK worker dies. This is process ownership, not a sandbox.
+
+The example rejects observed tool requests. Use `"once"` only after your
+application approves the unchanged native request. Omitted `approval` means
+`"upstream"` and retains Cline SDK's **auto-approved defaults**; no interactive
+permission guarantee is implied. Native events, exact resume and per-turn/
+cumulative usage remain distinct. See the
+[Cline SDK contract and evidence limits](SPEC.md#optional-cline-sdk-sessions).
+
 ### Caller-owned OpenCode HTTP sessions
 
 Select `harness="opencode", backend="rpc"` with an explicit `OpenCodeOptions`

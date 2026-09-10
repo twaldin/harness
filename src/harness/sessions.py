@@ -1,7 +1,7 @@
 """Live sessions — an owned child driven over JSONL, a caller-owned OpenCode
 server driven over HTTP + SSE, or Amp threads driven through one-shot workers.
 
-Four (harness, backend) pairs share one public surface:
+Six (harness, backend) pairs share one public surface:
 
 - `pi` / `rpc`: `pi --mode rpc`, the native JSONL protocol on stdio.
 - `omp` / `sdk`: an owned Bun child running the sibling `_omp_sdk.mjs` bridge,
@@ -31,6 +31,15 @@ Four (harness, backend) pairs share one public surface:
 - `amp` / `sdk`: one finite Node worker (`_amp_sdk.mjs`) per operation, loading
   the caller-installed `@ampcode/sdk` from `AmpSdkOptions.package_root` and
   driving the pinned native CLI at `AmpSdkOptions.cli_path`. See `_amp`.
+- `cline` / `sdk`: an owned Node child running the sibling `_cline_sdk.mjs`
+  worker, which loads the caller-installed `@cline/sdk` from
+  `ClineSdkOptions.package_root` and drives one local `ClineCore` session
+  under the caller-selected `config_dir`. Same framing as the OMP bridge
+  plus: every native `CoreSessionEvent` arrives as `sdk_event`, `sdk_settled`
+  carries the native `AgentResult`, permission prompts surface as
+  `cline_permission` events (only with `approval="callback"`) answered with
+  `respond_approval`, and every native command runs *here*, in a
+  parent-owned process group, in answer to a `shell_request` frame.
 
 `open_session(spec)` spawns the child in its own POSIX process group (or opens
 the HTTP transport), completes the identity handshake and returns a
@@ -71,15 +80,19 @@ import json
 import math
 import os
 import re
+import shutil
 import signal
 import sys
+import tempfile
+import threading
 from collections import deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePath
-from typing import Coroutine, Literal
+from typing import Coroutine, Literal, cast
 from urllib.parse import urlsplit
 
 from harness._instructions import PreparedCommand, cleanup_command, prepare_command
+from harness._subproc import SubprocOutcome, run_subprocess_async
 from harness.base import (
     BACKENDS,
     PERMISSION_POLICIES,
@@ -87,6 +100,7 @@ from harness.base import (
     BuildCommand,
     ErrorCode,
     HarnessError,
+    OutputStream,
     PermissionPolicy,
     absolute_workdir,
 )
@@ -122,6 +136,14 @@ SUPPORTED_CLAUDE_CLI_VERSION = "2.1.259"
 SUPPORTED_AMP_SDK_DISTRIBUTION = "@ampcode/sdk 0.1.0-20260823161614-g3631dc6"
 #: Native Amp CLI the worker verifies through `--version` before any thread call.
 SUPPORTED_AMP_CLI_VERSION = "0.0.1788883237-g0b98e3"
+#: Exact `@cline/sdk` distribution the `_cline_sdk.mjs` worker loads from
+#: `ClineSdkOptions.package_root`; any other is `launch-failed`.
+SUPPORTED_CLINE_SDK_DISTRIBUTION = "@cline/sdk 0.0.82"
+#: Node the Cline worker requires: `module.findPackageJSON` (public since
+#: 22.14) resolves the caller's exact ESM-only native transitives without a
+#: deep-import bypass. The worker rejects an older runtime (and Bun);
+#: nothing is probed here.
+MINIMUM_CLINE_NODE_VERSION = "22.14.0"
 #: Endpoint used when neither `spec.env` nor the process env sets `AMP_URL`.
 DEFAULT_AMP_ENDPOINT = "https://ampcode.com"
 #: Exact `GET /global/health` version of the OpenCode server this module is
@@ -133,9 +155,10 @@ _TICK = 0.02
 _TERM_GRACE = 0.5
 _DRAIN_BUDGET = 1.0
 #: Qualified (harness, backend) pairs; every other combination is rejected.
-_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc", "claude-code": "sdk", "amp": "sdk"}
+_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc", "claude-code": "sdk", "amp": "sdk", "cline": "sdk"}
 _SDK_WORKER = Path(__file__).with_name("_omp_sdk.mjs")
 _CLAUDE_WORKER = Path(__file__).with_name("_claude_sdk.py")
+_CLINE_WORKER = Path(__file__).with_name("_cline_sdk.mjs")
 #: Child environment the SDK bridge owns (both pinned to `agent_dir` so the
 #: selected profile is also the config root); conflicting caller entries are
 #: rejected. `bun --no-env-file` only silences Bun's own dotenv loading; the
@@ -144,6 +167,31 @@ _SDK_OWNED_ENV = ("PI_CODING_AGENT_DIR", "PI_CONFIG_DIR")
 #: Child environment the Claude worker owns (pinned to `config_dir`); a
 #: conflicting caller entry is rejected. The worker inherits everything else.
 _CLAUDE_OWNED_ENV = "CLAUDE_CONFIG_DIR"
+#: Child environment the Cline worker owns: the caller's Cline root, its
+#: data / session / database directories, the local session backend, the
+#: update check and the hub daemon switch. The worker re-pins all of them
+#: (and drops every other inherited `CLINE_*_DIR` / `CLINE_*_PATH`) before
+#: the SDK import; a conflicting caller entry is rejected. `TMPDIR` is owned
+#: too, but its value is the parent-owned per-session directory, so any
+#: caller entry for it is rejected outright.
+_CLINE_OWNED_ENV = (
+    "CLINE_DIR",
+    "CLINE_DATA_DIR",
+    "CLINE_SESSION_DATA_DIR",
+    "CLINE_DB_DATA_DIR",
+    "CLINE_SESSION_BACKEND_MODE",
+    "CLINE_NO_AUTO_UPDATE",
+    "CLINE_RUN_AS_HUB_DAEMON",
+)
+#: Wall-clock cap on one parent-owned native command (the native bash default).
+_CLINE_COMMAND_TIMEOUT_SECONDS = 30.0
+#: Capture cap per stream for one parent-owned native command.
+_CLINE_COMMAND_MAX_OUTPUT_BYTES = 48_000
+#: Concurrent `shell_request` commands the worker may keep outstanding.
+_CLINE_MAX_ACTIVE_COMMANDS = 32
+#: Budget for the bounded cleanup of cancelled commands during teardown; the
+#: shared runner escalates SIGTERM -> SIGKILL and drains inside it.
+_CLINE_COMMAND_CLEANUP_BUDGET = 2.0
 
 OmpSdkAuth = Literal["local", "environment"]
 OpenCodeAuth = Literal["none", "basic"]
@@ -168,6 +216,13 @@ AmpEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 AmpVisibility = Literal["private", "unlisted", "workspace", "group"]
 _AMP_EFFORTS: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 _AMP_VISIBILITIES: tuple[str, ...] = ("private", "unlisted", "workspace", "group")
+#: Native surface the Cline worker may use: the builtin tools and nothing
+#: else (no hooks, plugins, rules, skills, workflows, MCP servers,
+#: subagents, teams, checkpoints or detached commands).
+ClineFeatures = Literal["builtin-only"]
+#: "upstream" keeps the native auto-approval configuration; "callback"
+#: routes every native tool approval to `LiveSession.respond_approval`.
+ClineApproval = Literal["upstream", "callback"]
 
 
 # ── public types ────────────────────────────────────────────────────────────
@@ -186,6 +241,7 @@ class SessionReference:
                      OpenCode and Amp, whose history lives on a server.
                      Claude: None until a native hook reports transcript_path;
                      the exact supplied transcript on resume.
+                     Cline: the native session manifest path.
     `workdir`      — absolute directory the session was opened in. For
                      OpenCode this is the literal server-side directory.
     `endpoint`     — normalized OpenCode server or Amp service origin
@@ -255,6 +311,42 @@ class ClaudeSdkOptions:
 
 
 @dataclass(frozen=True)
+class ClineSdkOptions:
+    """Where the `cline` / `sdk` worker finds the caller's SDK and Cline root
+    and which native surface it may use. Nothing is guessed, discovered,
+    installed or copied.
+
+    `package_root` — absolute directory of the caller-installed `@cline/sdk`
+                     package the worker imports; the worker requires exactly
+                     `SUPPORTED_CLINE_SDK_DISTRIBUTION` and resolves the
+                     native transitives from it.
+    `config_dir`   — absolute caller-selected Cline root, exported as
+                     `CLINE_DIR` with the data / session / database
+                     directories pinned under `config_dir/data`.
+    `provider`     — non-blank native provider ID, passed verbatim. With
+                     `SessionSpec.model` unset the worker uses that
+                     provider's configured model and fails when it has none;
+                     a selected model ID is never normalized or mapped.
+    `features`     — only "builtin-only": native hooks, plugins, rules,
+                     skills, workflows, MCP servers, subagents, teams,
+                     checkpoints and command detachment are switched off
+                     explicitly, never left to a default. Any other value is
+                     `unsupported-capability`.
+    `approval`     — "upstream" leaves the native auto-approval configuration
+                     untouched (no implicit bypass); "callback" clears native
+                     auto-approval for every tool and surfaces each request
+                     as a `cline_permission` event answered with
+                     `LiveSession.respond_approval`.
+    """
+
+    package_root: Path
+    config_dir: Path
+    provider: str
+    features: ClineFeatures
+    approval: ClineApproval = "upstream"
+
+
+@dataclass(frozen=True)
 class OpenCodeOptions:
     """Where the caller's `opencode serve` instance is and how to authenticate.
 
@@ -315,8 +407,9 @@ class SessionSpec:
     """Everything needed to open a live session.
 
     `harness`         — "pi" / "opencode" (rpc), or "omp" / "amp" /
-                        "claude-code" (sdk). Other registered harnesses raise
-                        `unsupported-backend`; unknown names `unknown-harness`.
+                        "claude-code" / "cline" (sdk). Other registered
+                        harnesses raise `unsupported-backend`; unknown names
+                        `unknown-harness`.
     `workdir`         — cwd for the child (absolute against the process cwd).
                         OpenCode: the explicit absolute POSIX directory on the
                         server, retained literally (no local resolution,
@@ -324,9 +417,11 @@ class SessionSpec:
                         (`.`/`..` segments, empty segments, trailing slash)
                         are `invalid-options`.
     `backend`         — "rpc" with "pi" / "opencode" or "sdk" with "omp" /
-                        "amp" / "claude-code"; other pairings and "cli"
-                        raise `unsupported-backend`.
-    `model`           — trimmed native selector for Pi / OMP / Claude;
+                        "amp" / "claude-code" / "cline"; other pairings and
+                        "cli" raise `unsupported-backend`.
+    `model`           — trimmed native selector for Pi / OMP / Claude; Cline
+                        passes the ID through exactly and falls back to the
+                        selected provider profile's model when unset.
                         OpenCode requires provider/model. None preserves
                         native selection; empty is invalid. Amp rejects model
                         because amp_sdk.mode owns routing.
@@ -336,16 +431,23 @@ class SessionSpec:
                         `CLAUDE_CONFIG_DIR` (config_dir). Conflicting explicit
                         entries reject. Amp reads AMP_URL from the overlay or
                         inherited environment and pins AMP_SKIP_UPDATE_CHECK=1.
+                        Cline owns `CLINE_DIR`, the data / session / database
+                        directories under it, `CLINE_SESSION_BACKEND_MODE`,
+                        `CLINE_NO_AUTO_UPDATE`, `CLINE_RUN_AS_HUB_DAEMON` and
+                        `TMPDIR` (the parent-owned per-session directory; a
+                        caller entry is rejected). The commands the parent
+                        runs for the Cline worker get the same overlay.
                         OpenCode rejects a non-empty env.
     `executable`      — bare binary name or absolute path; default "pi" for
-                        pi, "bun" for omp, "node" for amp, and
+                        pi, "bun" for omp, "node" for amp and cline, and
                         sys.executable for claude-code (an interpreter with
                         the selected SDK dependencies). This selects the
                         worker runtime, not the native SDK CLI. OpenCode rejects it.
     `permission_policy` — only "upstream"; "bypass" raises `unsupported-capability`.
     `instructions`    — projected to the adapter's instructions file
                         (`AGENTS.md`; `CLAUDE.md` for claude-code, which
-                        requires "project" in `claude_sdk.setting_sources`)
+                        requires "project" in `claude_sdk.setting_sources`;
+                        `CLINE.md` for cline)
                         under the workdir lease for the life of the process
                         tree. Rejected for OpenCode (no local filesystem to
                         project into).
@@ -361,9 +463,14 @@ class SessionSpec:
                         with GET /session/{id} before anything else. Amp
                         requires session_file=None, the same workdir and
                         AMP_URL endpoint, and a full T-UUID verified by the SDK.
+                        Cline requires an existing absolute native manifest
+                        and the same workdir; no Pi/OMP header is expected
+                        (the worker verifies the native manifest identity,
+                        path and cwd before and after the native start).
     `omp_sdk`         — required with harness "omp", rejected otherwise.
     `claude_sdk`      — required with harness "claude-code", rejected otherwise.
     `amp_sdk`         — required with harness "amp", rejected otherwise.
+    `cline_sdk`       — required with harness "cline", rejected otherwise.
     `opencode`        — required with harness "opencode", rejected otherwise.
     `timeout_seconds` — wall-clock cap per turn (default 1800). None disables
                         it. Expiry tears the session down (`timed-out`).
@@ -394,6 +501,7 @@ class SessionSpec:
     opencode: OpenCodeOptions | None = None
     amp_sdk: AmpSdkOptions | None = None
     claude_sdk: ClaudeSdkOptions | None = None
+    cline_sdk: ClineSdkOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -415,11 +523,12 @@ class SessionEvent:
     RPC frame, native SDK event unwrapped from sdk_event (OMP / Claude)
     or amp_event (Amp), or the OpenCode SSE event. Claude also reports
     claude_permission / claude_permission_cancelled / claude_session_hook /
-    claude_interrupt; permission request_id is explicitly bridge-local. OpenCode:
-    (`{"id", "type", "properties"}`)."""
+    claude_interrupt, and Cline cline_permission /
+    cline_permission_cancelled; permission request_id is explicitly
+    bridge-local. OpenCode: (`{"id", "type", "properties"}`)."""
 
     backend: Literal["rpc", "sdk"]
-    harness: Literal["pi", "omp", "opencode", "claude-code", "amp"]
+    harness: Literal["pi", "omp", "opencode", "claude-code", "amp", "cline"]
     session_id: str
     turn_id: str | None
     request_id: str | None
@@ -547,7 +656,7 @@ def get_session_capabilities(name: str, backend: Backend = "rpc") -> SessionCapa
         follow_up=True,
         resume=True,
         concurrent_turns=False,
-        approval=name in ("opencode", "claude-code"),
+        approval=name in ("opencode", "claude-code", "cline"),
     )
 
 
@@ -815,9 +924,12 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
         raise HarnessError(f"resume.session_id {resume.session_id!r} must be a Claude session UUID", code="invalid-options")
     omp_sdk = _validate_omp_sdk(spec)
     claude_sdk = _validate_claude_sdk(spec)
+    cline_sdk = _validate_cline_sdk(spec)
     if spec.harness == "claude-code" and not spec.executable and not sys.executable:
         raise HarnessError("claude-code sdk sessions need executable: sys.executable is empty in this interpreter", code="invalid-options")
-    return replace(spec, workdir=workdir, model=model, env=dict(spec.env), resume=resume, omp_sdk=omp_sdk, claude_sdk=claude_sdk)
+    return replace(
+        spec, workdir=workdir, model=model, env=dict(spec.env), resume=resume, omp_sdk=omp_sdk, claude_sdk=claude_sdk, cline_sdk=cline_sdk
+    )
 
 
 def _validate_opencode_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
@@ -835,6 +947,8 @@ def _validate_opencode_spec(spec: SessionSpec, model: str | None) -> SessionSpec
         raise HarnessError("claude_sdk applies only to claude-code sdk sessions, not opencode rpc", code="invalid-options")
     if spec.amp_sdk is not None:
         raise HarnessError("amp_sdk applies only to amp sdk sessions, not opencode rpc", code="invalid-options")
+    if spec.cline_sdk is not None:
+        raise HarnessError("cline_sdk applies only to cline sdk sessions, not opencode rpc", code="invalid-options")
     if model is not None:
         provider, _, model_id = model.partition("/")
         if not provider or not model_id:
@@ -938,6 +1052,78 @@ def _validate_claude_sdk(spec: SessionSpec) -> ClaudeSdkOptions | None:
         setting_sources=tuple(sources),
         settings_file=settings_file,
     )
+
+
+def _cline_owned_env(config_dir: Path) -> dict[str, str]:
+    """The Cline child environment the worker re-pins before the SDK import;
+    the parent exports the same values to the worker and to every command it
+    runs on the worker's behalf."""
+    data = config_dir / "data"
+    return {
+        "CLINE_DIR": str(config_dir),
+        "CLINE_DATA_DIR": str(data),
+        "CLINE_SESSION_DATA_DIR": str(data / "sessions"),
+        "CLINE_DB_DATA_DIR": str(data / "db"),
+        "CLINE_SESSION_BACKEND_MODE": "local",
+        "CLINE_NO_AUTO_UPDATE": "1",
+        "CLINE_RUN_AS_HUB_DAEMON": "0",
+    }
+
+
+def _validate_cline_sdk(spec: SessionSpec) -> ClineSdkOptions | None:
+    """Snapshot `spec.cline_sdk`: required for cline, rejected otherwise.
+    The native surface is an explicit selection, not a narrowed default, and
+    the environment the session owns cannot be supplied by the caller. A
+    missing / wrong-version SDK or runtime is the worker's startup failure
+    (`launch-failed`)."""
+    options = spec.cline_sdk
+    if spec.harness != "cline":
+        if options is not None:
+            raise HarnessError(f"cline_sdk applies only to cline sdk sessions, not {spec.harness} {spec.backend}", code="invalid-options")
+        return None
+    if not isinstance(options, ClineSdkOptions):
+        raise HarnessError(
+            "cline sdk sessions require cline_sdk=ClineSdkOptions(package_root, config_dir, provider, features)",
+            code="invalid-options",
+        )
+    package_root = _absolute_option("cline_sdk.package_root", options.package_root)
+    config_dir = _absolute_option("cline_sdk.config_dir", options.config_dir)
+    provider = options.provider
+    if not isinstance(provider, str) or not provider.strip() or "\0" in provider:
+        raise HarnessError("cline_sdk.provider must be a non-blank native provider ID without NUL bytes", code="invalid-options")
+    if options.features != "builtin-only":
+        raise HarnessError(
+            f"cline_sdk.features must be 'builtin-only', got {options.features!r}; native hooks, plugins, rules, skills, "
+            "workflows, MCP servers, subagents, teams, checkpoints and command detachment have no owned mapping",
+            code="unsupported-capability",
+        )
+    if options.approval not in ("upstream", "callback"):
+        raise HarnessError(f"cline_sdk.approval must be 'upstream' or 'callback', got {options.approval!r}", code="invalid-options")
+    owned = _cline_owned_env(config_dir)
+    for key in _CLINE_OWNED_ENV:
+        if key in spec.env and spec.env[key] != owned[key]:
+            raise HarnessError(f"env[{key!r}]={spec.env[key]!r} conflicts with the value {owned[key]!r} the cline worker owns; omit it", code="invalid-options")
+    for key in spec.env:
+        if key.startswith("CLINE_") and (key.endswith("_DIR") or key.endswith("_PATH")) and key not in owned:
+            raise HarnessError(
+                f"env[{key!r}] is a native Cline storage override; the worker drops every unowned CLINE_*_DIR / CLINE_*_PATH "
+                "before the SDK import so nothing is written outside the selected profile, so it has no mapping here",
+                code="unsupported-capability",
+            )
+    if "TMPDIR" in spec.env:
+        raise HarnessError(
+            "env['TMPDIR'] is owned by the session: each cline session runs the worker and its commands in its own temporary directory; omit it",
+            code="invalid-options",
+        )
+    return ClineSdkOptions(
+        package_root=package_root,
+        config_dir=config_dir,
+        provider=provider,
+        features="builtin-only",
+        approval=options.approval,
+    )
+
+
 def _amp_endpoint(env: dict[str, str]) -> str:
     """Origin the Amp CLI will talk to: `AMP_URL` from `env`, else the
     inherited process environment, else `DEFAULT_AMP_ENDPOINT`; normalized
@@ -1010,6 +1196,8 @@ def _validate_amp_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
         raise HarnessError("claude_sdk applies only to claude-code sdk sessions, not amp sdk", code="invalid-options")
     if spec.omp_sdk is not None:
         raise HarnessError("omp_sdk applies only to omp sdk sessions, not amp sdk", code="invalid-options")
+    if spec.cline_sdk is not None:
+        raise HarnessError("cline_sdk applies only to cline sdk sessions, not amp sdk", code="invalid-options")
     if model is not None:
         raise HarnessError("model is not supported for amp; amp_sdk.mode selects routing", code="invalid-options")
     skip = spec.env.get("AMP_SKIP_UPDATE_CHECK")
@@ -1022,7 +1210,7 @@ def _validate_amp_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
     return replace(spec, workdir=workdir, model=None, env=dict(spec.env), resume=resume, amp_sdk=amp_sdk)
 
 
-def _build(spec: SessionSpec) -> BuildCommand:
+def _build(spec: SessionSpec, temp_dir: Path | None = None) -> BuildCommand:
     adapter_cls = _adapter_class(spec.harness)
     env = dict(spec.env)
     resume = None
@@ -1048,6 +1236,24 @@ def _build(spec: SessionSpec) -> BuildCommand:
         cmd = spec.executable or sys.executable
         args = [str(_CLAUDE_WORKER), json.dumps(launch)]
         env[_CLAUDE_OWNED_ENV] = str(spec.claude_sdk.config_dir)
+    elif spec.harness == "cline":
+        assert spec.cline_sdk is not None and temp_dir is not None
+        launch = {
+            "packageRoot": str(spec.cline_sdk.package_root),
+            "configDir": str(spec.cline_sdk.config_dir),
+            "provider": spec.cline_sdk.provider,
+            "features": spec.cline_sdk.features,
+            "approval": spec.cline_sdk.approval,
+            "cwd": str(spec.workdir),
+            "model": spec.model,
+            "resume": resume,
+            "instructions": spec.instructions is not None,
+            "tempDir": str(temp_dir),
+        }
+        cmd = spec.executable or "node"
+        args = [str(_CLINE_WORKER), json.dumps(launch)]
+        env.update(_cline_owned_env(spec.cline_sdk.config_dir))
+        env["TMPDIR"] = str(temp_dir)
     elif spec.backend == "sdk":
         assert spec.omp_sdk is not None
         launch = {
@@ -1113,6 +1319,19 @@ class _Pending:
 
 
 @dataclass
+class _ShellJob:
+    """One native command the parent owns for the cline worker: its task and
+    cancel handles are kept apart from the session's reader tasks so teardown
+    can stop and await them explicitly."""
+
+    id: str
+    cancel: threading.Event
+    task: asyncio.Task[None] | None = None
+    #: Set when the shared runner could not finish its bounded group cleanup.
+    cleanup_error: str | None = None
+
+
+@dataclass
 class _TurnBase:
     """State every backend keeps for the active turn."""
 
@@ -1132,8 +1351,9 @@ class _Turn(_TurnBase):
     #: sdk: the `sdk_settled` bridge frame that reported an error, if any.
     sdk_failure: dict[str, object] | None = None
     #: claude-code: native `result` events observed during the turn (exactly
-    #: one is required at settlement), the settled native result and the
-    #: `sdk_failure` frame, if any.
+    #: one is required at settlement). `native_result` is the settled native
+    #: result (Claude's `result` message or the native Cline `AgentResult`)
+    #: and `failure_frame` the `sdk_failure` frame, if any.
     native_results: int = 0
     native_result: dict[str, object] | None = None
     failure_frame: dict[str, object] | None = None
@@ -1369,20 +1589,28 @@ class LiveSession(abc.ABC):
 
 
 class _ProcessSession(LiveSession):
-    """An owned session child: `pi --mode rpc`, the OMP SDK bridge or the
-    Claude SDK worker."""
+    """An owned session child: `pi --mode rpc`, the OMP SDK bridge, the
+    Claude SDK worker or the Cline SDK worker."""
 
     _active: _Turn | None
 
-    def __init__(self, spec: SessionSpec, prepared: PreparedCommand) -> None:
+    def __init__(self, spec: SessionSpec, prepared: PreparedCommand, temp_dir: Path | None = None) -> None:
         super().__init__(spec)
         self._prepared = prepared
         self._sdk = spec.backend == "sdk"
         self._claude = spec.harness == "claude-code"
-        self._child = "claude sdk worker" if self._claude else "omp sdk bridge" if self._sdk else "pi"
-        #: claude-code: bridge approval IDs announced by `claude_permission`
-        #: and not yet answered, cancelled or ended with their turn.
+        self._cline = spec.harness == "cline"
+        self._child = "claude sdk worker" if self._claude else "cline sdk worker" if self._cline else "omp sdk bridge" if self._sdk else "pi"
+        #: claude-code / cline: bridge approval IDs announced by a permission
+        #: event and not yet answered, cancelled or ended with their turn.
         self._approvals: set[str] = set()
+        #: cline: the temporary directory this session owns — `TMPDIR` for the
+        #: worker and for every command run on its behalf — removed once every
+        #: owned process group is gone.
+        self._temp_dir = temp_dir
+        #: cline: the commands the parent runs for the worker, by request id.
+        self._commands: dict[str, _ShellJob] = {}
+        self._command_seq = 0
         self._proc: asyncio.subprocess.Process | None = None
         self._pending: dict[str, _Pending] = {}
         self._write_lock = asyncio.Lock()
@@ -1394,18 +1622,29 @@ class _ProcessSession(LiveSession):
     # ---- public surface ---------------------------------------------------
 
     async def respond_approval(self, request_id: str, response: OpenCodeApprovalResponse) -> None:
-        """Answer a Claude `claude_permission` event (`request_id` is its
-        bridge-local `id`). `once` allows the call with its original input;
-        `reject` denies it with a fixed message. No persistent rule, updated
-        input, permission-mode change or bypass can be granted here: `always`
-        is refused before any request. The worker validates the ID again;
-        unknown, already answered, cancelled or ended requests are
-        `invalid-options`. Cancelling the caller closes the session."""
-        if not self._claude:
+        """Answer a `claude_permission` / `cline_permission` event
+        (`request_id` is its bridge-local `id`). `once` allows the call with
+        its original input; `reject` denies it with a fixed message. No
+        persistent rule, updated input, permission-mode change or bypass can
+        be granted here: `always` is refused before any request. Cline needs
+        `cline_sdk.approval='callback'`; with 'upstream' every permission
+        stays with the native configuration and there is no channel. The
+        worker validates the ID again; unknown, already answered, cancelled
+        or ended requests are `invalid-options`. Cancelling the caller closes
+        the session."""
+        if self._cline:
+            assert self._spec.cline_sdk is not None
+            if self._spec.cline_sdk.approval != "callback":
+                raise HarnessError(
+                    "cline_sdk.approval='upstream' leaves every permission to the native configuration; "
+                    "open the session with approval='callback' to answer them here",
+                    code="unsupported-capability",
+                )
+        elif not self._claude:
             await super().respond_approval(request_id, response)
             return
         if not isinstance(request_id, str) or not request_id:
-            raise HarnessError("request_id must be the non-empty id of a claude_permission event", code="invalid-options")
+            raise HarnessError("request_id must be the non-empty id of a permission event", code="invalid-options")
         if response == "always":
             raise HarnessError(
                 "approval response 'always' would persist a native permission rule; only 'once' and 'reject' are supported",
@@ -1453,7 +1692,7 @@ class _ProcessSession(LiveSession):
             turn.abort_id = f"req-{self._request_seq}"
             self._register(turn.abort_id, "abort", turn)
             await self._uncancellable(self._loop.create_task(self._send({"id": turn.abort_id, "type": "abort"})))
-        if self._claude:
+        if self._claude or self._cline:
             pending = self._pending.get(turn.abort_id)
             if pending is not None:
                 await asyncio.shield(pending.future)
@@ -1537,15 +1776,19 @@ class _ProcessSession(LiveSession):
         elif self._sdk:
             # The bridge speaks exactly three frame types: correlated
             # responses, wrapped native events and its own settlement; the
-            # Claude worker adds identity updates and fatal failures.
+            # Claude worker adds identity updates and fatal failures, the
+            # Cline worker fatal failures and its command requests.
             if kind == "sdk_settled":
                 self._settle_sdk(turn, frame)
                 return
-            if self._claude and kind == "sdk_failure":
+            if (self._claude or self._cline) and kind == "sdk_failure":
                 self._fail_sdk(turn, frame)
                 return
             if self._claude and kind == "sdk_reference":
                 self._deliver(frame, kind, None, len(line))
+                return
+            if self._cline and kind in ("shell_request", "shell_cancel"):
+                self._handle_shell(frame, kind, turn)
                 return
             if kind != "sdk_event":
                 self._fail("protocol-error", f"unexpected {kind!r} frame from the {self._child}")
@@ -1594,10 +1837,12 @@ class _ProcessSession(LiveSession):
                 return
             if not self._admit_claude(frame, kind, turn):
                 return
+        if self._cline and not self._admit_cline(frame, kind, turn):
+            return
         request_id = frame.get("id")
         event = SessionEvent(
             backend=self._spec.backend,  # type: ignore[arg-type]  # validated: rpc or sdk
-            harness=self._spec.harness,  # type: ignore[arg-type]  # validated: pi, omp or claude-code
+            harness=self._spec.harness,  # type: ignore[arg-type]  # validated: pi, omp, claude-code or cline
             session_id=self._reference.session_id,
             turn_id=None if turn is None else turn.handle.id,
             request_id=request_id if isinstance(request_id, str) else None,
@@ -1633,6 +1878,35 @@ class _ProcessSession(LiveSession):
                 return False
             self._approvals.add(approval)
         elif kind == "claude_permission_cancelled":
+            approval = frame.get("id")
+            if isinstance(approval, str):
+                self._approvals.discard(approval)
+        return True
+
+    def _admit_cline(self, frame: dict[str, object], kind: str, turn: _Turn | None) -> bool:
+        """Native Cline events name their session in `payload.sessionId`
+        where they carry one; synthetic permission notifications are tracked
+        for `respond_approval`. False when the session failed instead."""
+        assert self._reference is not None
+        payload = frame.get("payload")
+        if isinstance(payload, dict):
+            session_id = payload.get("sessionId")
+            if isinstance(session_id, str) and session_id != self._reference.session_id:
+                self._fail("protocol-error", f"native {kind!r} event names session {session_id!r}, not the selected {self._reference.session_id!r}")
+                return False
+        if kind == "cline_permission":
+            approval = frame.get("id")
+            if not isinstance(approval, str) or not approval:
+                self._fail("protocol-error", "cline_permission event has no string id")
+                return False
+            if turn is None:
+                self._fail("protocol-error", f"cline_permission {approval!r} arrived while no turn was active")
+                return False
+            if approval in self._approvals:
+                self._fail("protocol-error", f"duplicate cline_permission id {approval!r}")
+                return False
+            self._approvals.add(approval)
+        elif kind == "cline_permission_cancelled":
             approval = frame.get("id")
             if isinstance(approval, str):
                 self._approvals.discard(approval)
@@ -1703,6 +1977,8 @@ class _ProcessSession(LiveSession):
             turn.sdk_failure = frame
         elif self._claude and not self._settle_claude(turn, frame):
             return
+        elif self._cline and not self._settle_cline(turn, frame):
+            return
         turn.settled = True
         self._maybe_finish(turn)
 
@@ -1719,6 +1995,22 @@ class _ProcessSession(LiveSession):
             return False
         if turn.native_results != 1:
             self._fail("protocol-error", f"sdk_settled after {turn.native_results} native result events; exactly one is required")
+            return False
+        turn.native_result = result
+        return True
+
+    def _settle_cline(self, turn: _Turn, frame: dict[str, object]) -> bool:
+        """The settlement carries the exact native `AgentResult` (which has
+        no native `type` field) and its finish reason must be one the native
+        enum defines; anything else is a protocol error, never a guessed
+        outcome."""
+        result = frame.get("result")
+        if not isinstance(result, dict):
+            self._fail("protocol-error", "sdk_settled carries no native AgentResult object")
+            return False
+        reason = result.get("finishReason")
+        if not isinstance(reason, str) or reason not in _CLINE_FINISH_REASONS:
+            self._fail("protocol-error", f"native result finishReason {reason!r} is not one of {', '.join(_CLINE_FINISH_REASONS)}")
             return False
         turn.native_result = result
         return True
@@ -1744,6 +2036,11 @@ class _ProcessSession(LiveSession):
             status, error = _classify_claude_result(turn.native_result)
             self._finish(turn, status, turn.native_result, error)
             return
+        if self._cline:
+            assert turn.native_result is not None
+            status, error = _classify_cline_result(turn.native_result)
+            self._finish(turn, status, turn.native_result, error)
+            return
         status, error = self._classify(turn)
         self._finish(turn, status, turn.last_end, error)
 
@@ -1763,6 +2060,93 @@ class _ProcessSession(LiveSession):
         if reason == "aborted":
             return "interrupted", None
         return "completed", None
+
+    # ---- parent-owned commands (cline) ------------------------------------
+
+    def _handle_shell(self, frame: dict[str, object], kind: str, turn: _Turn | None) -> None:
+        """`shell_request` / `shell_cancel` from the worker. The harness, not
+        the worker, owns every native command process group; these frames are
+        control traffic and never enter an event queue."""
+        request_id = frame.get("id")
+        if not isinstance(request_id, str) or not request_id:
+            self._fail("protocol-error", f"{kind} frame has no string 'id'")
+            return
+        if kind == "shell_cancel":
+            # The native tool aborted the call; a command that already
+            # finished or is racing its result makes this a no-op.
+            job = self._commands.get(request_id)
+            if job is not None:
+                job.cancel.set()
+            return
+        if turn is None:
+            self._fail("protocol-error", f"shell_request {request_id!r} arrived while no turn was active")
+            return
+        sequence = re.fullmatch(r"shell-([1-9][0-9]{0,15})", request_id)
+        if sequence is None or not self._command_seq < int(sequence[1]) <= 2**53 - 1:
+            self._fail("protocol-error", f"shell_request has an invalid or reused sequence {request_id!r}")
+            return
+        if len(self._commands) >= _CLINE_MAX_ACTIVE_COMMANDS:
+            self._fail("protocol-error", f"more than {_CLINE_MAX_ACTIVE_COMMANDS} concurrent shell_request commands")
+            return
+        cmd = frame.get("cmd")
+        if not isinstance(cmd, list) or not cmd or any(not isinstance(arg, str) or "\0" in arg for arg in cmd) or not cmd[0]:
+            self._fail("protocol-error", f"shell_request {request_id!r} needs NUL-free argv and a non-empty executable")
+            return
+        cwd = frame.get("cwd")
+        if not isinstance(cwd, str) or not cwd or "\0" in cwd or not os.path.isabs(cwd):
+            self._fail("protocol-error", f"shell_request {request_id!r} cwd {cwd!r} is not an absolute path")
+            return
+        stdin = frame.get("stdin")
+        if stdin is not None and not isinstance(stdin, str):
+            self._fail("protocol-error", f"shell_request {request_id!r} stdin must be a string or null")
+            return
+        job = _ShellJob(id=request_id, cancel=threading.Event())
+        self._command_seq = int(sequence[1])
+        self._commands[request_id] = job
+        job.task = self._loop.create_task(self._run_shell(job, cast(list[str], cmd), cwd, stdin))
+
+    async def _run_shell(self, job: _ShellJob, cmd: list[str], cwd: str, stdin: str | None) -> None:
+        """Run one native command in its own owned process group, stream its
+        output to the worker as it arrives and answer with exactly one
+        `shell_result` after the shared runner released the group."""
+
+        async def on_output(chunk: str, stream: OutputStream) -> None:
+            await self._send({"type": "shell_output", "id": job.id, "stream": stream, "chunk": chunk})
+
+        try:
+            try:
+                outcome = await run_subprocess_async(
+                    cmd,
+                    cwd=cwd,
+                    timeout_seconds=_CLINE_COMMAND_TIMEOUT_SECONDS,
+                    extra_env=dict(self._prepared.command.env),
+                    stdin=stdin,
+                    on_output=on_output,
+                    max_output_bytes=_CLINE_COMMAND_MAX_OUTPUT_BYTES,
+                    cancel=job.cancel,
+                )
+            except asyncio.CancelledError as cancelled:
+                # The runner already ran its bounded group cleanup; a chained
+                # cause means it could not finish it, which teardown must see.
+                cause = cancelled.__cause__
+                if cause is not None:
+                    job.cleanup_error = f"command {job.id} could not release its process group: {type(cause).__name__}: {cause}"
+                raise
+            except Exception as exc:
+                # Unexpected runner errors can mean failed group cleanup. Keep
+                # this job and the lease: a native tool error is not proof that
+                # all of its processes stopped.
+                job.cleanup_error = f"command {job.id} cleanup could not be proved: {type(exc).__name__}: {exc}"
+                self._fail("agent-error", job.cleanup_error)
+                return
+            result: dict[str, object] = {"type": "shell_result", "id": job.id, "output": _cline_command_output(outcome)}
+            error = _cline_command_error(outcome)
+            if error is not None:
+                result["error"] = error
+            await self._send(result)
+        finally:
+            if job.cleanup_error is None:
+                self._commands.pop(job.id, None)
 
     # ---- child I/O --------------------------------------------------------
 
@@ -1848,6 +2232,20 @@ class _ProcessSession(LiveSession):
             return True, exc
         return True, None
 
+    def _discard_temp_dir(self) -> HarnessError | None:
+        """Remove the temporary directory this session owns; only called once
+        every owned process group is gone. A directory that could not be
+        removed is reported, never silently leaked."""
+        path = self._temp_dir
+        if path is None:
+            return None
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            return HarnessError(f"could not remove the owned temporary directory {path}: {exc.strerror or exc}", code="adapter-error")
+        self._temp_dir = None
+        return None
+
     async def _teardown(self) -> None:
         failure = self._failure
         assert failure is not None and self._proc is not None
@@ -1856,6 +2254,16 @@ class _ProcessSession(LiveSession):
             pending.timer.cancel()
         if self._active is not None and self._active.timer is not None:
             self._active.timer.cancel()
+        # The session is failing: no further frame is handled once `_failure`
+        # is set, so no command can be launched, and the ones we already own
+        # are stopped here so their groups die with the worker's own group.
+        commands = [job for job in self._commands.values() if job.task is not None]
+        command_tasks: list[asyncio.Task[None]] = []
+        for job in commands:
+            assert job.task is not None
+            job.cancel.set()
+            job.task.cancel()
+            command_tasks.append(job.task)
         stdin_error: Exception | None = None
         try:
             if proc.stdin is not None:
@@ -1873,7 +2281,8 @@ class _ProcessSession(LiveSession):
                 group_exists, group_error = self._signal_group(signal.SIGKILL)
                 escalated = group_error is None
             readers = [t for t in readers if not t.done()]
-            if not group_exists and self._exited.is_set() and not readers:
+            running = [t for t in command_tasks if not t.done()]
+            if not group_exists and self._exited.is_set() and not readers and not running:
                 break
             if now >= drain_end:
                 break
@@ -1895,6 +2304,10 @@ class _ProcessSession(LiveSession):
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+        pending_commands = [t for t in command_tasks if not t.done()]
+        if pending_commands:
+            await asyncio.wait(pending_commands, timeout=_CLINE_COMMAND_CLEANUP_BUDGET)
+        command_error = _command_cleanup_error(commands)
         for pending in list(self._pending.values()):
             if not pending.future.done():
                 pending.future.set_result(None)
@@ -1908,6 +2321,13 @@ class _ProcessSession(LiveSession):
             raise group_error
         if not self._exited.is_set():
             raise HarnessError(f"{self._child} process {proc.pid} could not be reaped within the teardown budget", code="adapter-error")
+        if command_error is not None:
+            # Command groups may still be live: keep the lease and the
+            # temporary directory rather than report a successful disposal.
+            raise HarnessError(command_error, code="adapter-error")
+        # Every owned group is gone: the temporary directory goes before the
+        # lease is released, and a failed release keeps both.
+        temp_error = self._discard_temp_dir()
         cleanup_command(self._prepared)
         code = self._returncode
         if self._sdk and failure.status not in ("exited", "signaled") and code not in (0, -signal.SIGTERM):
@@ -1930,6 +2350,8 @@ class _ProcessSession(LiveSession):
             )
         if stdin_error is not None:
             raise stdin_error
+        if temp_error is not None:
+            raise temp_error
 
     # ---- startup ----------------------------------------------------------
 
@@ -1945,6 +2367,7 @@ class _ProcessSession(LiveSession):
                 start_new_session=True,
             )
         except OSError as exc:
+            self._discard_temp_dir()
             cleanup_command(self._prepared)
             raise HarnessError(f"failed to launch {argv[0]!r}: {exc.strerror or exc}", code="launch-failed") from None
         self._spawn(self._watch_exit())
@@ -2017,6 +2440,14 @@ class _ProcessSession(LiveSession):
             raise HarnessError(f"{self._child} resumed session {session_id!r}, expected {resume.session_id!r}")
         if self._claude and _UUID.fullmatch(session_id) is None:
             raise HarnessError(f"{self._child} selected a non-UUID session ID {session_id!r}")
+        if self._cline:
+            if not isinstance(session_file, str) or not session_file:
+                raise HarnessError(f"{self._child} reported no native session manifest path")
+            workdir = data.get("workdir")
+            if not isinstance(workdir, str) or not _same_dir(workdir, self._spec.workdir):
+                raise HarnessError(f"{self._child} opened the session in {workdir!r}, not the requested {str(self._spec.workdir)!r}")
+            if resume is not None and resume.session_file is not None and not _same_dir(session_file, resume.session_file):
+                raise HarnessError(f"{self._child} resumed the manifest {session_file!r}, expected {str(resume.session_file)!r}")
         return SessionReference(
             session_id=session_id,
             session_file=Path(session_file) if session_file else None,
@@ -2081,6 +2512,84 @@ def _claude_result_error(result: dict[str, object]) -> str:
     return "native result reported an error"
 
 
+#: Native `AgentFinishReason` -> turn status. Any other reason is a protocol
+#: error: an unmapped reason is never guessed into a turn outcome.
+_CLINE_FINISH_REASONS: dict[str, SessionTurnStatus] = {
+    "completed": "completed",
+    "aborted": "interrupted",
+    "max_iterations": "agent-error",
+    "mistake_limit": "agent-error",
+    "error": "agent-error",
+}
+
+
+def _classify_cline_result(result: dict[str, object]) -> tuple[SessionTurnStatus, str | None]:
+    """Native `AgentResult` -> turn status; the finish reason was validated
+    when the settlement arrived."""
+    reason = str(result.get("finishReason"))
+    status = _CLINE_FINISH_REASONS[reason]
+    if status != "agent-error":
+        return status, None
+    error = result.get("error")
+    if isinstance(error, str) and error.strip():
+        return status, error.strip()
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return status, message.strip()
+    return status, f"native run finished with reason {reason}"
+
+
+def _cline_command_output(outcome: SubprocOutcome) -> str:
+    """`shell_result.output`: captured stdout, then stderr under its own
+    marker, with an explicit marker wherever the cap cut the capture off."""
+    limit = _CLINE_COMMAND_MAX_OUTPUT_BYTES
+    output = outcome.stdout
+    if outcome.stdout_truncated:
+        output += f"\n[stdout truncated at {limit} bytes]"
+    if outcome.stderr or outcome.stderr_truncated:
+        output += "\n[stderr]\n" + outcome.stderr
+        if outcome.stderr_truncated:
+            output += f"\n[stderr truncated at {limit} bytes]"
+    return output
+
+
+def _cline_command_error(outcome: SubprocOutcome) -> str | None:
+    """`shell_result.error`: every outcome the native tool must see as a
+    failure. Captured output alone never implies success."""
+    if outcome.launch_error is not None:
+        return f"command could not be launched: {outcome.launch_error}"
+    if outcome.termination == "timed-out":
+        return f"command exceeded the {_CLINE_COMMAND_TIMEOUT_SECONDS:g}s limit and its process group was stopped"
+    if outcome.termination == "cancelled":
+        return "command was cancelled and its process group was stopped"
+    if outcome.callback_error is not None:
+        return f"command output could not be forwarded to the worker: {outcome.callback_error}"
+    if outcome.signal is not None:
+        return f"command was killed by {outcome.signal}"
+    if outcome.exit_code != 0:
+        return f"command exited with code {outcome.exit_code}"
+    return None
+
+
+def _command_cleanup_error(jobs: list[_ShellJob]) -> str | None:
+    """Whether the parent-owned commands really released their process
+    groups. Anything unfinished or failed means live processes may remain,
+    which must keep the workdir lease and the temporary directory."""
+    problems: list[str] = []
+    for job in jobs:
+        task = job.task
+        assert task is not None
+        if not task.done():
+            problems.append(f"command {job.id} did not release its process group within {_CLINE_COMMAND_CLEANUP_BUDGET:g}s")
+        elif job.cleanup_error is not None:
+            problems.append(job.cleanup_error)
+        elif not task.cancelled() and task.exception() is not None:
+            error = task.exception()
+            problems.append(f"command {job.id} failed during cleanup: {type(error).__name__}: {error}")
+    return "; ".join(problems) if problems else None
+
+
 async def open_session(spec: SessionSpec) -> LiveSession:
     """Open the live session for `spec`: spawn the session child (`pi --mode
     rpc`, the OMP Bun bridge, or the native Python Claude SDK worker),
@@ -2107,11 +2616,21 @@ async def open_session(spec: SessionSpec) -> LiveSession:
     if spec.resume is not None:
         if spec.harness == "claude-code":
             _verify_claude_transcript(spec.resume)
-        else:
+        elif spec.harness != "cline":
+            # A native Cline manifest carries no Pi / OMP session header: the
+            # worker verifies its identity, path and cwd around the start.
             _verify_session_header(spec.resume, spec.backend)
-    built = _build(spec)
-    prepared = prepare_command(built)
-    session = _ProcessSession(spec, prepared)
+    # The cline worker and every command it asks for run inside a temporary
+    # directory this session owns and removes once their groups are gone.
+    temp_dir = Path(tempfile.mkdtemp(prefix="harness-cline-")) if spec.harness == "cline" else None
+    try:
+        built = _build(spec, temp_dir)
+        prepared = prepare_command(built)
+    except BaseException:
+        if temp_dir is not None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+    session = _ProcessSession(spec, prepared, temp_dir)
     env = os.environ.copy()
     env.update(built.env)
     await _await_startup(session, session._startup([built.cmd] + built.args, env))
@@ -2144,6 +2663,9 @@ async def _await_startup(session: LiveSession, startup: Coroutine[object, object
 __all__ = [
     "ClaudeSdkOptions",
     "ClaudeSettingSource",
+    "ClineApproval",
+    "ClineFeatures",
+    "ClineSdkOptions",
     "AmpEffort",
     "AmpSdkOptions",
     "AmpVisibility",

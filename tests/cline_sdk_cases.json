@@ -1,0 +1,10 @@
+[
+  {"name": "success", "status": "completed"},
+  {"name": "reject", "status": "completed", "reply": "reject"},
+  {"name": "interrupt", "status": "interrupted", "operation": "interrupt"},
+  {"name": "close", "status": "closed", "operation": "close"},
+  {"name": "worker-loss", "status": "signaled"},
+  {"name": "command-error", "status": "completed"},
+  {"name": "provider-error", "status": "agent-error"},
+  {"name": "partial-wire", "status": "protocol-error"}
+]

@@ -38,25 +38,35 @@
 // `amp` on `sdk` is the fifth: one finite Node worker (`_amp_sdk.mjs`,
 // loading the caller-installed @ampcode/sdk) per operation, driven through
 // the shared subprocess runner. Implemented in amp.ts and loaded lazily.
+//
+// `cline` on `sdk` is the sixth: an owned Node child running the shared
+// worker `_cline_sdk.mjs`, which loads the caller-installed @cline/sdk 0.0.82
+// against an explicit builtin-only profile. Same request framing plus
+// `approval`; native `CoreSessionEvent`s arrive as `sdk_event`, a turn
+// completes on `{type:'sdk_settled', result}` carrying the exact native
+// `AgentResult`, and every native command is delegated back to this process
+// (`shell_request` / `shell_cancel`), which owns the command process groups
+// through the shared subprocess runner and answers with `shell_output` /
+// `shell_result`.
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
-import { closeSync, existsSync, openSync, readSync, realpathSync } from 'node:fs'
-import { constants as osConstants } from 'node:os'
+import { closeSync, existsSync, mkdtempSync, openSync, readSync, realpathSync, rmSync } from 'node:fs'
+import { constants as osConstants, tmpdir } from 'node:os'
 import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
-import type { Backend, ErrorCode, PermissionPolicy } from './base.js'
+import type { Backend, ErrorCode, OutputStream, PermissionPolicy, SubprocOutcome } from './base.js'
 import { HarnessError } from './base.js'
 import { cleanupCommand, prepareCommand } from './instructions.js'
 import type { PreparedCommand } from './instructions.js'
-import { DRAIN_MS, GRACE_MS, assertSupportedPlatform, describeError } from './lifecycle.js'
+import { DRAIN_MS, GRACE_MS, assertSupportedPlatform, describeError, prepareLaunch, runLifecycle } from './lifecycle.js'
 import { getAdapter } from './registry.js'
 
 /** `rpc` drives `pi` (and `opencode` over HTTP); `sdk` drives `omp` through the owned Bun bridge, `claude-code` through the owned SDK worker and `amp` through the Node SDK worker. Any other pairing (and `cli`) is `unsupported-backend`. */
 export type SessionBackend = 'rpc' | 'sdk'
 
 /** The harnesses with a live session backend. */
-type SessionHarness = 'pi' | 'omp' | 'opencode' | 'claude-code' | 'amp'
+type SessionHarness = 'pi' | 'omp' | 'opencode' | 'claude-code' | 'amp' | 'cline'
 
 /**
  * Selection of the caller-installed OMP SDK. Nothing here is guessed: the
@@ -92,6 +102,41 @@ export interface ClaudeSdkOptions {
   settingSources: ClaudeSettingSource[]
   /** Optional absolute settings JSON file passed as native `--settings`. */
   settingsFile?: string
+}
+
+/** Native Cline feature selection; only the explicit builtin-only profile is qualified. */
+export type ClineFeatures = 'builtin-only'
+
+/** How native tool approvals are answered. */
+export type ClineApproval = 'upstream' | 'callback'
+
+/**
+ * Selection of the caller-installed Cline local SDK (@cline/sdk 0.0.82 with
+ * its @cline/core / @cline/shared transitives, resolved by the worker).
+ * Nothing is discovered or defaulted: the package, the Cline root and the
+ * native provider are explicit, and `features` names the one profile this
+ * integration qualified. `builtin-only` is not a silently accepted default:
+ * it selects the native builtin tools and explicitly excludes hooks,
+ * plugins, rules, skills, workflows, MCP servers, subagents, teams,
+ * checkpoints, custom runtime hooks and command detachment, none of which
+ * this session owns.
+ */
+export interface ClineSdkOptions {
+  /** Absolute path to the caller-installed `@cline/sdk` package directory (loaded by the worker, never by this process). */
+  packageRoot: string
+  /** Absolute caller-selected Cline root: the worker pins `CLINE_DIR` to it and every native data root under its `data` subdirectory. */
+  configDir: string
+  /** Native provider ID, passed through verbatim (trimmed); the worker takes the model from that provider's stored profile when `model` is omitted. */
+  provider: string
+  /** Must be `builtin-only`; any other selection is `unsupported-capability`. */
+  features: ClineFeatures
+  /** `upstream` (default) leaves the SDK's native auto-approval defaults intact; `callback` sets the native `*` policy to `autoApprove: false` and routes every request through `respondApproval`. */
+  approval?: ClineApproval
+}
+
+/** `ClineSdkOptions` after validation; `approval` carries its resolved default. */
+export interface ResolvedClineSdkOptions extends ClineSdkOptions {
+  readonly approval: ClineApproval
 }
 
 /** Native Amp reasoning effort; omitted leaves the CLI default. */
@@ -168,15 +213,15 @@ export interface SessionReference {
 
 export interface SessionSpec {
   harness: string
-  /** Local absolute directory for `pi`/`omp`/`amp`; for `opencode` the literal absolute POSIX directory on the server (never resolved or created locally). */
+  /** Local absolute directory for `pi`/`omp`/`amp`/`cline`; for `opencode` the literal absolute POSIX directory on the server (never resolved or created locally). */
   workdir: string
-  /** Required; `rpc` for `pi` and `opencode`, `sdk` for `omp`, `claude-code` and `amp`. */
+  /** Required; `rpc` for `pi` and `opencode`, `sdk` for `omp`, `claude-code`, `amp` and `cline`. */
   backend: SessionBackend
-  /** Passed through as `--model <trimmed>` (rpc), to the OMP SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. Rejected for `amp`, which routes models through `ampSdk.mode`. */
+  /** Passed through as `--model <trimmed>` (rpc), to the OMP or Cline SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults (on `cline`: the selected provider profile's stored model, which the worker requires to exist). Rejected for `amp`, which routes models through `ampSdk.mode`. */
   model?: string
-  /** Layered over the inherited process env; never mutated. For `omp`, entries conflicting with the session-owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected; for `claude-code`, an entry conflicting with the session-owned `CLAUDE_CONFIG_DIR` is rejected; for `amp`, `AMP_SKIP_UPDATE_CHECK` may only be `"1"` and `AMP_URL` selects the endpoint. Must be empty on `opencode`. */
+  /** Layered over the inherited process env; never mutated. For `omp`, entries conflicting with the session-owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected; for `claude-code`, an entry conflicting with the session-owned `CLAUDE_CONFIG_DIR` is rejected; for `cline`, entries conflicting with the session-owned Cline roots and mode variables are rejected, any other `CLINE_*_DIR` / `CLINE_*_PATH` override is refused (the worker drops them before importing the SDK) and so is `TMPDIR` (the session owns one temporary directory per session); for `amp`, `AMP_SKIP_UPDATE_CHECK` may only be `"1"` and `AMP_URL` selects the endpoint. Must be empty on `opencode`. */
   env?: Record<string, string>
-  /** Replaces the `pi` binary (rpc), the `bun` binary running the OMP bridge worker, the `node` binary running the Amp SDK worker, or the JavaScript runtime running the Claude SDK worker (defaults to this process's `execPath`; a `bun` runtime gets `--no-env-file`): a bare name resolved on PATH or an absolute path. Rejected on `opencode`. */
+  /** Replaces the `pi` binary (rpc), the `bun` binary running the OMP bridge worker, the `node` binary running the Amp or Cline SDK worker, or the JavaScript runtime running the Claude SDK worker (defaults to this process's `execPath`; a `bun` runtime gets `--no-env-file`): a bare name resolved on PATH or an absolute path. Rejected on `opencode`. */
   executable?: string
   /** Only `upstream` is supported; `bypass` is rejected. */
   permissionPolicy?: PermissionPolicy
@@ -198,6 +243,8 @@ export interface SessionSpec {
   opencode?: OpenCodeOptions
   /** Required for harness `claude-code` (backend `sdk`), rejected otherwise. */
   claudeSdk?: ClaudeSdkOptions
+  /** Required for harness `cline` (backend `sdk`), rejected otherwise. */
+  clineSdk?: ClineSdkOptions
 }
 
 /** `SessionSpec` after defaults and validation; the read-only snapshot a `LiveSession` exposes. */
@@ -223,6 +270,8 @@ export interface ResolvedSessionSpec {
   readonly opencode: Readonly<OpenCodeOptions> | null
   /** Frozen copy of the caller's selection for `claude-code`; null otherwise. */
   readonly claudeSdk: Readonly<ClaudeSdkOptions> | null
+  /** Frozen copy of the caller's selection for `cline` plus the resolved approval mode; null otherwise. */
+  readonly clineSdk: ResolvedClineSdkOptions | null
 }
 
 /** What a harness supports as a live session on a backend. Static; never probes installs or credentials. */
@@ -311,6 +360,14 @@ export const AMP_THREAD_ID = /^T-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
 const AMP_DEFAULT_ENDPOINT = 'https://ampcode.com'
 const AMP_EFFORTS: readonly string[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 const AMP_VISIBILITIES: readonly string[] = ['private', 'unlisted', 'workspace', 'group']
+/** Native Cline bash-tool wall clock, reproduced by this process as the owning executor. */
+const CLINE_COMMAND_TIMEOUT_SECONDS = 30
+/** Per stream, matching the native tool's own bound; what the worker receives is that bounded prefix. */
+const CLINE_COMMAND_MAX_OUTPUT_BYTES = 48_000
+/** Native command requests that may be in flight at once; beyond it the worker is violating the protocol. */
+const CLINE_MAX_ACTIVE_COMMANDS = 32
+/** Bound on the owned command groups' teardown; the runner's own TERM → GRACE → KILL → DRAIN budget plus slack for the final result write. */
+const CLINE_COMMAND_TEARDOWN_MS = GRACE_MS + DRAIN_MS + 1_000
 
 export function invalid(message: string): HarnessError {
   return new HarnessError(message, 'invalid-options')
@@ -372,11 +429,75 @@ function ompSdkEnv(options: Readonly<OmpSdkOptions>): Readonly<Record<string, st
   return { PI_CODING_AGENT_DIR: options.agentDir, PI_CONFIG_DIR: options.agentDir }
 }
 
+/**
+ * Owned child environment for the Cline worker and for every command this
+ * session runs on its behalf: the same native roots and modes the worker
+ * pins before importing the SDK, so a command can never write outside the
+ * selected profile. `TMPDIR` is added per session from the owned temporary
+ * directory.
+ */
+function clineSdkEnv(options: Readonly<ClineSdkOptions>): Readonly<Record<string, string>> {
+  const data = join(options.configDir, 'data')
+  return {
+    CLINE_DIR: options.configDir,
+    CLINE_DATA_DIR: data,
+    CLINE_SESSION_DATA_DIR: join(data, 'sessions'),
+    CLINE_DB_DATA_DIR: join(data, 'db'),
+    CLINE_SESSION_BACKEND_MODE: 'local',
+    CLINE_NO_AUTO_UPDATE: '1',
+    CLINE_RUN_AS_HUB_DAEMON: '0',
+  }
+}
+
+/** A native argv from the worker: NUL-free strings only; null when the frame is malformed. */
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  const entries: readonly unknown[] = value
+  const argv: string[] = []
+  for (const entry of entries) {
+    if (typeof entry !== 'string' || entry.includes('\0')) return null
+    argv.push(entry)
+  }
+  return argv
+}
+
+/**
+ * What the native tool receives as the command's output: the captured
+ * stdout prefix, then a marked stderr section when there is one. This
+ * process is the owning executor, so a bound it enforced is stated in the
+ * output instead of silently shortening it.
+ */
+function commandOutput(outcome: Required<SubprocOutcome>): string {
+  const stdout = outcome.stdout + (outcome.stdoutTruncated ? `\n[stdout truncated at ${CLINE_COMMAND_MAX_OUTPUT_BYTES} bytes]` : '')
+  if (outcome.stderr === '' && !outcome.stderrTruncated) return stdout
+  return `${stdout}\n[stderr]\n${outcome.stderr}${outcome.stderrTruncated ? `\n[stderr truncated at ${CLINE_COMMAND_MAX_OUTPUT_BYTES} bytes]` : ''}`
+}
+
+/** Anything but a clean exit 0 is a native tool error; the captured output still travels with it, never as a silent success. */
+function commandError(outcome: Required<SubprocOutcome>): string | null {
+  switch (outcome.termination) {
+    case 'exited':
+      if (outcome.exitCode !== 0) return `command exited with code ${outcome.exitCode}`
+      break
+    case 'signaled':
+      return `command was terminated by ${outcome.signal ?? 'a signal'}`
+    case 'timed-out':
+      return `command exceeded the ${CLINE_COMMAND_TIMEOUT_SECONDS}s timeout`
+    case 'cancelled':
+      return 'command was cancelled'
+    case 'launch-failed':
+      return `command could not be launched (${outcome.launchError ?? 'unknown error'})`
+    default:
+      return outcome.callbackError ?? `command ended with termination ${JSON.stringify(outcome.termination)}`
+  }
+  return outcome.callbackError
+}
+
 /** Which backend each session harness is qualified on; anything else is `unsupported-backend`. */
-const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', 'claude-code': 'sdk', amp: 'sdk' }
+const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', 'claude-code': 'sdk', amp: 'sdk', cline: 'sdk' }
 
 function isSessionHarness(name: string): name is SessionHarness {
-  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'claude-code' || name === 'amp'
+  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'claude-code' || name === 'amp' || name === 'cline'
 }
 
 /** Resolve the harness first, then validate the backend before rejecting an unsupported pairing. */
@@ -387,7 +508,7 @@ function requireSessionHarness(name: unknown, backend: unknown): { harness: Sess
     throw invalid(`Unknown backend: ${JSON.stringify(backend)}. Expected one of: cli, rpc, sdk`)
   }
   if (!isSessionHarness(adapter.name)) {
-    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "omp" (sdk), "claude-code" (sdk) and "amp" (sdk) are supported`, 'unsupported-backend')
+    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "omp" (sdk), "claude-code" (sdk), "amp" (sdk) and "cline" (sdk) are supported`, 'unsupported-backend')
   }
   const qualified = SESSION_BACKENDS[adapter.name]
   if (backend !== qualified) {
@@ -409,7 +530,7 @@ export function getSessionCapabilities(name: string, backend: Backend = 'rpc'): 
     followUp: true,
     resume: true,
     concurrentTurns: false,
-    approval: resolved.harness === 'opencode' || resolved.harness === 'claude-code',
+    approval: resolved.harness === 'opencode' || resolved.harness === 'claude-code' || resolved.harness === 'cline',
   }
 }
 
@@ -465,6 +586,33 @@ function resolveClaudeSdk(raw: unknown): Readonly<ClaudeSdkOptions> {
     settingSources: sources,
     ...(settingsFile === undefined ? {} : { settingsFile }),
   })
+}
+
+/** Validate the caller's Cline SDK selection; every field is explicit, nothing is probed on disk (the worker qualifies the runtime and the package versions). */
+function resolveClineSdk(raw: unknown): ResolvedClineSdkOptions {
+  if (!isJsonObject(raw)) throw invalid('clineSdk must be a ClineSdkOptions object')
+  const unsupported = Object.keys(raw).find((key) => !['packageRoot', 'configDir', 'provider', 'features', 'approval'].includes(key))
+  if (unsupported !== undefined) throw invalid(`clineSdk contains an unsupported option ${JSON.stringify(unsupported)}`)
+  const { packageRoot, configDir, provider, features, approval } = raw
+  if (typeof packageRoot !== 'string' || !isAbsolute(packageRoot) || packageRoot.includes('\0')) {
+    throw invalid('clineSdk.packageRoot must be the absolute path of the installed @cline/sdk package')
+  }
+  if (typeof configDir !== 'string' || !isAbsolute(configDir) || configDir.includes('\0')) {
+    throw invalid('clineSdk.configDir must be the absolute path of the caller-selected Cline root')
+  }
+  if (typeof provider !== 'string' || provider.trim() === '' || provider.includes('\0')) {
+    throw invalid('clineSdk.provider must be a non-blank native provider ID')
+  }
+  if (features !== 'builtin-only') {
+    throw new HarnessError(
+      `clineSdk.features must be "builtin-only", got ${JSON.stringify(features)}: native hooks, plugins, rules, skills, workflows, MCP servers, subagents, teams, checkpoints and detached commands are not owned by this session`,
+      'unsupported-capability',
+    )
+  }
+  if (approval !== undefined && approval !== 'upstream' && approval !== 'callback') {
+    throw invalid(`clineSdk.approval must be "upstream" or "callback", got ${JSON.stringify(approval)}`)
+  }
+  return Object.freeze({ packageRoot, configDir, provider: provider.trim(), features: 'builtin-only', approval: approval ?? 'upstream' })
 }
 
 function isAmpEffort(value: unknown): value is AmpEffort {
@@ -657,6 +805,16 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   } else if (rawClaudeSdk !== undefined) {
     throw invalid('claudeSdk is only accepted for harness "claude-code" on backend "sdk"')
   }
+  const rawClineSdk: unknown = spec.clineSdk
+  let clineSdk: ResolvedClineSdkOptions | null = null
+  if (harness === 'cline') {
+    if (rawClineSdk === undefined) {
+      throw invalid('clineSdk is required for harness "cline" on backend "sdk": packageRoot, configDir, provider and features are never guessed')
+    }
+    clineSdk = resolveClineSdk(rawClineSdk)
+  } else if (rawClineSdk !== undefined) {
+    throw invalid('clineSdk is only accepted for harness "cline" on backend "sdk"')
+  }
   const rawAmpSdk: unknown = spec.ampSdk
   if (harness === 'amp') {
     if (rawAmpSdk === undefined) throw invalid('ampSdk is required for harness "amp": packageRoot, cliPath, executor and mode are never guessed')
@@ -723,6 +881,24 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
       throw invalid(`env.CLAUDE_CONFIG_DIR ${JSON.stringify(explicit)} conflicts with claudeSdk.configDir ${JSON.stringify(claudeSdk.configDir)}`)
     }
   }
+  if (clineSdk !== null) {
+    const owned = clineSdkEnv(clineSdk)
+    for (const [key, value] of Object.entries(owned)) {
+      const explicit = env[key]
+      if (explicit !== undefined && explicit !== value) {
+        throw invalid(`env.${key} ${JSON.stringify(explicit)} conflicts with the session-owned value ${JSON.stringify(value)} derived from clineSdk.configDir`)
+      }
+    }
+    for (const key of Object.keys(env)) {
+      // The worker deletes every other native path override before importing the SDK: honoring one here would be a silent lie.
+      if (key.startsWith('CLINE_') && (key.endsWith('_DIR') || key.endsWith('_PATH')) && owned[key] === undefined) {
+        throw new HarnessError(`env.${key} is an unsupported Cline storage override: every native path stays inside clineSdk.configDir`, 'unsupported-capability')
+      }
+    }
+    if (env.TMPDIR !== undefined) {
+      throw invalid('env.TMPDIR is not supported for cline: the session owns one temporary directory per session and pins TMPDIR to it')
+    }
+  }
   // The Amp endpoint derives from the layered env, so the selection resolves after it.
   let ampSdk: ResolvedAmpSdkOptions | null = null
   if (harness === 'amp') {
@@ -733,7 +909,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     ampSdk = resolveAmpSdk(rawAmpSdk, env)
   }
 
-  let executable: string | null = claudeSdk !== null ? process.execPath : harness === 'omp' ? 'bun' : harness === 'amp' ? 'node' : 'pi'
+  let executable: string | null = claudeSdk !== null ? process.execPath : harness === 'omp' ? 'bun' : harness === 'amp' || harness === 'cline' ? 'node' : 'pi'
   const rawExecutable: unknown = spec.executable
   if (opencode !== null) {
     if (rawExecutable !== undefined) throw invalid('executable is not supported for opencode: no local process is launched')
@@ -819,6 +995,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     ampSdk,
     opencode,
     claudeSdk,
+    clineSdk,
   })
 }
 
@@ -842,9 +1019,37 @@ function claudeSdkWorkerPath(): string {
   return fileURLToPath(new URL('./claude-sdk-worker.mjs', import.meta.url))
 }
 
+/**
+ * The Cline SDK worker: `src/harness/_cline_sdk.mjs` next to the Python
+ * package when running from source (`sessions.ts`), the build-time copy
+ * `cline-sdk.mjs` beside the bundle otherwise. Resolved by path only; the
+ * optional SDK is loaded by the worker, never imported here.
+ */
+function clineSdkWorkerPath(): string {
+  const source = basename(fileURLToPath(import.meta.url)) === 'sessions.ts'
+  return fileURLToPath(new URL(source ? '../../src/harness/_cline_sdk.mjs' : './cline-sdk.mjs', import.meta.url))
+}
+
+/**
+ * Drop a session-owned temporary directory after a failed setup: the launch
+ * error is what the caller must see, and the directory sits under the system
+ * temporary root. A live session removes it through the reported cleanup
+ * path instead, and keeps it when that cleanup fails.
+ */
+function discardTempDir(dir: string | null): void {
+  if (dir === null) return
+  try {
+    rmSync(dir, { recursive: true, force: true })
+  } catch {
+    // the launch failure is the reported error
+  }
+}
+
 /** What the leader process is called in diagnostics. */
 function leaderName(spec: ResolvedSessionSpec): string {
-  return spec.claudeSdk !== null ? 'the Claude SDK worker' : spec.backend === 'sdk' ? 'the OMP SDK bridge' : 'pi'
+  if (spec.claudeSdk !== null) return 'the Claude SDK worker'
+  if (spec.clineSdk !== null) return 'the Cline SDK worker'
+  return spec.backend === 'sdk' ? 'the OMP SDK bridge' : 'pi'
 }
 
 /** Bounded native header reader; OMP alone permits one leading title record. */
@@ -1209,7 +1414,15 @@ export abstract class LiveSession {
   abstract close(): Promise<void>
 }
 
-/** Pi RPC, the OMP SDK bridge and the Claude SDK worker: one owned child process per session. Constructed only through `LiveSession.open`. */
+/** One owned command group serving a native `shell_request`. */
+interface CommandJob {
+  readonly cancel: AbortController
+  /** Settles once the group is gone and its result was queued; assigned right after registration, so teardown always finds it. */
+  done: Promise<void>
+  failure: unknown
+}
+
+/** Pi RPC, the OMP SDK bridge, the Claude SDK worker and the Cline SDK worker: one owned child process per session. Constructed only through `LiveSession.open`. */
 class ProcessSession extends LiveSession {
   readonly #prepared: PreparedCommand
   readonly #child: ChildProcess
@@ -1222,8 +1435,16 @@ class ProcessSession extends LiveSession {
   #prelude: { frame: JsonObject; requestId: string | null; bytes: number }[] = []
   #preludeBytes = 0
   #reference: SessionReference | null = null
-  /** Bridge-local `claude_permission` IDs observed and not yet answered or cancelled (claude-code only). */
+  /** Worker-local permission IDs observed and not yet answered or cancelled (`claude_permission` on claude-code, `cline_permission` on cline). */
   readonly #pendingApprovals = new Set<string>()
+  /** Unique temporary directory this session owns (cline only): pinned as `TMPDIR` for the worker and every command, removed once every owned group is gone. */
+  readonly #tempDir: string | null
+  /** Environment every owned command inherits: the session-owned Cline roots, modes and `TMPDIR`, exactly what the worker pins for itself. */
+  readonly #commandEnv: Readonly<Record<string, string>>
+  /** Live command groups by native request ID; their cancel and completion handles are kept independently of the stdout reader. */
+  readonly #commands = new Map<string, CommandJob>()
+  /** Worker-owned monotonic IDs detect replay without accumulating session-long history. */
+  #commandSeq = 0
   #requestSeq = 0
   #turnSeq = 0
   #active: ProcessTurn | null = null
@@ -1238,11 +1459,13 @@ class ProcessSession extends LiveSession {
   #onLeaderKnown: (() => void)[] = []
   #onStdioClosed: (() => void)[] = []
 
-  private constructor(spec: ResolvedSessionSpec, prepared: PreparedCommand, child: ChildProcess) {
+  private constructor(spec: ResolvedSessionSpec, prepared: PreparedCommand, child: ChildProcess, tempDir: string | null) {
     super(spec)
     this.#prepared = prepared
     this.#child = child
     this.#pid = child.pid ?? null
+    this.#tempDir = tempDir
+    this.#commandEnv = spec.clineSdk === null || tempDir === null ? {} : Object.freeze({ ...spec.env, ...clineSdkEnv(spec.clineSdk), TMPDIR: tempDir })
     this.#stderr = new BoundedCapture(spec.maxBufferBytes)
     this.#sessionQueue = new EventQueue(spec.maxBufferBytes, () => {
       void this.#invalidate('protocol-error', `unconsumed session events exceeded maxBufferBytes (${spec.maxBufferBytes})`)
@@ -1274,12 +1497,14 @@ class ProcessSession extends LiveSession {
     assertSupportedPlatform()
     const resume = spec.resume
     if (resume !== null && resume.sessionFile !== null) {
-      if (spec.claudeSdk === null) verifySessionHeader(resume, resume.sessionFile, spec.backend)
-      else verifyClaudeTranscript(resume, resume.sessionFile)
+      // Cline: the worker verifies the native manifest's ID, cwd and expected path before starting; there is no Pi/OMP JSONL header here.
+      if (spec.claudeSdk !== null) verifyClaudeTranscript(resume, resume.sessionFile)
+      else if (spec.clineSdk === null) verifySessionHeader(resume, resume.sessionFile, spec.backend)
     }
     const args: string[] = []
     // Explicit layering, never a parent mutation: inherited env, then the caller's entries, then the session-owned ones.
     const layered: Record<string, string> = { ...spec.env }
+    let tempDir: string | null = null
     if (spec.ompSdk !== null) {
       const worker = ompSdkWorkerPath()
       if (!existsSync(worker)) throw new HarnessError(`OMP SDK bridge worker is missing at ${worker}`, 'launch-failed')
@@ -1296,20 +1521,42 @@ class ProcessSession extends LiveSession {
         packageRoot, cliPath, configDir, settingSources, settingsFile: settingsFile ?? null, cwd: spec.workdir, model: spec.model, resume,
       }))
       layered.CLAUDE_CONFIG_DIR = configDir
+    } else if (spec.clineSdk !== null) {
+      const worker = clineSdkWorkerPath()
+      if (!existsSync(worker)) throw new HarnessError(`Cline SDK worker is missing at ${worker}`, 'launch-failed')
+      const { packageRoot, configDir, provider, features, approval } = spec.clineSdk
+      // Owned and unique per session: the native detached-log recovery must never see another session's temporary files.
+      try {
+        tempDir = mkdtempSync(join(tmpdir(), 'harness-cline-'))
+      } catch (err) {
+        throw new HarnessError(`the Cline session temporary directory could not be created: ${describeError(err)}`, 'launch-failed')
+      }
+      // `instructions` is a flag, not content: the lease already projected CLINE.md, and the worker adds the native file mention to each prompt.
+      args.push(worker, JSON.stringify({
+        packageRoot, configDir, provider, features, approval, cwd: spec.workdir, model: spec.model, resume, tempDir,
+        instructions: spec.instructions !== null,
+      }))
+      Object.assign(layered, clineSdkEnv(spec.clineSdk), { TMPDIR: tempDir })
     } else {
       args.push(...PI_ARGS)
       if (spec.model !== null) args.push('--model', spec.model)
       if (resume !== null && resume.sessionFile !== null) args.push('--session', resume.sessionFile)
     }
     const adapter = getAdapter(spec.harness)
-    const prepared = prepareCommand({
-      cmd: executable,
-      args,
-      cwd: spec.workdir,
-      env: layered,
-      instructionsFile: join(spec.workdir, adapter.instructionsFilename),
-      ...(spec.instructions === null ? {} : { instructionContent: spec.instructions }),
-    })
+    let prepared: PreparedCommand
+    try {
+      prepared = prepareCommand({
+        cmd: executable,
+        args,
+        cwd: spec.workdir,
+        env: layered,
+        instructionsFile: join(spec.workdir, adapter.instructionsFilename),
+        ...(spec.instructions === null ? {} : { instructionContent: spec.instructions }),
+      })
+    } catch (err) {
+      discardTempDir(tempDir)
+      throw err
+    }
     const env: Record<string, string> = {}
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) env[key] = value
@@ -1325,9 +1572,10 @@ class ProcessSession extends LiveSession {
       })
     } catch (err) {
       cleanupCommand(prepared)
+      discardTempDir(tempDir)
       throw new HarnessError(`${leaderName(spec)} could not be launched: ${describeError(err)}`, 'launch-failed')
     }
-    const session = new ProcessSession(spec, prepared, child)
+    const session = new ProcessSession(spec, prepared, child, tempDir)
     try {
       await session.#request('get_state', {})
     } catch (err) {
@@ -1355,6 +1603,14 @@ class ProcessSession extends LiveSession {
       return 'get_state returned a malformed sessionFile'
     }
     if (isStreaming !== false) return 'get_state reports the agent is already streaming'
+    if (this.spec.clineSdk !== null) {
+      // The native manifest path is the session file, and the worker must have started in the requested workdir.
+      if (typeof sessionFile !== 'string') return 'get_state returned no native Cline manifest path'
+      const workdir = data.workdir
+      if (typeof workdir !== 'string' || !samePath(workdir, this.spec.workdir)) {
+        return `get_state reports workdir ${JSON.stringify(workdir)}, not the requested ${JSON.stringify(this.spec.workdir)}`
+      }
+    }
     const resume = this.spec.resume
     if (resume !== null && sessionId !== resume.sessionId) {
       return `${leaderName(this.spec)} resumed session ${JSON.stringify(sessionId)}, not ${JSON.stringify(resume.sessionId)}`
@@ -1457,23 +1713,29 @@ class ProcessSession extends LiveSession {
   }
 
   /**
-   * Answer an outstanding `claude_permission` request (claude-code only) with
-   * `once` (native allow with the original input) or `reject` (native deny
-   * with a fixed message). The request must have been observed as an event of
-   * this session and be neither answered nor cancelled; the worker validates
-   * it again before resolving the native `canUseTool` callback. Pi RPC and the
-   * OMP SDK bridge expose no native permission replies.
+   * Answer an outstanding native permission request with `once` (native
+   * allow with the original input) or `reject` (native deny with a fixed
+   * message). Supported on `claude-code` (`claude_permission`) and on
+   * `cline` with `clineSdk.approval` set to `callback` (`cline_permission`):
+   * the request must have been observed as an event of this session and be
+   * neither answered nor cancelled, and the worker validates it again before
+   * resolving the native callback. Pi RPC, the OMP SDK bridge and a Cline
+   * session left on upstream approvals expose no native permission replies.
    */
   async respondApproval(requestId: string, response: OpenCodeApprovalResponse): Promise<void> {
-    if (this.spec.claudeSdk === null) {
-      throw new HarnessError(`${this.spec.harness} live sessions cannot answer permission requests; only "opencode" and "claude-code" support respondApproval`, 'unsupported-capability')
+    const cline = this.spec.clineSdk
+    if (this.spec.claudeSdk === null && cline === null) {
+      throw new HarnessError(`${this.spec.harness} live sessions cannot answer permission requests; only "opencode", "claude-code" and "cline" support respondApproval`, 'unsupported-capability')
+    }
+    if (cline !== null && cline.approval !== 'callback') {
+      throw new HarnessError('clineSdk.approval is "upstream": native approvals stay with the SDK, so this session never receives a request to answer', 'unsupported-capability')
     }
     const reply: unknown = response
     if (reply === 'always') {
       throw new HarnessError('permission reply "always" is unsupported: it would store a permission rule beyond this session', 'unsupported-capability')
     }
     if (reply !== 'once' && reply !== 'reject') throw invalid(`response must be "once" or "reject", got ${JSON.stringify(reply)}`)
-    if (typeof requestId !== 'string' || requestId === '') throw invalid('requestId must be the bridge approval ID of an observed claude_permission event')
+    if (typeof requestId !== 'string' || requestId === '') throw invalid('requestId must be the worker approval ID of an observed permission event')
     if (this.#dead) throw new HarnessError('session is closed', 'session-closed')
     if (!this.#pendingApprovals.has(requestId)) {
       throw invalid(`no outstanding permission request ${JSON.stringify(requestId)} was observed for session ${this.reference.sessionId}`)
@@ -1508,9 +1770,13 @@ class ProcessSession extends LiveSession {
     })
   }
 
-  /** Serialized, backpressured stdin writes; a write failure is a disconnect. */
-  #write(line: string): void {
-    this.#writes = this.#writes.then(async () => {
+  /**
+   * Serialized, backpressured stdin writes; a write failure is a disconnect.
+   * The returned promise settles once this line reached the pipe, so an
+   * owned command's output callback can hand the child's backpressure on.
+   */
+  #write(line: string): Promise<void> {
+    const written = this.#writes.then(async () => {
       if (this.#dead) return
       const stdin = this.#child.stdin
       if (stdin === null || stdin.destroyed || stdin.writableEnded) {
@@ -1532,6 +1798,8 @@ class ProcessSession extends LiveSession {
     }).catch((err: unknown) => {
       void this.#invalidate('disconnected', `stdin write failed: ${describeError(err)}`)
     })
+    this.#writes = written
+    return written
   }
 
   // ---- stdout framing ----
@@ -1636,9 +1904,14 @@ class ProcessSession extends LiveSession {
         turn.settled = true
       }
     }
-    if (this.spec.claudeSdk !== null && typeof frame.id === 'string') {
-      if (frame.type === 'claude_permission') this.#pendingApprovals.add(frame.id)
-      else if (frame.type === 'claude_permission_cancelled') this.#pendingApprovals.delete(frame.id)
+    if (typeof frame.id === 'string') {
+      if (this.spec.claudeSdk !== null) {
+        if (frame.type === 'claude_permission') this.#pendingApprovals.add(frame.id)
+        else if (frame.type === 'claude_permission_cancelled') this.#pendingApprovals.delete(frame.id)
+      } else if (this.spec.clineSdk !== null) {
+        if (frame.type === 'cline_permission') this.#pendingApprovals.add(frame.id)
+        else if (frame.type === 'cline_permission_cancelled') this.#pendingApprovals.delete(frame.id)
+      }
     }
     this.#route(frame, typeof frame.id === 'string' ? frame.id : null, bytes)
     if (turn !== null && settles) this.#maybeComplete(turn)
@@ -1648,10 +1921,12 @@ class ProcessSession extends LiveSession {
    * Frames from an SDK worker other than responses: `sdk_event` unwraps to
    * the exact native event and goes through event routing; `sdk_settled` is
    * the worker's authoritative turn completion (carrying the exact native
-   * `result` on claude-code) and is never exposed as an event. The Claude
-   * worker additionally reports the persisted transcript (`sdk_reference`)
-   * and fatal native failures (`sdk_failure`). Anything else is a protocol
-   * violation.
+   * `result` on claude-code and cline) and is never exposed as an event. The
+   * Claude worker additionally reports the persisted transcript
+   * (`sdk_reference`), and either SDK worker may report a fatal native
+   * failure (`sdk_failure`). The Cline worker delegates its native commands
+   * back here (`shell_request` / `shell_cancel`), which are not
+   * request/response frames. Anything else is a protocol violation.
    */
   #onBridgeFrame(frame: JsonObject, bytes: number): void {
     if (frame.type === 'sdk_event') {
@@ -1664,11 +1939,16 @@ class ProcessSession extends LiveSession {
       return
     }
     const claude = this.spec.claudeSdk !== null
+    const cline = this.spec.clineSdk !== null
+    if (cline && (frame.type === 'shell_request' || frame.type === 'shell_cancel')) {
+      this.#onShellFrame(frame)
+      return
+    }
     if (claude && frame.type === 'sdk_reference') {
       this.#onReference(frame)
       return
     }
-    if (claude && frame.type === 'sdk_failure') {
+    if ((claude || cline) && frame.type === 'sdk_failure') {
       const { status, error, raw } = frame
       if (typeof error !== 'string' || error === '') {
         void this.#invalidate('protocol-error', 'sdk_failure frame has no non-empty "error"')
@@ -1701,13 +1981,18 @@ class ProcessSession extends LiveSession {
         return
       }
     }
-    const turn = this.#active
-    if (turn === null || turn.done) {
-      // OMP: an idle settle mirrors an idle agent_settled. Claude: exactly one result per prompt, so a stray settle is a violation.
-      if (claude) void this.#invalidate('protocol-error', 'sdk_settled arrived without an active turn')
+    // The native Cline AgentResult is opaque: it carries no discriminating `type`, and its `finishReason` alone decides the turn.
+    if (cline && result !== undefined && !isJsonObject(result)) {
+      void this.#invalidate('protocol-error', 'sdk_settled "result" is not a native Cline AgentResult object')
       return
     }
-    if (claude && typeof error !== 'string' && result === undefined) {
+    const turn = this.#active
+    if (turn === null || turn.done) {
+      // OMP: an idle settle mirrors an idle agent_settled. Claude and Cline: exactly one settlement per prompt, so a stray one is a violation.
+      if (claude || cline) void this.#invalidate('protocol-error', 'sdk_settled arrived without an active turn')
+      return
+    }
+    if ((claude || cline) && typeof error !== 'string' && result === undefined) {
       void this.#invalidate('protocol-error', 'sdk_settled carries neither a native result nor an error')
       return
     }
@@ -1788,6 +2073,23 @@ class ProcessSession extends LiveSession {
         this.#finishTurn(turn, 'agent-error', result, message)
       } else {
         this.#finishTurn(turn, 'completed', result, null)
+      }
+      return
+    }
+    if (this.spec.clineSdk !== null) {
+      const result = turn.result
+      if (result === null) return
+      const reason = result.finishReason
+      if (reason === 'completed') {
+        this.#finishTurn(turn, 'completed', result, null)
+      } else if (reason === 'aborted') {
+        this.#finishTurn(turn, 'interrupted', result, null)
+      } else if (reason === 'max_iterations' || reason === 'mistake_limit' || reason === 'error') {
+        const text = result.errorMessage
+        this.#finishTurn(turn, 'agent-error', result, typeof text === 'string' && text !== '' ? text : `native run finished with reason ${JSON.stringify(reason)}`)
+      } else {
+        // The native reason set is qualified; an unknown one is a protocol violation, never a guessed status.
+        void this.#invalidate('protocol-error', `sdk_settled result has unknown finishReason ${JSON.stringify(reason)}`, result)
       }
       return
     }
@@ -1897,6 +2199,12 @@ class ProcessSession extends LiveSession {
    * The exit metadata of `SessionTurnResult` always describes the owned
    * leader (worker); a native Claude exit is described by the `sdk_failure`
    * frame passed as `raw`.
+   *
+   * On `cline` the owned command groups are cancelled and awaited here as
+   * well, alongside the worker group and before the turn settles, so no
+   * command outlives the session that asked for it. A command group that
+   * will not stop keeps the lease and the owned temporary directory and is
+   * reported as a cleanup failure, never as a clean disposal.
    */
   #invalidate(status: SessionTurnStatus, error: string | null, raw: JsonObject | null = null): Promise<void> {
     if (this.#teardown !== null) return this.#teardown
@@ -1914,15 +2222,17 @@ class ProcessSession extends LiveSession {
     const turn = this.#active
     if (turn !== null) clearTimeout(turn.timer)
     const disposing = this.spec.backend === 'sdk' && this.#pid !== null && this.#leader === null
-    this.#teardown = this.#stopGroup().catch((err: unknown) => {
+    this.#teardown = this.#stopAll().catch((err: unknown) => {
       this.#cleanupError = err
     }).then(() => {
       if (turn !== null) this.#finishTurn(turn, status, raw ?? turn.lastAgentEnd, error)
       this.#sessionQueue.end()
-      // A failed reap/termination must not release ownership of live resources.
+      // A failed reap/termination, of the worker group or of an owned command group, must not release ownership of live resources.
       if (this.#cleanupError !== null) return
       try {
         cleanupCommand(this.#prepared)
+        // Last: the temporary directory belongs to this process and outlives every owned group.
+        if (this.#tempDir !== null) rmSync(this.#tempDir, { recursive: true, force: true })
       } catch (err) {
         this.#cleanupError = err
         return
@@ -1976,16 +2286,135 @@ class ProcessSession extends LiveSession {
       throw new HarnessError(`${leaderName(this.spec)} process ${this.#pid} was not reaped within the teardown budget`, 'adapter-error')
     }
   }
+
+  /** Stop the worker group and every owned command group concurrently; both are awaited, and the first failure is raised once they settled. */
+  async #stopAll(): Promise<void> {
+    const failures: unknown[] = []
+    const commands = this.#stopCommands().catch((err: unknown) => { failures.push(err) })
+    const group = this.#stopGroup().catch((err: unknown) => { failures.push(err) })
+    await commands
+    await group
+    if (failures.length > 0) throw failures[0]
+  }
+
+  /**
+   * Cancel every owned command group and await its bounded teardown. No new
+   * command is accepted from here on (`#dead` is already set), and a group
+   * that outlasts the runner's own TERM → KILL → drain budget is a cleanup
+   * failure: the caller keeps the lease and the temporary directory.
+   */
+  async #stopCommands(): Promise<void> {
+    const jobs = [...this.#commands.values()]
+    if (jobs.length === 0) return
+    for (const job of jobs) job.cancel.abort()
+    const stopped = Promise.allSettled(jobs.map((job) => job.done)).then(() => true)
+    if (!(await Promise.race([stopped, sleep(CLINE_COMMAND_TEARDOWN_MS).then(() => false)]))) {
+      throw new HarnessError(`${this.#commands.size} owned command process group(s) did not stop within ${CLINE_COMMAND_TEARDOWN_MS}ms`, 'adapter-error')
+    }
+    const failed = jobs.find((job) => job.failure !== null)
+    if (failed) throw new HarnessError(`owned command cleanup could not be proved: ${describeError(failed.failure)}`, 'adapter-error')
+  }
+
+  // ---- owned command execution (cline) ----
+
+  /**
+   * The Cline worker asked this process to run a native command, or to
+   * cancel one. The harness owns every command process group: the worker
+   * resolved the argv through the native shell helpers and never spawns
+   * anything itself, so `cmd` is executed verbatim and never interpolated
+   * into a shell.
+   */
+  #onShellFrame(frame: JsonObject): void {
+    const id = frame.id
+    if (typeof id !== 'string' || id === '') {
+      void this.#invalidate('protocol-error', `${JSON.stringify(frame.type)} frame has no non-empty string "id"`)
+      return
+    }
+    if (frame.type === 'shell_cancel') {
+      // Idempotent by contract: a command that already finished, or whose result is in flight, has nothing left to cancel.
+      this.#commands.get(id)?.cancel.abort()
+      return
+    }
+    const turn = this.#active
+    if (turn === null || turn.done) {
+      void this.#invalidate('protocol-error', `shell_request ${JSON.stringify(id)} arrived outside an active turn`)
+      return
+    }
+    const sequence = /^shell-([1-9][0-9]{0,15})$/.exec(id)
+    const number = sequence === null ? NaN : Number(sequence[1])
+    if (!Number.isSafeInteger(number) || number <= this.#commandSeq) {
+      void this.#invalidate('protocol-error', `shell_request has an invalid or reused sequence ${JSON.stringify(id)}`)
+      return
+    }
+    if (this.#commands.size >= CLINE_MAX_ACTIVE_COMMANDS) {
+      void this.#invalidate('protocol-error', `more than ${CLINE_MAX_ACTIVE_COMMANDS} native commands are in flight at once`)
+      return
+    }
+    const cmd = stringArray(frame.cmd)
+    if (cmd === null || cmd.length === 0 || cmd[0] === '') {
+      void this.#invalidate('protocol-error', `shell_request ${JSON.stringify(id)} has no "cmd" argv of NUL-free strings`)
+      return
+    }
+    const cwd = frame.cwd
+    if (typeof cwd !== 'string' || !isAbsolute(cwd) || cwd.includes('\0')) {
+      void this.#invalidate('protocol-error', `shell_request ${JSON.stringify(id)} has no absolute "cwd"`)
+      return
+    }
+    const stdin = frame.stdin
+    if (stdin !== null && typeof stdin !== 'string') {
+      void this.#invalidate('protocol-error', `shell_request ${JSON.stringify(id)} has a non-string "stdin"`)
+      return
+    }
+    this.#commandSeq = number
+    // Registered before the run starts, so teardown finds the job even if the runner refuses it synchronously.
+    const job: CommandJob = { cancel: new AbortController(), done: Promise.resolve(), failure: null }
+    this.#commands.set(id, job)
+    job.done = this.#runCommand(id, cmd, cwd, stdin, job)
+  }
+
+  /**
+   * Run one native command on the shared subprocess runner: its own process
+   * group, the native bash tool's wall clock and per-stream bound, streamed
+   * progress the worker turns into native tool updates, and the runner's
+   * bounded teardown on cancellation. An unexpected runner error retains
+   * ownership rather than treating unproven cleanup as a native tool error.
+   */
+  async #runCommand(id: string, cmd: string[], cwd: string, stdin: string | null, job: CommandJob): Promise<void> {
+    const cancel = job.cancel.signal
+    try {
+      const request = prepareLaunch(cmd, {
+        cwd,
+        timeoutSeconds: CLINE_COMMAND_TIMEOUT_SECONDS,
+        maxOutputBytes: CLINE_COMMAND_MAX_OUTPUT_BYTES,
+        stdin,
+        extraEnv: this.#commandEnv,
+        cancel,
+      })
+      const outcome = await runLifecycle(request, cancel, undefined, (chunk: string, stream: OutputStream) =>
+        this.#write(`${JSON.stringify({ type: 'shell_output', id, stream, chunk })}\n`))
+      const output = commandOutput(outcome)
+      const error = commandError(outcome)
+      await this.#write(`${JSON.stringify(error === null ? { type: 'shell_result', id, output } : { type: 'shell_result', id, output, error })}\n`)
+    } catch (err) {
+      job.failure = err
+      void this.#invalidate('agent-error', `command cleanup could not be proved: ${describeError(err)}`)
+    } finally {
+      if (job.failure === null) this.#commands.delete(id)
+    }
+  }
 }
 
 /**
- * Validate the spec and open the native session. For `pi`/`omp`/`claude-code`:
+ * Validate the spec and open the native session. For `pi`/`omp`/`claude-code`/`cline`:
  * verify any resume target, take the workdir lease (projecting `instructions`
- * into AGENTS.md / CLAUDE.md), spawn the leader (`pi --mode rpc`, `bun`
- * running the OMP SDK bridge worker, or the JavaScript runtime running the
- * Claude SDK worker, which qualifies the SDK/CLI versions and selects the
- * native session ID) and complete the `get_state` handshake; rejects with
- * the lease released and the process group stopped when any step fails. For
+ * into AGENTS.md / CLAUDE.md / CLINE.md), spawn the leader (`pi --mode rpc`,
+ * `bun` running the OMP SDK bridge worker, `node` running the Cline SDK
+ * worker, which qualifies the runtime and the package versions and verifies
+ * the native manifest identity, or the JavaScript runtime running the Claude
+ * SDK worker, which qualifies the SDK/CLI versions and selects the native
+ * session ID) and complete the `get_state` handshake; rejects with the lease
+ * released, the process group stopped and any owned temporary directory
+ * removed when any step fails. For
  * `amp`: take the lease, run one finite `open` worker that creates the thread
  * (or verifies the resume target through the SDK) and adopt its identity;
  * rejects with the worker's process group stopped and the lease released.

@@ -101,6 +101,25 @@ not this JavaScript worker. See the
 [paired examples](../README.md#optional-claude-agent-sdk-sessions) and
 [version/configuration/event contract](../SPEC.md#optional-claude-agent-sdk-sessions).
 
+## Optional Cline SDK backend
+
+`openSession({ harness: 'cline', backend: 'sdk', workdir, clineSdk })` runs
+the official `@cline/sdk@0.0.82` in an owned **Node >=22.14** worker, including
+when called from Bun. `clineSdk` requires absolute `packageRoot` and
+`configDir`, a native `provider`, and explicit `features: 'builtin-only'`.
+The profile is writable native Cline state; use a dedicated profile.
+Model omission reads that provider's configured model.
+
+The SDK stays local, without hub discovery/startup. Native hooks, plugins,
+MCP, subagents and command detachment are excluded independently of the
+public bash executor hook. Harness owns command groups through its shared
+subprocess runner and stops them on forced worker loss before releasing the
+workdir lease. `approval: 'callback'` requires explicit `once`/`reject`
+replies; the default `upstream` preserves native auto-approved defaults.
+Exact native resume, raw events/usage and bounded failure behavior use the
+shared session API. See the [paired examples](../README.md#optional-cline-sdk-sessions)
+and [full contract](../SPEC.md#optional-cline-sdk-sessions).
+
 ## Caller-owned OpenCode HTTP backend
 
 `openSession({ harness: 'opencode', backend: 'rpc', workdir, opencode })`

@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp SDK bridge sessions, optional native Claude SDK sessions, caller-owned OpenCode HTTP sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp/Cline SDK bridge sessions, optional native Claude SDK sessions, caller-owned OpenCode HTTP sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -1328,7 +1328,7 @@ explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
 Other pairings reject with `unsupported-backend`, except the separately
-documented OMP/Amp/Claude SDK and caller-owned OpenCode HTTP sessions below. Unknown
+documented OMP/Amp/Claude/Cline SDK and caller-owned OpenCode HTTP sessions below. Unknown
 names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
@@ -1821,6 +1821,152 @@ Sources refreshed September 9:
 [pinned SDK package](https://www.npmjs.com/package/@ampcode/sdk/v/0.1.0-20260823161614-g3631dc6),
 [pinned CLI package](https://www.npmjs.com/package/@ampcode/cli/v/0.0.1788883237-g0b98e3).
 
+## Optional Cline SDK sessions
+
+`open_session` / `openSession` accept `harness: "cline", backend: "sdk"`.
+Both languages launch the same owned **Node >=22.14** worker. Python uses a
+named Node bridge, not a native Python SDK. The official TypeScript-only
+**`@cline/sdk@0.0.82`** embeds the Cline agent runtime; Harness does not replace
+it with a raw model API. The existing Cline one-shot CLI adapter is unchanged.
+
+### Explicit dependencies, profile and permissions
+
+Both package roots export `ClineSdkOptions`, `ClineFeatures` and
+`ClineApproval`. `SessionSpec.cline_sdk` / `clineSdk` is required for this
+pairing and rejected on other harnesses:
+
+| TypeScript field | Selection |
+|---|---|
+| `packageRoot` | Absolute installed `@cline/sdk` package directory, not a project root |
+| `configDir` | Absolute caller-selected, writable Cline profile root |
+| `provider` | Nonempty native provider ID; never inferred from the model |
+| `features` | Required literal `"builtin-only"`; other feature selections are unsupported |
+| `approval` | `"upstream"` (default) or `"callback"` |
+
+Python uses `package_root` and `config_dir`. `SessionSpec.executable` selects
+Node, default `node`, even when the caller runs under Bun. The SDK itself
+declares Node >=22; this bridge needs Node >=22.14 for public ESM package
+resolution. Startup verifies `@cline/sdk`, `@cline/core`, `@cline/shared`,
+`@cline/agents` and `@cline/llms` are all 0.0.82 before SDK initialization.
+Optional packages are not imported by ordinary CLI imports or capability
+queries. Missing/unqualified dependencies fail with `launch-failed`; no
+installation, CLI fallback, ACP fallback or permission bypass occurs.
+
+The worker pins `backendMode: "local"`: no hub discovery, prewarming, shared
+hub attachment or spoke management. It pins native data/session/DB paths below
+`configDir`, and owns a unique `TMPDIR` for the session. This also prevents
+the SDK's startup detached-log reaper from inspecting other Cline processes'
+temporary files. Conflicting caller-owned environment selections are rejected;
+other `CLINE_*_DIR` / `CLINE_*_PATH` redirects are unsupported, and caller
+`TMPDIR` is rejected. Inherited storage redirects are cleared in the worker.
+The parent environment is never mutated.
+
+Use a dedicated native profile: Cline owns its writable state and may migrate
+legacy provider settings or refresh selected credentials there. Harness does
+not copy authentication, discover another profile, or call native session
+listing/reconciliation APIs. `model` is passed verbatim; omission reads the
+selected provider's model from this profile and fails if none is configured.
+Native custom model IDs remain allowed, including upstream's metadata-free
+unregistered-model behavior; no substitute model or catalog requirement is
+invented. `CLINE_API_KEY`, when explicitly supplied in the child environment,
+is passed to native configuration; otherwise native profile authentication
+applies. No authenticated-provider success is implied by local execution.
+
+`approval: "upstream"` preserves the SDK's native **auto-approved defaults**;
+it is not an interactive approval policy. `"callback"` explicitly sets the
+native wildcard tool policy to require approval and publishes
+`cline_permission` events with a bridge-local `id` and the complete native
+request. Use `respondApproval(id, "once" | "reject")` /
+`respond_approval(...)`. No persistent `"always"` rule, modified input or
+bypass is supported. Pending requests are cancelled with their turn; stale or
+duplicate replies fail. Approval responses in upstream mode are unsupported.
+`permissionPolicy: "bypass"` is unsupported for this backend.
+
+### Supported native surface and owned commands
+
+`"builtin-only"` is an explicit restricted profile, not silent disabling of a
+requested native configuration. It excludes file hooks, plugins, rules,
+skills, workflows, MCP settings tools, subagents, teams, checkpoints and
+caller-injected runtime extensions. The worker supplies
+`localRuntime.configExtensions: []`, disables spawn/teams/MCP/checkpoints,
+and exposes no arbitrary runtime-options channel. Native mode changes,
+steering, forks, automation, command detachment and hub operations are not
+available through this API. Native file hooks are not made safe by a shell
+executor override: they are excluded independently.
+
+For `run_commands`, the public `capabilities.toolExecutors.bash` hook sends
+native shell/argv invocations to the Harness parent. The parent uses the
+existing shared subprocess runner, one recorded process group per command,
+with native shell invocation semantics and streamed native tool updates.
+At most 32 commands may be in flight. Commands have a 30-second wall deadline
+and a 48,000-byte prefix cap **per output stream**, with explicit truncation
+markers; this replaces native middle-truncation, not an unbounded capture.
+Nonzero exits, cancellation, timeout and launch failures remain tool errors.
+
+Closing, a turn deadline, protocol failure or forced worker loss cancels and
+awaits all parent-owned command groups alongside the worker group before
+restoring instructions or releasing the workdir lease. Cleanup failure is
+reported and retains ownership rather than implying successful disposal.
+Ordinary native git/search/indexer children remain in the worker's owned
+process group. As with other Harness subprocesses, deliberate descendant
+`setsid`/`setpgid` escapes are unsupported; this is not an OS sandbox.
+`instructions` uses the existing owned `CLINE.md` projection and native
+`@./CLINE.md` mention, including follow-up turns.
+
+### Identity, events and results
+
+Capabilities report events, interrupt, follow-up, resume and approval true;
+concurrent turns false. Resume requires the full returned reference:
+`sessionFile` names the native manifest under the selected profile, not a
+Pi/OMP JSONL header. Persistence may be lazy until the first turn.
+The worker verifies native record/manifest ID, cwd/workspace, provider/model,
+root-session flags and nonempty history before a read-only resume start with
+no prompt. Unknown/corrupt/empty history, a different profile or workspace,
+spawn/team-enabled history and a manifest still marked running are rejected.
+No latest-session selection, silent fresh session or fork is substituted.
+Returned native identity is checked again after start.
+
+Every complete native `CoreSessionEvent` wrapper is retained in `raw`,
+including unknown types and fields; `agent_event.payload.event` contains the
+agent event, while `chunk` may duplicate it. Native `Error` values are
+serialized with name/message/stack instead of becoming empty JSON objects.
+Callback notifications are the explicitly named bridge events above.
+Only the resolution of native `core.send` settles the turn, not an
+intermediate `done`, `ended`, status or chunk. Result `raw` is the native
+`AgentResult`, including its unchanged `finishReason`: `completed` maps to
+`completed`, `aborted` to `interrupted`, and `error`, `max_iterations` or
+`mistake_limit` to `agent-error`. An unknown reason is a protocol error.
+The latter two can accompany a native completed session status; Harness
+classifies the turn from its finish reason, not that status.
+
+Turn usage in `AgentResult`/native done events is distinct from cumulative
+manifest and snapshot usage. Repeated snapshots and duplicated chunks must
+not be summed. Optional native cost, including reported zero, is retained
+without estimation. Interrupt calls native abort, waits for tool cleanup and
+settlement, and keeps the session available for follow-up; close disposes it.
+
+### Qualification boundary
+
+`tests/cline_sdk_cases.json` drives Python, Bun and packaged Node against the
+real optional SDK with a finite synthetic loopback provider. A test-only
+wrapper injects a future event, malformed wire data and worker self-termination
+to exercise transport failure; it does not substitute the agent or provider
+logic. Private native probes separately exercised the public bash override,
+permission rejection, abort, exact resume and forced worker loss on
+Node 22.22.2, with disposable configuration and synthetic credentials.
+File-hook exclusion was checked with an enabled/disabled native hook marker.
+These are native-runtime/synthetic-provider checks, **not authenticated
+provider generation**; that evidence remains unavailable.
+
+The unmodified SDK shell executor and native ACP in CLI 3.0.61 both allowed
+an ordinary foreground shell to survive forced parent-group cleanup. ACP also
+drops native usage and unknown events. Neither is used as a fallback.
+Sources: [SDK overview](https://docs.cline.bot/sdk/overview.md),
+[permission policy](https://docs.cline.bot/sdk/guides/permission-handling.md),
+[pinned local bootstrap](https://github.com/cline/cline/blob/595f1dbf2ea819e987afeadb4ed4dd9a0ae9a55e/sdk/packages/core/src/services/local-runtime-bootstrap.ts),
+[native bash executor](https://github.com/cline/cline/blob/595f1dbf2ea819e987afeadb4ed4dd9a0ae9a55e/sdk/packages/core/src/extensions/tools/executors/bash.ts),
+[ACP event translator](https://github.com/cline/cline/blob/cli-v3.0.61/apps/cli/src/acp/session-updates.ts).
+
 ## Caller-owned OpenCode HTTP sessions
 
 `open_session` / `openSession` accept `harness: "opencode", backend: "rpc"`.
@@ -2000,7 +2146,7 @@ Pinned sources:
 
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC, OMP/Amp SDK, Claude SDK and caller-owned
+These requirements govern the shipped Pi RPC, OMP/Amp/Cline SDK, Claude SDK and caller-owned
 OpenCode HTTP session implementations above and future backends. They keep the common library small; they do not
 enable additional SDKs or native protocols by themselves.
 
@@ -2112,7 +2258,7 @@ Harness provides CLI command construction, output parsing and headless execution
 
 Optional agent SDK/protocol integrations are now in scope for the library.
 This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
-consumer-owned host/fleet boundary. The optional OMP/Amp SDK bridges and native Claude SDK sessions implement the
+consumer-owned host/fleet boundary. The optional OMP/Amp/Cline SDK bridges and native Claude SDK sessions implement the
 dependency and behavior requirements above. A raw model API,
 fleet manager, Linear engine or application is not an agent backend.
 

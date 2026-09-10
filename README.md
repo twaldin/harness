@@ -2,11 +2,55 @@
 
 <img src=".github/social-card.png" alt="harness" width="100%" />
 
-One CLI (and one Python API, and one TypeScript API) to invoke every headless coding-CLI agent as a subprocess. `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kimi-code`, `kiro`, `qoder` — one `RunSpec`, one `RunResult`, zero per-CLI adapter code in your project.
+Harness is a Python and TypeScript library for running coding agents through
+explicit CLI, RPC or optional SDK integrations. Twenty-six CLI adapters share
+`RunSpec → RunResult`; eight agent/backend pairs expose controlled sessions.
+It handles command construction, owned subprocess cleanup, instruction
+projection and available output/usage parsing. The caller chooses the agent,
+model, configuration, credentials and permission policy.
+
+This guide describes **the repository's landed source**, not a promise that
+the latest PyPI/npm releases contain it. See [installation](#install), the
+[adapter/evidence catalog](ADAPTER-MATRIX.md), [paired runnable examples](examples/README.md)
+and the authoritative [shared contract](SPEC.md).
+
+## Choose an integration
+
+| Need | API in Python / TypeScript | Choose this when |
+|---|---|---|
+| One task, terminal output and available accounting | `run(RunSpec(...))` / `await run({...})` | The agent has a CLI adapter; no retained control channel is needed. Python also has `await run_async(...)`. |
+| Live stdout/stderr from a one-shot run | `on_output` / `onOutput` | Raw decoded chunks suffice. These are not native session events or complete JSONL records. |
+| Native events, follow-up, interruption or exact resume | `await open_session(SessionSpec(...))` / `await openSession({...})` | Select a supported pair below. Consume each turn's events and await its result; always close the handle. |
+| An external terminal/process host | `build_command`, `prepare_command`, `cleanup_command` / camelCase equivalents | Your application owns launch and teardown. Command building alone has no filesystem effects. |
+
+Supported session pairs and their setup:
+
+| Agent | Explicit backend | Integration |
+|---|---|---|
+| [Pi](#controlled-pi-rpc-sessions) | `rpc` | Owned Pi CLI using its native RPC protocol |
+| [Oh My Pi](#optional-oh-my-pi-sdk-sessions) | `sdk` | Optional OMP package in an owned Bun bridge, in both languages |
+| [Claude Code](#optional-claude-agent-sdk-sessions) | `sdk` | Separate pinned native Python/TypeScript SDKs and CLIs |
+| [Amp](#optional-amp-sdk-sessions) | `sdk` | Optional TypeScript SDK in an owned Node bridge, in both languages |
+| [Cline](#optional-cline-sdk-sessions) | `sdk` | Optional TypeScript SDK in an owned Node bridge, builtin-only local mode |
+| [Factory Droid](#optional-factory-droid-sdk-sessions) | `sdk` | Separate optional native Python/TypeScript SDKs with an installed Droid CLI |
+| [OpenCode](#caller-owned-opencode-http-sessions) | `rpc` | HTTP/SSE client to a caller-owned server |
+| [OpenHands](#caller-owned-openhands-agent-server-sessions) | `rpc` | HTTP/WebSocket client to a caller-owned Agent Server; session-only, not a CLI adapter |
+
+`get_capabilities` / `getCapabilities` describes one-shot support;
+`get_session_capabilities` / `getSessionCapabilities` describes a selected
+session pair. Neither probes installation, authentication or provider access.
+`RunSpec` remains CLI-only even when that agent also supports sessions.
+There is no automatic CLI/RPC/SDK fallback.
+
+**Not shipped:** Pi SDK, Codex app-server/SDK, Copilot SDK and Prime Agent.
+Their qualification or discovery tickets do not enable those backends.
+See [deferred work and preserved follow-ups](WANTED-ADAPTERS.md).
 
 ## Quick start
 
-**Python** — `pip install harness-cli` (imports as `harness`; `harness` was squatted on PyPI)
+**Python** — install `harness-cli` (import name `harness`); see
+[source versus published installation](#install). Install/authenticate the
+selected agent separately and create a disposable workdir before running.
 
 ```python
 from harness import RunSpec, run
@@ -21,7 +65,8 @@ cost = f"${r.cost_usd:.4f}" if r.cost_usd is not None else "n/a"
 print(f"exit={r.exit_code}  cost={cost}  tokens={r.tokens_in}/{r.tokens_out}")
 ```
 
-**TypeScript** — `npm install @twaldin/harness-ts`
+**TypeScript** — install `@twaldin/harness-ts`; use the same caller-selected
+agent, model and workdir:
 
 ```typescript
 import { run } from '@twaldin/harness-ts'
@@ -29,14 +74,17 @@ import { run } from '@twaldin/harness-ts'
 const r = await run({
   harness: 'claude-code',
   model: 'sonnet',
-  prompt: 'Write a one-line TypeScript hello-world.',
+  prompt: 'Write a one-line Python hello-world.',
   workdir: '/tmp/scratch',
 })
 const cost = r.costUsd == null ? 'n/a' : `$${r.costUsd.toFixed(4)}`
 console.log(`exit=${r.exitCode}  cost=${cost}  tokens=${r.tokensIn}/${r.tokensOut}`)
 ```
 
-See [`examples/hello-world.py`](examples/hello-world.py) and [`ts/examples/hello-world.ts`](ts/examples/hello-world.ts) for runnable versions.
+See the [paired API examples](examples/README.md) for one-shot runs,
+cancellation, streaming, explicit configuration and Pi RPC sessions. The
+existing [`hello-world.py`](examples/hello-world.py) and
+[`hello-world.ts`](ts/examples/hello-world.ts) are smaller live-provider examples.
 
 ### Permissions and explicit backends
 
@@ -90,6 +138,10 @@ Python `run()` blocks; Python `run_async()` and TypeScript `run()` / `runAsync()
 allow concurrent calls. On macOS/Linux, each invocation owns a fresh process
 group, terminates leftover group members on exit, and escalates the adapter's
 graceful signal (SIGTERM by default; SIGINT for Cline) to SIGKILL after a bounded grace period.
+This is not containment of arbitrary detached children or remote work.
+Native tools/extensions that escape the owned group can survive: known limits
+include Goose stdio MCP and mini-SWE local shell actions. Consult the selected
+adapter's [qualification limits](ADAPTER-MATRIX.md) before granting tool access.
 
 Pass `cancel=threading.Event()` in Python or `cancel: controller.signal` from
 an `AbortController` in TypeScript. Explicit cancellation returns a result;
@@ -113,6 +165,50 @@ with `callback_error` / `callbackError` or `parse_error` / `parseError`.
 See [streaming, stdin and output limits](SPEC.md#streaming-stdin-and-output-limits)
 for capture controls, callback restrictions, interrupted delivery and migration.
 The [ownership contract](SPEC.md#ownership-and-execution) defines cleanup and OS support.
+
+### Errors and results
+
+Catch `HarnessError` by its stable `code`, not message text. Invalid selectors,
+conflicting native options and unsupported capabilities fail before preparation
+or launch. Session startup also rejects on dependency/handshake failures.
+
+One-shot process failure is instead a **returned result**: inspect `termination`,
+`exit_code` / `exitCode`, `launch_error` / `launchError`, truncation and
+`parse_error` / `parseError`. Cleanup failure raises rather than claiming the
+process was reaped. Accepted session turns report `SessionTurnResult.status`;
+an acknowledgement or exhausted event stream alone is not success.
+
+```python
+from harness import HarnessError, RunSpec, run
+
+try:
+    result = run(RunSpec(
+        harness="codex", prompt="Review this code", workdir="/tmp/scratch",
+        backend="sdk",  # deliberately unsupported by the one-shot API
+    ))
+except HarnessError as error:
+    print(error.code)  # unsupported-backend; nothing was launched
+```
+
+```typescript
+import { HarnessError, run } from '@twaldin/harness-ts'
+
+try {
+  await run({
+    harness: 'codex', prompt: 'Review this code', workdir: '/tmp/scratch',
+    backend: 'sdk', // deliberately unsupported by the one-shot API
+  })
+} catch (error) {
+  if (!(error instanceof HarnessError)) throw error
+  console.log(error.code) // unsupported-backend; nothing was launched
+}
+```
+
+Some upstream CLIs emit a native error but exit zero. Inspect adapter-specific
+`raw`, stdout/stderr and the requested outcome as well as process status.
+Null accounting means unknown, not free. Never sum repeated snapshots or treat
+estimated USD as a bill. See [error codes](SPEC.md#errors) and
+[telemetry distinctions](ADAPTER-MATRIX.md#cost--token-reporting-at-a-glance).
 
 ### Controlled Pi RPC sessions
 
@@ -674,17 +770,21 @@ If you're writing per-CLI subprocess plumbing from scratch, this library has alr
 
 ---
 
-## Why
+## Product boundary
 
-I wrote per-CLI spawn / env / output-parsing logic three separate times across three projects:
+Harness supplies library operations, not an orchestrator: it does not own a
+fleet, worktrees, scheduling, a UI, account setup or consumer migrations.
+Optional pane/dialog/log helpers are observations for an external host, not a
+generic interactive agent protocol. Token/cost fields can be unknown; native
+usage, estimates, cumulative totals and billed cost are not interchangeable.
 
-- [`flt`](https://github.com/twaldin/flt) — TS adapters in `src/adapters/{claude-code,opencode,codex,gemini,aider,swe-agent}.ts`. Each one knew how to launch its CLI in tmux, strip ANSI, detect a ready prompt, send keys to approve dialogs.
-- [`agentelo`](https://github.com/twaldin/agentelo) — `bin/agentelo` (1847 lines of Node) with ~800 lines of `if (harness === 'X')` blocks. Per-CLI argv, env setup (Vertex tokens, GCloud, OpenAI proxy), inactivity watchdogs, six different token/cost parsers (claude's JSON envelope, codex's JSONL turn events, gemini's `stats.models`, opencode's session sqlite, aider's "Tokens: N sent" scrape, swe-agent's trajectory file).
-- [`hone`](https://github.com/twaldin/hone) — `src/hone/mutators/claude_code.py`, then almost the same logic again for an `anthropic_api.py` mutator, then a `custom_script.py` shape, with the JSON parsing rewritten each time.
-
-Three implementations, three sets of bugs, knowledge gained in one project never crossed to the others. When `opencode` changed its session DB schema, only agentelo learned. When `claude --output-format json` added a `cache_creation_input_tokens` field that mattered for accurate cost, only hone fixed it.
-
-`harness` is the deduped version. Each CLI's quirks live in exactly one adapter file, all twenty-six adapters share the same `RunSpec → RunResult` contract, and the next consumer (TS or Python) shells out to `harness run --json` instead of starting from scratch.
+Earlier live-mode proposals described design possibilities, not shipped APIs.
+Streaming, controlled sessions and optional SDK integrations now ship only for
+the pairs listed above, within their explicit [SPEC gates](SPEC.md#backend-and-session-implementation-gates).
+Remote-server ownership stays with the caller: closing OpenCode/OpenHands
+transport does not stop server work. This supersedes blanket historical
+“subprocess-only”, “no SDK” or “no streaming” descriptions without accepting
+every proposed backend, feature or downstream migration.
 
 ---
 
@@ -802,30 +902,58 @@ hone run prompt.md \
 
 ## Install
 
-### Python
+Python requires **3.10+**. TypeScript ships **ESM**; the repository's lifecycle
+CI uses **Node 22** and **Bun 1.3.14** on macOS/Linux. The locked
+`better-sqlite3@12.9.0` declares Node `20.x || 22.x || 23.x || 24.x || 25.x`.
+Use Node 22 for the packaged examples rather than assuming a newer host runtime
+is supported. Windows subprocess/session lifecycle support is not claimed.
+SDK workers and selected upstream agents have additional requirements in their
+setup sections; `.nvmrc` is not a universal backend compatibility promise.
+
+Published-package installation (check that the release has the API you need):
 
 ```bash
-pip install harness-cli
+python3 -m venv /absolute/path/to/consumer/.venv
+/absolute/path/to/consumer/.venv/bin/python -m pip install harness-cli
+
+# First create /absolute/path/to/consumer/package.json containing
+# {"private":true,"type":"module"}; do not rely on an empty directory.
+# This must print /absolute/path/to/consumer before installing:
+npm --prefix /absolute/path/to/consumer prefix
+npm --prefix /absolute/path/to/consumer install @twaldin/harness-ts
 ```
 
-The PyPI name is `harness-cli` (`harness` was squatted). The Python import is `from harness import ...`.
-
-For dev work:
+For the exact source documented here, check out a selected commit and build
+local artifacts instead of assuming publication. From that checkout:
 
 ```bash
-git clone https://github.com/twaldin/harness
-cd harness
-pip install -e ".[dev]"
+uv build
+cd ts
+bun install --frozen-lockfile
+npm --prefix "$PWD" pack
 ```
 
-### TypeScript
+Install the resulting wheel and `.tgz` in your consumer using absolute artifact
+paths. Managed worktrees with private instruction symlinks must first be
+exported with `git archive <commit>` to a disposable source directory; build
+there without removing those links. See [distribution qualification](CONTRIBUTING.md#distribution-qualification)
+and [example commands](examples/README.md). No package publication is required.
 
-```bash
-npm install @twaldin/harness-ts
-# or: bun add @twaldin/harness-ts
-```
+The Python distribution is `harness-cli`, imported as `harness`; TypeScript
+imports `@twaldin/harness-ts`. Current manifest versions are **0.3.22** and
+**0.2.27**, respectively. This recorded skew is not a compatibility or release
+policy change; Python's historical `harness.__version__` also differs from its
+distribution metadata. Use installed distribution metadata and the selected
+commit to identify what you are testing, not that constant.
 
-See [`ts/README.md`](ts/README.md) for full TypeScript docs.
+Harness does not install agents, log in, select accounts or copy credentials.
+Configure authentication with the upstream tool in caller-owned locations.
+Optional Python extras and TypeScript SDK packages are listed per backend;
+ordinary CLI imports do not load those SDKs. Source/fixture success is not a
+successful provider call. Consult the [dated ledger](ADAPTER-MATRIX.md#dated-qualification-ledger)
+before relying on model availability, permissions or telemetry.
+
+See [`ts/README.md`](ts/README.md) for the TypeScript reference.
 
 ---
 
@@ -902,7 +1030,8 @@ The opt-in `--worktree` features in some CLIs (e.g. `claude --worktree`) are int
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for code conventions and the "add an adapter" guide (~20 minutes).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the paired adapter/session contribution
+guide, shared fixtures, lifecycle requirements and qualification evidence.
 
 Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md) for source-qualified candidates, installation identities, headless paths, validation gaps and existing implementation tickets. Reuse the linked ticket rather than starting duplicate work; deferred candidates need fresh qualification first.
 
@@ -912,16 +1041,11 @@ Looking for an adapter contribution? See [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md
 
 Twenty-six adapters are included: `claude-code`, `cline`, `openclaude`, `opencode`, `codex`, `gemini`, `aider`, `amp`, `auggie`, `swe-agent`, `mini-swe-agent`, `qwen`, `continue-cli`, `pi`, `omp`, `factory-droid`, `kilo`, `crush`, `hermes`, `goose`, `copilot`, `cursor`, `mistral-vibe`, `kimi-code`, `kiro`, `qoder`. Current package versions are recorded in [`pyproject.toml`](pyproject.toml) and [`ts/package.json`](ts/package.json).
 
-### host Node version
+### Runtime selection
 
-This repo now includes `.nvmrc` pinned to Node `20.20.2` for interactive host usage:
-
-```bash
-cd ~/harness
-nvm use
-```
-
-That helps for local dev and agent worktrees. In Docker / benchmark containers, prefer an explicit Node 20 install instead of relying on shell hooks.
+The repository's `.nvmrc` records a historical Node 20.20.2 host choice.
+Use the [installation requirements](#install) and each selected backend's pinned
+runtime/dependencies for qualification; Node 20 cannot run every SDK worker.
 
 ### bringup helpers
 
@@ -971,7 +1095,10 @@ To bypass harness-specific normalization, use `--model-no-resolve` (Python: `Run
 - `kimi-code` invokes maintained `@moonshot-ai/kimi-code` (`kimi`), not the Python predecessor. **Print mode always uses native auto permissions**; explicit bypass is unsupported rather than silently dropped. Exact model aliases and `KIMI_CODE_HOME` remain caller-selected. JSONL assistant/tool messages remain in `raw`, with null accounting. Source/fixture qualification only; no installed/provider smoke. See [setup and limits](ADAPTER-MATRIX.md#kimi-code).
 - `qoder` uses official `@qoder-ai/qodercli` with JSON output. `QoderOptions(permission_mode="accept_edits")` / `{kind: 'qoder', permissionMode: 'accept_edits'}` approves workspace edits, not shell commands. Model, `QODER_CONFIG_DIR` and account auth remain caller-selected; metrics stay null. See [setup, prompt compatibility and provider-smoke gaps](ADAPTER-MATRIX.md#qoder).
 
-Pending:
-- Per-harness inactivity watchdogs (port from `agentelo/bin/agentelo`).
-- Vertex AI / GCloud token plumbing (currently consumer-supplied via `env`).
-- Wire as the spawn backend for flt and agentelo (TS → Python subprocess boundary; design TBD).
+### Consumer-owned and deferred work
+
+- Shared opt-in inactivity deadlines are implemented; per-adapter watchdogs are
+  not required. See [subprocess lifecycle](#subprocess-lifecycle).
+- Vertex/GCloud credential plumbing and consumer orchestration stay with callers.
+- Future adapter/backend discovery stays in [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md);
+  this guide does not complete or dispatch those follow-ups.

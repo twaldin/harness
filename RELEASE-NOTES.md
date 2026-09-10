@@ -2,6 +2,15 @@
 
 ## Unreleased — shared Python/TypeScript contract
 
+- Documented the landed Python/TypeScript APIs with an integration chooser,
+  paired runnable one-shot/configuration/cancellation/streaming/Pi RPC examples,
+  isolated-consumer instructions and a consolidated adapter/session catalog.
+  The current session pairs are Pi RPC, OMP/Claude/Amp/Cline/Factory Droid SDK,
+  and caller-owned OpenCode/OpenHands RPC. Pi SDK, Codex app-server/SDK,
+  Copilot SDK and Prime remain unsupported/deferred; qualification is not
+  implementation. See [the guide](README.md#choose-an-integration) and
+  [evidence limits](ADAPTER-MATRIX.md#shipped-session-backends). This is
+  documentation/example qualification: no public API change or package release.
 - Added maintained `kimi-code` in both languages, with exact model aliases,
   caller-selected `KIMI_CODE_HOME` and shared subprocess lifecycle. Native print
   mode implies auto permissions; explicit bypass and arbitrary config files

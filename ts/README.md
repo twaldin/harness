@@ -1,6 +1,16 @@
 # @twaldin/harness-ts
 
-TypeScript SDK for [harness](../) — invoke claude-code, cline, openclaude, opencode, codex, gemini, aider, amp, auggie, swe-agent, mini-swe-agent, qwen, continue-cli, pi, omp, factory-droid, crush, kilo, hermes, goose, copilot, cursor, mistral-vibe, kimi-code, kiro, or qoder as a subprocess with a uniform RunSpec → RunResult contract.
+TypeScript library for [Harness](https://github.com/twaldin/harness): twenty-six
+CLI adapters share `RunSpec → RunResult`, and eight explicit agent/backend
+pairs expose controlled sessions. Harness handles command construction,
+owned subprocess cleanup, instruction projection and available usage parsing;
+the caller selects the agent, model, configuration, credentials and permissions.
+
+This reference describes the landed repository source, **not a claim that it
+has been published to npm**. See the [integration chooser](https://github.com/twaldin/harness#choose-an-integration),
+[paired runnable examples](https://github.com/twaldin/harness/blob/main/examples/README.md)
+and [adapter/evidence catalog](https://github.com/twaldin/harness/blob/main/ADAPTER-MATRIX.md).
+No public API or backend is added by this documentation update.
 
 ## Install
 
@@ -12,6 +22,20 @@ npm install @twaldin/harness-ts
 The package ships ESM only. Use a Node version supported by the installed `better-sqlite3` dependency. The `better-sqlite3@12.9.0` package selected by `bun.lock` declares `engines.node` as `20.x || 22.x || 23.x || 24.x || 25.x`, not Node 18. Bun is used for the repository's build and test commands.
 
 Upstream CLI runtime requirements are independent of this package. Current OpenClaude requires Node >=22; check the selected version in the [qualification ledger](../ADAPTER-MATRIX.md#dated-qualification-ledger), which distinguishes installed help checks from provider smoke and synthetic fixtures.
+
+Use Node 22 (the packaged lifecycle CI runtime) or Bun 1.3.14 for qualification
+on macOS/Linux; Windows lifecycle support is not claimed. SDK workers have
+additional per-backend requirements. The manifest is currently 0.2.27, while
+Python's distribution is 0.3.22; this records existing skew, not a new version
+policy. To test this exact source rather than a published release, build/pack
+the selected commit and install the tarball into a caller-owned consumer.
+Create its private `package.json` first, use an **absolute** `npm --prefix`,
+verify `npm prefix`, and verify the resolved package path belongs to that
+consumer. See [source installation](https://github.com/twaldin/harness#install).
+
+Install and authenticate the selected agent separately. Harness does not
+install CLIs, copy credentials, switch accounts or infer provider access.
+Capability queries are static, not installation/authentication probes.
 
 ## First example
 
@@ -35,15 +59,19 @@ console.log(`exit=${r.exitCode}  cost=${cost}  tokens=${r.tokensIn}/${r.tokensOu
 console.log(r.stdout.slice(0, 200))
 ```
 
-See [`examples/hello-world.ts`](examples/hello-world.ts) for a runnable file.
+See [`examples/hello-world.ts`](examples/hello-world.ts) for a small live-provider
+example and the [paired API guide](https://github.com/twaldin/harness/blob/main/examples/README.md)
+for executable one-shot, configuration, cancellation, streaming and session modes.
 
 Permission policy defaults to upstream behavior; Harness no longer injects
 approval/bypass flags automatically. Unattended callers intentionally requiring
 the former behavior must set `permissionPolicy: 'bypass'`. Codex bypass also
 disables sandboxing. Unsupported bypass fails rather than being ignored.
 One-shot backend selection defaults to `cli`; selecting `rpc` or `sdk` through
-`RunSpec` for a registered CLI adapter throws `unsupported-backend`, without CLI fallback. Controlled Pi RPC
-uses `openSession` below. See the [shared migration](../SPEC.md#permission-policy-and-migration).
+`RunSpec` for a registered CLI adapter throws `unsupported-backend`, without fallback.
+Use `openSession` for supported RPC/SDK pairs; see the
+[integration chooser](https://github.com/twaldin/harness#choose-an-integration) and
+[shared migration](../SPEC.md#permission-policy-and-migration).
 
 Codex app-server sessions remain **deferred/unsupported** after native
 tool-containment qualification; the existing Codex CLI adapter is unchanged.
@@ -76,6 +104,10 @@ qualification. `harness: 'pi', backend: 'sdk'` rejects with
 Existing CLI/RPC behavior is unchanged. See the
 [SDK finding and qualification limits](../ADAPTER-MATRIX.md#pi-sdk-unsupported-after-qualification).
 
+Other deferred paths include Copilot SDK and Prime Agent; a completed
+qualification ticket does not ship a backend. See
+[preserved findings and follow-ups](../WANTED-ADAPTERS.md).
+
 ## Optional OMP SDK backend
 
 `openSession({ harness: 'omp', backend: 'sdk', workdir, ompSdk })` uses the same
@@ -92,6 +124,19 @@ environment/dotenv/models.yml resolution. Native configuration/tools are not
 a sandbox. Always close in `finally`; resume passes the exact native reference.
 See the [paired SDK examples](../README.md#optional-oh-my-pi-sdk-sessions) and
 [SDK contract](../SPEC.md#optional-omp-sdk-sessions).
+
+## Optional Amp SDK backend
+
+`openSession({ harness: 'amp', backend: 'sdk', workdir, ampSdk })` uses the
+optional `@ampcode/sdk@0.1.0-20260823161614-g3631dc6` and caller-selected
+Neo CLI `0.0.1788883237-g0b98e3` through an owned Node >=22 bridge, matching
+Python. `ampSdk` explicitly supplies absolute `packageRoot` and `cliPath`,
+`executor: 'local'` and a native mode. `executable` selects Node, not Amp.
+Direct common model selection, bypass, approval responses and remote executors
+reject. Local execution still requires the native Amp thread service and
+caller-selected auth; no authenticated-provider success is claimed.
+See the [paired setup example](https://github.com/twaldin/harness#optional-amp-sdk-sessions)
+and [full contract](../SPEC.md#optional-amp-sdk-sessions).
 
 ## Optional Claude Agent SDK backend
 
@@ -275,8 +320,9 @@ Returns registered adapter names, sorted: `['aider', 'amp', 'auggie', 'claude-co
 Reports implemented support without loading optional SDKs or probing local
 installation/auth. All one-shot adapters use CLI and support cancellation and
 chunk streaming (raw subprocess output, not structured events). Controlled
-Pi RPC uses `getSessionCapabilities` instead; pure pane/session-log helpers are
-not controlled sessions. Native CLI options are typed per agent:
+RPC/SDK pairs use `getSessionCapabilities(name, backend)` instead; pure
+pane/session-log helpers are not controlled sessions. Native CLI options are
+typed per agent:
 
 ```typescript
 buildCommand({
@@ -438,6 +484,12 @@ failure are surfaced in `RunResult`. `termination` distinguishes `exited`,
 Execution retains parser exceptions in `parseError` with null metrics/raw
 without losing the terminal output; standalone `parseOutput` still throws.
 See [ownership and execution](../SPEC.md#ownership-and-execution) for cleanup limits.
+
+An exit-zero process may still carry an upstream error in `raw` or text; check
+the adapter contract and requested outcome, not just `exitCode`. Session
+startup rejects; accepted turns report `SessionTurnResult.status`. Event
+acknowledgement is not completion. Null accounting is unknown, not zero cost.
+See the [matching Python/TypeScript error example](https://github.com/twaldin/harness#errors-and-results).
 
 ---
 

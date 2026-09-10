@@ -9,6 +9,19 @@ recorded by this audit. Hermes and OMP landed separately; their entries retain
 their own qualification evidence. Hermes headless flags were checked against
 installed Hermes Agent v0.20.0 (2026.8.3) and the upstream parser.
 
+**2026-09-10 documentation pass ([TWA-88](https://linear.app/twaldin/issue/TWA-88)).**
+This pass added the consolidated [session-backend catalog](#shipped-session-backends)
+and the [authentication prerequisites](#authentication-prerequisites) table, and
+re-fetched the ten official authentication pages marked there. Everything else
+keeps its own earlier date: no upstream help probe, native run, cancellation
+check or provider attempt was repeated. No upstream agent was installed,
+upgraded or reconfigured. Two **version-only** observations were taken on macOS
+arm64 — `codex --version` reported `codex-cli 0.153.4` and `claude --version`
+reported `2.1.220` — confirming the installed builds behind the dated
+2026-09-08 rows without renewing their help or provider qualification. Host
+runtimes observed the same day: Node 26.6.0, Bun 1.3.14, Python 3.11.15, with
+Node 22.23.2 available for packaged-consumer validation.
+
 ## Shipped versus planned
 
 The twenty-six adapters below are registered in **both** implementations and have
@@ -18,6 +31,18 @@ shared fixture files: `aider`, `amp`, `auggie`, `claude-code`, `cline`, `codex`,
 compatibility or real-provider smoke coverage.
 Both package roots initialize the built-in registry on import, so listing
 adapters no longer depends on a prior Python build/parse/run call.
+
+Live sessions are a **separate axis** from this CLI list, not a later phase of
+it: eight `(harness, backend)` pairs ship today and are catalogued under
+[shipped session backends](#shipped-session-backends). Seven extend a CLI
+adapter (`pi` rpc; `omp`, `claude-code`, `amp`, `cline`, `factory-droid` sdk;
+`opencode` rpc) and each keeps its one-shot CLI command unchanged. `openhands`
+is **session-only**: it registers no CLI adapter, so `list_adapters` /
+`listAdapters` still returns exactly the twenty-six names above and
+`get_adapter("openhands")` / `getAdapter("openhands")` remains
+`unknown-harness`. Selecting `rpc` / `sdk` through the one-shot `RunSpec` API
+for a registered CLI adapter raises `unsupported-backend`; unknown agent names
+still raise `unknown-harness`. There is no automatic backend fallback.
 
 [WANTED-ADAPTERS.md](WANTED-ADAPTERS.md) is the dated upstream candidate catalog:
 installation identities, headless feasibility, exclusions and deduplicated
@@ -74,6 +99,113 @@ Off-PATH probes used absolute executables; Harness does not add them to PATH.
 No tools were upgraded, credentials switched, global configuration rewritten or
 packages published. Provider/model availability must be verified for the caller's
 selected account; fixture success cannot qualify it.
+
+### Authentication prerequisites
+
+Provider authentication, where required, must already be configured by the
+caller. Native local/deterministic models need not require a credential.
+Harness never logs in, copies or rewrites credentials, creates accounts, edits
+global configuration or substitutes a provider/model/account. A missing or
+rejected credential surfaces as the upstream tool's own failure, never
+as a Harness fallback. Rows cover all twenty-six adapters; the linked section
+holds the detailed evidence and limits.
+
+Ten official pages were re-fetched **2026-09-10** and are marked ⟳; every other
+link keeps its earlier check date from the ledger above.
+
+| adapter | credential the caller must already hold | where it is selected |
+|---|---|---|
+| [aider](#aider) | provider API keys for the chosen model (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …), CLI flags, a `.env` file or `.aider.conf.yml` ⟳ [API keys](https://aider.chat/docs/config/api-keys.html) | inherited caller environment; `configFile` maps to `--config`. No credential YAML is generated. |
+| [amp](#amp) | existing `amp login` session, or `AMP_API_KEY` holding an `sgamp_` access token (Settings → Security), not a short-lived login session token | caller environment / native Amp home |
+| [auggie](#auggie) | existing Augment account login; enterprise agreements may separately disable noninteractive mode, so login alone is not entitlement | native Augment configuration; `configHome` / `configFile` are unsupported |
+| [claude-code](#claude-code) | native browser login, or `ANTHROPIC_API_KEY` ⟳ [setup](https://code.claude.com/docs/en/setup); Harness requires no environment variable | `configHome` → `CLAUDE_CONFIG_DIR`; `configFile` → `--settings` |
+| [cline](#cline) | `cline auth` completed in the selected root (`cline --config /absolute/cline-home auth` for a separate root) | `configHome` → `CLINE_DIR` |
+| [codex](#codex) | Sign in with ChatGPT or another available sign-in method ⟳ [Codex CLI](https://developers.openai.com/codex/cli/); Harness requires no environment variable | `configHome` → `CODEX_HOME` |
+| [continue-cli](#continue-cli) | caller-selected Continue/provider authentication | inherited environment; explicit OpenAI-compatible selection requires a caller-supplied `configFile` |
+| [copilot](#copilot) | Copilot entitlement, available quota and organization policy on the selected account; documented token precedence `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, then stored login; BYOK uses caller provider environment | `configHome` → `COPILOT_HOME` (configuration and session state, not credential isolation) |
+| [crush](#crush) | provider credentials chosen in the native provider picker, or provider environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `HYPER_API_KEY`, …) ⟳ [upstream README](https://github.com/charmbracelet/crush) | inherited environment / native config. A credential-free run exits 1 with `No providers configured` and emits no session. |
+| [cursor](#cursor) | `agent login`, or `CURSOR_API_KEY`; available models and entitlement follow that account | `configHome` → `CURSOR_CONFIG_DIR` (native project data separately uses `CURSOR_DATA_DIR`) |
+| [factory-droid](#factory-droid) | `FACTORY_API_KEY` (`fk-…`) generated from the Factory settings page ⟳ [droid exec](https://docs.factory.ai/droid-exec/overview) | child environment; `HOME` / `FACTORY_HOME_OVERRIDE` stay caller-selected |
+| [gemini](#gemini) | Sign in with Google, a Gemini API key, or Vertex AI ⟳ [authentication](https://geminicli.com/docs/get-started/authentication/) | caller environment; `GOOGLE_GENAI_USE_VERTEXAI` / `GOOGLE_CLOUD_PROJECT` are caller-set, never required or injected |
+| [goose](#goose) | provider selection and credentials in the native configuration or environment (`GOOSE_PROVIDER`, `GOOSE_MODEL`, keyring entries) | `configHome` → `GOOSE_PATH_ROOT` relocates config/data/state; it is not credential isolation |
+| [hermes](#hermes) | provider credentials in the selected Hermes home or caller environment | `configHome` → `HERMES_HOME`. Optional terminal backends (Docker, SSH, Modal, …) are caller-provisioned. |
+| [kilo](#kilo) | providers and credentials managed by `kilo auth` ⟳ [CLI reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference) | native config. Harness injects only `KILO_DB` and a model-only `KILO_CONFIG_CONTENT` default, never credentials. |
+| [kimi-code](#kimi-code) | Kimi OAuth or API key, or a configured compatible provider | `configHome` → `KIMI_CODE_HOME`. Passing an unrelated API-key variable is not proof upstream will accept it. |
+| [kiro](#kiro) | `KIRO_API_KEY` for an eligible paid subscription, or an existing browser session, which takes precedence | caller environment. Without credentials, 2.21.1 attempts browser onboarding even in headless mode. |
+| [mini-swe-agent](#mini-swe-agent) | provider key and model in the native global configuration (`.env` under the selected config dir, `MSWEA_MODEL_NAME`) ⟳ [official CLI](https://mini-swe-agent.com/latest/usage/mini/) | `configHome` → `MSWEA_GLOBAL_CONFIG_DIR`; `configFile` **replaces** `mini.yaml`. Harness sets `MSWEA_CONFIGURED=true` only to suppress the onboarding wizard. |
+| [mistral-vibe](#mistral-vibe) | `MISTRAL_API_KEY` or a configured native compatible provider | `configHome` → `VIBE_HOME` (where Vibe reads `config.toml`, `.env`, agents and state). Missing credentials fail programmatic mode without onboarding. |
+| [omp](#omp-oh-my-pi) | upstream authentication completed inside the caller-selected OMP home | `configHome` → `PI_CODING_AGENT_DIR` plus `--profile default` |
+| [openclaude](#openclaude) | credentials in OpenClaude's own config root; a nonempty `OPENAI_API_KEY` or `OPENAI_BASE_URL` **in `RunSpec.env`** explicitly selects OpenAI-compatible mode | native config root, which its session-log helper reads as `OPENCLAUDE_CONFIG_DIR` (there is no `configHome` mapping for this adapter). Process environment alone never selects the OpenAI-compatible branch, and `.claude` is never a fallback. |
+| [opencode](#opencode) | provider credentials in the caller's OpenCode auth store (added with `/connect`, stored under `~/.local/share/opencode/auth.json`) or provider environment ⟳ [providers](https://opencode.ai/docs/providers/) | native config/auth store |
+| [pi](#pi) | provider-specific API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) | caller environment / selected Pi home; Harness injects none |
+| [qoder](#qoder) | Qoder account login or `QODER_PERSONAL_ACCESS_TOKEN` (the PAT takes precedence) | `configHome` → `QODER_CONFIG_DIR` |
+| [qwen](#qwen) | `QWEN_API_KEY`, or a provider configured with the in-session `/auth` flow ⟳ [upstream README](https://github.com/QwenLM/qwen-code) | caller environment / native config; cost stays null because billing lives in that account |
+| [swe-agent](#swe-agent) | provider authentication for the **consumer-supplied wrapper's** own model configuration, not a native SWE-agent login | inherited caller environment; `SWE_WRAPPER` selects the wrapper path |
+
+Session backends have their own, different prerequisites (server session keys,
+SDK packages, pinned native CLIs); see the catalog below.
+
+## Shipped session backends
+
+Eight `(harness, backend)` pairs support controlled live sessions through
+`open_session` / `openSession`. This catalog is the index; each row's contract,
+options and full evidence live in the linked SPEC section. Capability queries
+are pure: they perform no installation, version, network or credential check.
+
+### Identity, dependencies and auth
+
+| pair | transport and ownership | pinned upstream (qualified exactly) | runtime floor | optional install | auth prerequisite |
+|---|---|---|---|---|---|
+| `pi` / `rpc` | owned `pi --mode rpc` child; JSONL over stdio in its own POSIX process group | `@earendil-works/pi-coding-agent` 0.85.1 (terminal `agent_settled`) | the Pi CLI's own runtime; `executable` selects the binary | none — no Harness package extra; the caller installs the CLI | native provider authentication in the caller's selected Pi home or environment |
+| `omp` / `sdk` | owned Bun child running the shipped `_omp_sdk.mjs` bridge, one native `createAgentSession` per process | `@oh-my-pi/pi-coding-agent` 18.1.14 | Bun >= 1.3.14 (`executable` selects Bun) | caller-installed SDK at `OmpSdkOptions.package_root`; no extra is published | upstream auth inside the selected `agent_dir`: `auth: "local"` opens `<agentDir>/agent.db`, `"environment"` uses an in-memory credential database |
+| `claude-code` / `sdk` | owned worker (`_claude_sdk.py` under Python, `claude-sdk-worker.mjs` under Node/Bun) hosting the native SDK, which spawns the caller-selected Claude Code executable | Python `claude-agent-sdk` 0.2.152 with CLI **2.1.259**; TypeScript `@anthropic-ai/claude-agent-sdk` 0.3.263 with CLI **2.1.263**; any other version is `launch-failed` | Python >= 3.10; Node or Bun for the TypeScript worker | Python `harness-cli[claude-sdk]`; TypeScript loads the caller-installed package from `ClaudeSdkOptions.packageRoot` (not a runtime dependency of `@twaldin/harness-ts`) | native Claude login in the explicit `configDir` (`CLAUDE_CONFIG_DIR`) or `ANTHROPIC_API_KEY` |
+| `amp` / `sdk` | one finite Node worker (`_amp_sdk.mjs`) **per operation**, driving the pinned native CLI with the local executor | `@ampcode/sdk` 0.1.0-20260823161614-g3631dc6 with Amp Neo CLI 0.0.1788883237-g0b98e3 | Node >= 22, including for Bun callers | caller-installed SDK at `AmpSdkOptions.package_root` plus the pinned CLI at `cli_path` | `AMP_API_KEY` or an existing `amp login`; local execution still needs the native Amp thread service |
+| `cline` / `sdk` | owned Node child running `_cline_sdk.mjs` with `backendMode: "local"`; native commands run in dedicated process groups owned by the Harness parent through the public bash hook | `@cline/sdk` 0.0.82, with `@cline/core`, `@cline/shared`, `@cline/agents` and `@cline/llms` all 0.0.82 | Node >= 22.14 (Bun is rejected for the worker) | caller-installed SDK at `ClineSdkOptions.packageRoot` | a dedicated writable Cline profile (`configDir`) with caller-selected provider/model credentials; `provider` is required and never inferred from the model |
+| `factory-droid` / `sdk` | Harness-owned stdio transport injected into the published SDK's `DroidClient`, driving exactly one owned `droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc` child | Python `droid-sdk` 0.4.0 / TypeScript `@factory/droid-sdk` 0.9.1 (`/node`); qualified Droid CLI 0.213.0 (protocol 1.204.0, API 1.0.0) | POSIX process groups required; Windows unsupported | Python `harness-cli[factory-droid]`; TypeScript optional peer `@factory/droid-sdk@0.9.1` | nonempty `FACTORY_API_KEY` in the effective child environment; Harness never converts a local login into a key |
+| `opencode` / `rpc` | direct HTTP plus the `GET /event` SSE stream of a server the **caller** runs; nothing is spawned and close never disposes the server | OpenCode 1.18.29; startup requires `GET /global/health` to report exactly that version | — (remote server) | Python `harness-cli[opencode]` (`httpx` 0.28.x); TypeScript uses the runtime `fetch`, with no OpenCode SDK | required explicit `auth: "none" \| "basic"` (Basic credentials only in `Authorization`); provider credentials belong to the caller's server |
+| `openhands` / `rpc` | direct Agent Server HTTP plus the `/sockets/session/{id}` WebSocket of a caller-owned server; **session-only**, no CLI adapter | OpenHands Agent Server 1.45.0; `/server_info` must report 1.45.0 for server, SDK, tools and workspace packages | — (remote server); upstream's own >= 3.12 requirement is not imposed on the Harness client | Python `harness-cli[openhands]` (`httpx` 0.28.x, `websockets` 15.x); TypeScript lazily loads the optional `ws` 8.x peer under packaged Node, and Bun's built-in implementation otherwise | a caller-supplied **server session key** (`X-Session-API-Key`, never a provider credential), an existing server-side `agent_profile`, and explicit `confirm_no_unwanted_callbacks: true` |
+
+Ordinary Harness imports and capability queries never import an optional SDK,
+contact an endpoint or read a credential store. Selecting a session at open
+time does load/connect to its chosen dependency. CLI runs launch the selected
+CLI, which can read native state. A missing dependency/runtime or rejected
+version fails explicitly; it never causes a CLI fallback.
+
+### Capabilities and evidence ceiling
+
+All eight report `events`, `interrupt`, `follow_up` and `resume` true and
+`concurrent_turns` false. Resume always needs an explicit native ID; “latest”
+is never resume.
+
+| pair | generic `respond_approval` | approval channel in practice | evidence ceiling reached | contract |
+|---|---|---|---|---|
+| `pi` / `rpc` | false | none exposed; permissions stay upstream | shared JSONL conformance in Python, Bun and packaged Node, plus the real Pi 0.85.1 runtime against a local synthetic SSE provider (streaming, settlement, follow-up, interruption, native resume). No authenticated provider generation. | [controlled RPC sessions](SPEC.md#controlled-rpc-sessions) |
+| `omp` / `sdk` | false | none; bypass is unsupported | `tests/omp_sdk_cases.json` and a synthetic SDK package drive the actual bridge in Python, Bun and packaged Node; native 18.1.14 on Bun 1.3.14 ran against isolated homes and a local synthetic SSE provider. No credentialed provider success, no cross-version SDK claim. | [optional OMP SDK sessions](SPEC.md#optional-omp-sdk-sessions) |
+| `claude-code` / `sdk` | **true** | native permission prompts arrive as `claude_permission` events, answered once per request | `tests/claude_sdk_cases.json` plus a finite synthetic CLI exercise the real optional SDKs in Python, Bun and packaged Node; the actual SDK/CLI pairs ran in isolated homes against a local synthetic Anthropic SSE provider. No authenticated generation. | [optional Claude Agent SDK sessions](SPEC.md#optional-claude-agent-sdk-sessions) |
+| `amp` / `sdk` | false | unsupported: no approval replies and no bypass | `tests/amp_sdk_cases.json` in Python, Bun and packaged Node; the unmodified pinned npm SDK ran against a synthetic CLI, and the pinned Neo executable reported its native thread-actor connection failure and a loopback peer's HTTP 401 through the real SDK. No real `AMP_API_KEY` was available: no successful native model turn is claimed. | [optional Amp SDK sessions](SPEC.md#optional-amp-sdk-sessions) |
+| `cline` / `sdk` | **true** | only with `approval: "callback"`, which sets the native wildcard policy; `"upstream"` keeps the SDK's auto-approved defaults | `tests/cline_sdk_cases.json` drives the real SDK with a finite synthetic loopback provider in Python, Bun and packaged Node; private native probes on Node 22.22.2 covered the bash override, rejection, abort, exact resume and forced worker loss. No authenticated generation. | [optional Cline SDK sessions](SPEC.md#optional-cline-sdk-sessions) |
+| `factory-droid` / `sdk` | false | native `on_permission` / `on_question` callbacks — a separate channel, not the generic method | `tests/droid_sdk_cases.json` with the real pinned SDKs in Python, Bun and built Node; native Droid 0.213.0 on macOS arm64 with Python 3.11.15, Bun 1.3.14 and Node 26.6.0 passed generation, usage scopes, granted/denied Execute, interruption and exact resume against an isolated loopback synthetic provider. Authenticated provider success not run. | [optional Factory Droid SDK sessions](SPEC.md#optional-factory-droid-sdk-sessions) |
+| `opencode` / `rpc` | **true** | one-shot native permission replies (`"once"` / `"reject"`) | **mock-server conformance only**: `tests/opencode_cases.json`, a bounded synthetic HTTP/SSE peer, Python tests, Bun source tests and `node tests/node-opencode.mjs`. Native-runtime and authenticated-provider evidence are explicitly **not run**; 1.18.29 is a source pin. | [caller-owned OpenCode HTTP sessions](SPEC.md#caller-owned-opencode-http-sessions) |
+| `openhands` / `rpc` | false | none: a native `waiting_for_confirmation` state becomes an explicit agent-error rather than an implicit grant | **mock-server conformance only**: `tests/openhands_cases.json`, a finite-lifetime synthetic HTTP/WebSocket peer, Python tests, Bun source tests and `node tests/node-openhands.mjs`. Native-runtime and authenticated-provider evidence are explicitly **not run**; 1.45.0 is a source pin. | [caller-owned OpenHands Agent Server sessions](SPEC.md#caller-owned-openhands-agent-server-sessions) |
+
+Three evidence levels stay distinct in the rows above and must not be merged:
+deterministic shared fixtures/mock peers; native runtime driven against a local
+**synthetic** provider; and authenticated provider success, which **no** session
+backend has recorded. Usage stays native: cumulative snapshots are never summed,
+Factory credits and Amp/Copilot-style unit measures are not USD, and unavailable
+cost is never reported as zero.
+
+### Unsupported and deferred session paths
+
+These are recorded so a reader never infers support from a ticket:
+
+| path | status |
+|---|---|
+| Codex `rpc` / `sdk` (app-server) | **unsupported after qualification** — native tools survived owned-group teardown; see [the record](#codex-app-server-unsupported-after-qualification). Future work is deferred to [TWA-107](https://linear.app/twaldin/issue/TWA-107). |
+| Pi `sdk` | **unsupported after qualification**; see [the record](#pi-sdk-unsupported-after-qualification). [TWA-84](https://linear.app/twaldin/issue/TWA-84) completed that finding, not implementation. Reliable native containment remains in undispatched Backlog [TWA-108](https://linear.app/twaldin/issue/TWA-108). |
+| Copilot `sdk` | **unsupported after qualification** — attached native tools survived forced teardown; see [the record](#copilot-sdk-unsupported-after-qualification). Containment remains deferred as [TWA-105](https://linear.app/twaldin/issue/TWA-105). |
+| OMP `rpc` | unsupported; only the OMP SDK bridge ships. Older Pi/OMP protocols are not assumed compatible with Pi 0.85.1 RPC. |
+| every other registered agent/backend pair | `unsupported-backend`, raised before any process, network or write; unknown agent names instead raise `unknown-harness` |
 
 ## Session telemetry coverage
 
@@ -232,9 +364,29 @@ interruption, follow-up and exact resume are supported; native permission and
 question callbacks are separate from generic approval responses. Native smoke
 passed with a synthetic provider, not authenticated-provider success. See the
 [Factory SDK contract](SPEC.md#optional-factory-droid-sdk-sessions).
+OpenHands Agent Server sessions use `getSessionCapabilities("openhands", "rpc")` /
+`get_session_capabilities("openhands", "rpc")`. This is the one **session-only**
+harness: it registers no CLI adapter, so `getAdapter("openhands")` stays
+`unknown-harness` and no one-shot run exists. Both languages speak the Agent
+Server's HTTP API and its `/sockets/session/{id}` WebSocket against a
+caller-owned 1.45.0 deployment, keyed by a server session key that is never a
+provider credential. Events, interruption, follow-up and exact conversation
+resume are supported; the generic approval method is not, and a native
+`waiting_for_confirmation` state raises an explicit agent-error instead of
+granting authority. Close releases only owned connections: the server, its
+containers and its persisted history are never paused, deleted or shut down.
+Evidence is mock-server conformance against the 1.45.0 source pin;
+native-runtime and authenticated-provider evidence have not run. See the
+[OpenHands session contract](SPEC.md#caller-owned-openhands-agent-server-sessions).
+The [session-backend catalog](#shipped-session-backends) indexes all eight
+pairs, their optional installs, auth prerequisites and evidence ceilings.
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
-Amp, Auggie, OMP, Cline, Copilot, Cursor, Kimi Code and mini-SWE-agent add install metadata but no pane or session-log heuristics.
+Eleven more adapters — Amp, Auggie, Cline, Copilot, Cursor, Kimi Code, Kiro,
+mini-SWE-agent, Mistral Vibe, OMP and Qoder — add install metadata in both
+languages but no pane or session-log heuristics, so twenty-three of the
+twenty-six carry install metadata and only `aider`, `goose` and `hermes`
+carry none.
 These helpers remain separate from native control.
 
 The default permission policy is `upstream`: commands below omit approval/bypass
@@ -280,14 +432,18 @@ Native denial takes precedence over grants and bypass.
 `AmpOptions.mode` / `{kind: 'amp', mode}` emits `--mode <value>` for a built-in
 or plugin mode; explicit model IDs are unsupported.
 
-Configuration selection is also explicit: `executable` selects the binary;
-`configHome` maps to `CLAUDE_CONFIG_DIR` for Claude Code, `CODEX_HOME` for
-Codex, `HERMES_HOME` for Hermes, `GOOSE_PATH_ROOT` for Goose, `CLINE_DIR` for Cline, `COPILOT_HOME` for Copilot, and
-`PI_CODING_AGENT_DIR` plus `--profile default` for OMP. `configFile` maps to
-Claude Code `--settings`, Amp `--settings-file`, or `--config` for Aider, Continue, OMP and mini-SWE-agent.
-mini-SWE-agent maps `configHome` to `MSWEA_GLOBAL_CONFIG_DIR`; its config file replaces the built-in config.
-Qoder maps `configHome` to `QODER_CONFIG_DIR`; `QoderOptions.permission_mode`
-(`permissionMode` in TS) explicitly selects `default`, `accept_edits` or `dont_ask`.
+Configuration selection is also explicit: `executable` selects the binary, and
+`configHome` maps to exactly twelve documented native roots — `CLAUDE_CONFIG_DIR`
+(Claude Code), `CODEX_HOME` (Codex), `HERMES_HOME` (Hermes), `GOOSE_PATH_ROOT`
+(Goose), `CLINE_DIR` (Cline), `COPILOT_HOME` (Copilot), `CURSOR_CONFIG_DIR`
+(Cursor), `KIMI_CODE_HOME` (Kimi Code), `MSWEA_GLOBAL_CONFIG_DIR`
+(mini-SWE-agent), `VIBE_HOME` (Mistral Vibe), `QODER_CONFIG_DIR` (Qoder) and
+`PI_CODING_AGENT_DIR` plus `--profile default` (OMP). The other fourteen
+adapters reject `configHome`. `configFile` maps to Claude Code `--settings`,
+Amp `--settings-file`, or `--config` for Aider, Continue, OMP and
+mini-SWE-agent; mini-SWE-agent's config file replaces the built-in config.
+`QoderOptions.permission_mode` (`permissionMode` in TS) explicitly selects
+`default`, `accept_edits` or `dont_ask`.
 Other adapters reject unsupported typed overrides. Existing
 caller-selected env remains inherited; no configuration or credential is copied.
 See [SPEC](SPEC.md#supported-configuration-overrides) for precedence, current

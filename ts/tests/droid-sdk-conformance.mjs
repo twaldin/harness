@@ -474,6 +474,7 @@ export async function runDroidConformance(api) {
       await rejects(api.openSession({ ...spec, factoryDroid }), 'invalid-options')
     }
     await rejects(api.openSession({ ...spec, ompSdk: { packageRoot: box.dir, agentDir: box.dir, auth: 'environment' } }), 'invalid-options')
+    await rejects(api.openSession({ ...spec, clineSdk: { packageRoot: box.dir, configDir: box.dir, provider: 'anthropic', features: 'builtin-only' } }), 'invalid-options')
     await rejects(api.openSession({ ...spec, opencode: { endpoint: 'http://127.0.0.1:1', auth: 'none' } }), 'invalid-options')
     await rejects(api.openSession({ ...spec, env: { ...spec.env, FACTORY_UPSTREAM_CLIENT_TYPE: 'cli' } }), 'invalid-options')
     await rejects(api.openSession({ harness: 'pi', backend: 'rpc', workdir: box.workdir, factoryDroid: {} }), 'invalid-options')

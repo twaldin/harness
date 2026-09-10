@@ -210,6 +210,14 @@ worker per operation. Exact thread resume and interruption preserve the native
 thread; approval replies and bypass are unsupported. Local execution still
 requires the native Amp thread service. See the
 [Amp SDK contract and separate qualification evidence](SPEC.md#optional-amp-sdk-sessions).
+Cline SDK sessions use `getSessionCapabilities("cline", "sdk")` /
+`get_session_capabilities("cline", "sdk")`: the official TypeScript SDK 0.0.82
+in explicit local mode, through the same Node >=22.14 bridge in both languages.
+`features: "builtin-only"` is required; detached hooks/plugins/MCP/subagents
+are excluded, and the Harness parent owns command execution through the
+public bash hook. Native identity, raw usage/events and callback approvals
+are retained. Native synthetic-provider checks do not imply authenticated
+provider success. See the [Cline SDK contract](SPEC.md#optional-cline-sdk-sessions).
 OpenCode HTTP sessions use `getSessionCapabilities("opencode", "rpc")` /
 `get_session_capabilities("opencode", "rpc")` against an explicitly selected
 caller-owned 1.18.29 endpoint. Both languages implement native HTTP/SSE,

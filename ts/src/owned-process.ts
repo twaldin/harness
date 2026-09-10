@@ -1,5 +1,5 @@
-// One owned child process per live session, shared by every process-backed
-// backend (Pi RPC, the OMP SDK bridge and the Factory Droid SDK transport):
+// One owned child process, shared by Pi RPC, the OMP/Claude/Cline SDK workers
+// and the Factory Droid SDK transport:
 // bounded stderr capture, strict LF framing of stdout within MAX_FRAME_BYTES,
 // serialized backpressured stdin writes, exit/EOF classification and the
 // bounded teardown TERM → GRACE_MS → KILL → DRAIN_MS reap/pipe drain of the
@@ -174,8 +174,14 @@ export class OwnedChild {
     this.stopped = true
   }
 
-  /** Serialized, backpressured stdin write; a write failure is reported as `disconnected`. */
-  write(line: string): void {
+  /**
+   * Serialized, backpressured stdin write; a write failure is reported as
+   * `disconnected`. The returned promise settles (never rejects) when this
+   * queued write finishes or the transport stops, so a caller streaming on someone else's behalf
+   * — the Cline session forwarding a parent-owned command's output — can
+   * hand this child's backpressure back to its own producer.
+   */
+  write(line: string): Promise<void> {
     this.#writes = this.#writes.then(async () => {
       if (this.stopped) return
       const stdin = this.#child.stdin
@@ -198,6 +204,7 @@ export class OwnedChild {
     }).catch((err: unknown) => {
       this.#fail('disconnected', `stdin write failed: ${describeError(err)}`)
     })
+    return this.#writes
   }
 
   /**

@@ -488,6 +488,7 @@ async def test_validation_precedes_all_network_effects(tmp_path):
             {"model": "   "},
             {"omp_sdk": spec.openhands},
             {"claude_sdk": spec.openhands},
+            {"cline_sdk": spec.openhands},
             {"backend": "sdk"},
             {"backend": "cli"},
         ):

@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 
 from harness import (
+    ClineSdkOptions,
+    FactoryDroidOptions,
     HarnessError,
     SessionReference,
     SessionSpec,
@@ -175,6 +177,23 @@ async def test_open_session_rejects_before_spawn(tmp_path: Path, overrides: dict
     assert info.value.code == code
     assert not (tmp_path / LOCK_DIRNAME).exists()
     assert not (tmp_path / "synthetic-session.jsonl").exists()
+
+
+@pytest.mark.parametrize("harness", ["factory-droid", "cline"])
+async def test_sdk_option_families_reject_outside_their_backend(tmp_path: Path, harness: str):
+    """Each otherwise-valid SDK selection refuses the foreign option family."""
+    with pytest.raises(HarnessError) as info:
+        async with await open_session(SessionSpec(
+            harness=harness,
+            workdir=tmp_path,
+            backend="sdk",
+            executable=str(tmp_path / "missing-sdk-executable"),
+            cline_sdk=ClineSdkOptions(tmp_path / "sdk", tmp_path / "profile", "openai-compatible", "builtin-only"),
+            factory_droid=FactoryDroidOptions(),
+        )):
+            pass
+    assert info.value.code == "invalid-options"
+    assert not (tmp_path / LOCK_DIRNAME).exists()
 
 
 async def test_open_session_missing_executable_is_launch_failed(tmp_path: Path):

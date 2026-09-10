@@ -73,6 +73,12 @@
   resume; interruption and disposal use the existing session lifecycle.
   Harness imports do not initialize OMP, and CLI behavior stays unchanged.
   See [SDK setup, runtime and qualification limits](SPEC.md#optional-omp-sdk-sessions).
+- Added explicit local Cline SDK sessions in Python and TypeScript through an
+  owned Node >=22.14 worker using caller-installed `@cline/sdk` 0.0.82.
+  Harness owns command execution through the public bash hook; native events,
+  usage and exact session identity survive follow-up and resume. Escaping native
+  features are unsupported, with no CLI/ACP fallback.
+  See [SDK setup, ownership and qualification limits](SPEC.md#optional-cline-sdk-sessions).
 - Added typed Claude Code effort and Codex sandbox options, validated before
   file writes. Codex sandbox and bypass cannot be combined.
 - Aligned eager registry initialization, collision errors, model selection,

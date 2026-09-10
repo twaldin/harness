@@ -76,6 +76,21 @@ export async function claudeConformance(api) {
     await assert.rejects(openSession({ ...spec, resume: { ...reference, sessionId: '00000000-0000-4000-8000-000000000000' } }))
     await missing(join(workdir, '.harness-run.lock'))
 
+    const uppercaseId = 'ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF'
+    const uppercaseFile = join(workdir, 'uppercase-native.jsonl')
+    await writeFile(uppercaseFile, JSON.stringify({ type: 'user', sessionId: uppercaseId, cwd: workdir }) + '\n')
+    const uppercaseReference = { sessionId: uppercaseId, sessionFile: uppercaseFile, workdir }
+    session = await openSession({ ...spec, resume: uppercaseReference })
+    turn = session.startTurn('success')
+    await collect(turn)
+    const uppercaseResult = await turn.result
+    assert.equal(uppercaseResult.status, 'completed')
+    assert.equal(uppercaseResult.sessionId, uppercaseId)
+    assert.equal(session.reference.sessionFile, uppercaseFile)
+    await session.close()
+    await assert.rejects(openSession({ ...spec, resume: { ...uppercaseReference, sessionId: uppercaseId.toLowerCase() } }))
+    await missing(join(workdir, '.harness-run.lock'))
+
     for (const [prompt, expected] of [['hang', 'interrupted'], ['race', 'completed']]) {
       session = await openSession(spec)
       turn = session.startTurn(prompt)

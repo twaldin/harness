@@ -89,7 +89,7 @@ bump that doesn't apply to the Python wheel). Anything that touches SPEC.md or
 the fixture set bumps both simultaneously.
 
 Current manifests do not meet that alignment: Python is `0.3.19` and
-TypeScript is `0.2.23`. This is recorded skew, not a new release policy.
+TypeScript is `0.2.24`. This is recorded skew, not a new release policy.
 
 ## How parity is enforced
 

@@ -24,44 +24,45 @@
 //   from `{type:'sdk_reference'}` once a native hook observed it, and fatal
 //   native failures arrive as `{type:'sdk_failure', status, error, raw?}`.
 //
-// Ownership mirrors the one-shot engine in lifecycle.ts: the child leads a
-// fresh POSIX process group, teardown is TERM → GRACE_MS → KILL → bounded
-// DRAIN_MS reap/drain, and the workdir lease (with any projected AGENTS.md)
-// is held until the tree is gone. Any transport or protocol violation
-// invalidates the handle and triggers that same bounded teardown.
+// Ownership mirrors the one-shot engine in lifecycle.ts through the shared
+// `OwnedChild` (owned-process.ts): the child leads a fresh POSIX process
+// group, teardown is TERM → GRACE_MS → KILL → bounded DRAIN_MS reap/drain,
+// and the workdir lease (with any projected AGENTS.md) is held until the tree
+// is gone. Any transport or protocol violation invalidates the handle and
+// triggers that same bounded teardown.
 //
-// `opencode` on `rpc` is the fourth harness: direct HTTP + SSE against a
-// caller-owned server, implemented in opencode.ts and loaded lazily. It
-// shares the spec validation, `EventQueue`, `TurnCore` and result shapes
-// declared here, never a child process.
+// Four more backends share the spec validation, `EventQueue`, `TurnCore` and
+// result shapes declared here and are loaded lazily:
 //
-// `amp` on `sdk` is the fifth: one finite Node worker (`_amp_sdk.mjs`,
-// loading the caller-installed @ampcode/sdk) per operation, driven through
-// the shared subprocess runner. Implemented in amp.ts and loaded lazily.
-//
-// `openhands` on `rpc` is the sixth: direct HTTP + WebSocket against a
-// caller-owned OpenHands Agent Server (openhands.ts, loaded lazily together
-// with the optional `ws` peer). It is session-only: there is no one-shot
-// adapter, so `getAdapter('openhands')` stays unknown-harness.
-import { spawn } from 'node:child_process'
+// - `opencode` on `rpc`: direct HTTP + SSE against a caller-owned server
+//   (opencode.ts), never a child process.
+// - `amp` on `sdk`: one finite Node worker (`_amp_sdk.mjs`, loading the
+//   caller-installed @ampcode/sdk) per operation through the subprocess runner.
+// - `factory-droid` on `sdk`: the caller-installed @factory/droid-sdk public
+//   `DroidClient` driving one owned `droid exec` child (factory-droid-sdk.ts).
+// - `openhands` on `rpc`: direct HTTP + WebSocket against a caller-owned
+//   Agent Server (openhands.ts, with the optional `ws` peer). Session-only:
+//   `getAdapter('openhands')` stays unknown-harness.
 import type { ChildProcess } from 'node:child_process'
 import { closeSync, existsSync, openSync, readSync, realpathSync } from 'node:fs'
-import { constants as osConstants } from 'node:os'
 import { basename, isAbsolute, join, resolve, sep } from 'node:path'
-import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
 import type { Backend, ErrorCode, PermissionPolicy } from './base.js'
 import { HarnessError } from './base.js'
 import { cleanupCommand, prepareCommand } from './instructions.js'
 import type { PreparedCommand } from './instructions.js'
-import { DRAIN_MS, GRACE_MS, assertSupportedPlatform, describeError } from './lifecycle.js'
+import { assertSupportedPlatform, describeError } from './lifecycle.js'
+import { MAX_FRAME_BYTES, OwnedChild, inheritedEnv, spawnGroupLeader } from './owned-process.js'
+import type { OwnedChildFailure } from './owned-process.js'
 import { getAdapter } from './registry.js'
 
-/** `rpc` drives `pi` (and `opencode`/`openhands` over HTTP); `sdk` drives `omp` through the owned Bun bridge, `claude-code` through the owned SDK worker and `amp` through the Node SDK worker. Any other pairing (and `cli`) is `unsupported-backend`. */
+export { MAX_FRAME_BYTES }
+
+/** `rpc`: Pi and caller-owned OpenCode/OpenHands servers. `sdk`: OMP, Claude, Amp and Factory Droid through their qualified local runtimes. Other pairings (including `cli`) reject. */
 export type SessionBackend = 'rpc' | 'sdk'
 
-/** The harnesses with a live session backend. `openhands` has no CLI adapter and exists only here. */
-type SessionHarness = 'pi' | 'omp' | 'opencode' | 'claude-code' | 'amp' | 'openhands'
+/** The harnesses with a live session backend. `openhands` has no CLI adapter. */
+type SessionHarness = 'pi' | 'omp' | 'opencode' | 'claude-code' | 'amp' | 'factory-droid' | 'openhands'
 
 /**
  * Selection of the caller-installed OMP SDK. Nothing here is guessed: the
@@ -137,6 +138,47 @@ export interface ResolvedAmpSdkOptions extends AmpSdkOptions {
   readonly endpoint: string
 }
 
+/** Native Droid autonomy levels (`AutonomyLevel` on the wire). */
+export type FactoryDroidAutonomy = 'off' | 'low' | 'medium' | 'high'
+
+/**
+ * A native Droid callback: receives the exact `params` JSON object of the
+ * CLI's `droid.request_permission` / `droid.ask_user` request and returns the
+ * native response JSON object, synchronously or as a promise.
+ *
+ * - Permission reply: `{ selectedOption, comment?, editedSpecContent? }` where
+ *   `selectedOption` must be one of the `options[].value` strings offered in
+ *   the request; nothing is escalated or mapped on the caller's behalf.
+ * - Question reply: `{ cancelled: boolean, answers?: [...] }` with native
+ *   `{ index, question, answer }` entries whose `index` names an offered
+ *   question (`answers` defaults to `[]`).
+ *
+ * A callback that throws, times out (`requestTimeoutSeconds`) or returns an
+ * invalid / unoffered reply fails closed: the session ends as `agent-error`
+ * with the cause retained and the owned process group is torn down.
+ */
+export type FactoryDroidCallback = (params: JsonObject) => JsonObject | Promise<JsonObject>
+
+/**
+ * Optional native policy for `factory-droid` on `sdk`. Every field is
+ * optional; omitted (or `null`) fields leave the upstream default untouched.
+ * Only the policy the pinned SDK exposes publicly is accepted: restrictive
+ * allowlists / additional tool IDs, MCP servers, hooks and permission bypass
+ * are unsupported and rejected, never tunnelled through CLI flags.
+ */
+export interface FactoryDroidOptions {
+  autonomy?: FactoryDroidAutonomy | null
+  /** Native tool IDs disabled for the session (copied). */
+  disabledTools?: readonly string[] | null
+  /** Native `autoRejectPermissionRequests`: the CLI rejects permission requests itself instead of asking. */
+  autoRejectPermissionRequests?: boolean | null
+  disableBuiltinSkills?: boolean | null
+  /** Answers `droid.request_permission`; without it the SDK's default (`cancel`) applies. */
+  onPermission?: FactoryDroidCallback | null
+  /** Answers `droid.ask_user`; without it the SDK's default (`cancelled`) applies. */
+  onQuestion?: FactoryDroidCallback | null
+}
+
 export type OpenCodeAuth = 'none' | 'basic'
 
 /**
@@ -186,7 +228,7 @@ export type JsonObject = Record<string, unknown>
 export interface SessionReference {
   /** Full native session ID; never a prefix. The canonical lowercase conversation UUID on `openhands`. */
   sessionId: string
-  /** Absolute session file, or null while the native session has not been persisted yet (always null on `opencode` and `openhands`; on `claude-code` null until a native hook reported the transcript, typically after the first turn). */
+  /** Absolute session file; null on server sessions and until Claude's native hook reports its transcript. Factory uses its verified persisted `.factory/sessions/<encoded workdir>/<id>.jsonl` under effective `FACTORY_HOME_OVERRIDE` / `HOME`. */
   sessionFile: string | null
   /** Absolute working directory the session was opened in; the literal server-side directory on `opencode` and `openhands`. */
   workdir: string
@@ -196,28 +238,25 @@ export interface SessionReference {
 
 export interface SessionSpec {
   harness: string
-  /** Local absolute directory for `pi`/`omp`/`amp`; for `opencode` and `openhands` the literal absolute POSIX directory on the server (never resolved or created locally). */
+  /** Local absolute directory for process sessions; literal absolute POSIX directory on OpenCode/OpenHands servers (never resolved or created locally). */
   workdir: string
-  /** Required; `rpc` for `pi`, `opencode` and `openhands`, `sdk` for `omp`, `claude-code` and `amp`. */
+  /** Required; `rpc` for Pi/OpenCode/OpenHands, `sdk` for OMP/Claude/Amp/Factory Droid. */
   backend: SessionBackend
-  /** Passed through as `--model <trimmed>` (rpc), to the OMP SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. Rejected for `amp`, which routes models through `ampSdk.mode`. Required on `openhands`: the exact native model the selected profile's LLM profile must declare. */
+  /** Native trimmed selector; Factory sends `modelId` for new sessions only; OpenCode requires provider/model. Amp rejects this (ampSdk.mode routes models). OpenHands requires the exact model declared by the selected profile. Omission otherwise preserves native selection. */
   model?: string
-  /** Layered over the inherited process env; never mutated. For `omp`, entries conflicting with the session-owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected; for `claude-code`, an entry conflicting with the session-owned `CLAUDE_CONFIG_DIR` is rejected; for `amp`, `AMP_SKIP_UPDATE_CHECK` may only be `"1"` and `AMP_URL` selects the endpoint. Must be empty on `opencode` and `openhands`. */
+  /** Overlay on inherited process env, never mutated. OMP/Claude profile variables and Amp's AMP_SKIP_UPDATE_CHECK are protected; AMP_URL selects Amp's endpoint. Factory requires a nonempty FACTORY_API_KEY and protects SDK attribution. Must be empty on server sessions. */
   env?: Record<string, string>
-  /** Replaces the `pi` binary (rpc), the `bun` binary running the OMP bridge worker, the `node` binary running the Amp SDK worker, or the JavaScript runtime running the Claude SDK worker (defaults to this process's `execPath`; a `bun` runtime gets `--no-env-file`): a bare name resolved on PATH or an absolute path. Rejected on server sessions. */
+  /** Bare name or absolute path: Pi/Droid CLI, Bun OMP worker, Node Amp worker, or Claude worker's JavaScript runtime (default process.execPath; Bun gets --no-env-file). Rejected on server sessions. */
   executable?: string
   /** Only `upstream` is supported; `bypass` is rejected. */
   permissionPolicy?: PermissionPolicy
   /** Projected into `AGENTS.md` for the session's lifetime. Rejected on server sessions (no local workdir). */
   instructions?: string
-  /** Resume an existing native session; needs `sessionFile` and the full `sessionId` (on `opencode`/`amp`/`openhands`: a null `sessionFile`, the matching `endpoint` and the full native ID). */
+  /** Exact native ID plus sessionFile; OpenCode/OpenHands/Amp instead require null sessionFile and matching endpoint. Factory preserves saved model/autonomy, rejecting model and factoryDroid.autonomy overrides on resume. */
   resume?: SessionReference
   /** Wall-clock limit per turn; defaults to 1800. `null` disables it. */
   timeoutSeconds?: number | null
-  /** Bound on every native request/response round trip; defaults to 30.
-   * On `amp` it also bounds `open` and each turn's native initialization (until
-   * the worker reports the thread identity). On `openhands`, submission through
-   * the matching socket echo shares one deadline; interruption is also bounded. */
+  /** Native round-trip bound, default 30s; includes Factory callbacks and Amp initialization. OpenHands submission through matching socket echo shares one deadline; interruption is also bounded. */
   requestTimeoutSeconds?: number
   /** Bytes of unconsumed events buffered per turn (and for idle session events); defaults to 1 MiB. Overflow is a protocol error, never a silent drop. */
   maxBufferBytes?: number
@@ -229,6 +268,8 @@ export interface SessionSpec {
   opencode?: OpenCodeOptions
   /** Required for harness `claude-code` (backend `sdk`), rejected otherwise. */
   claudeSdk?: ClaudeSdkOptions
+  /** Optional for harness `factory-droid` on `sdk` (omitted = upstream defaults), rejected otherwise. */
+  factoryDroid?: FactoryDroidOptions
   /** Required for harness `openhands`, rejected otherwise. */
   openhands?: OpenHandsOptions
 }
@@ -256,7 +297,9 @@ export interface ResolvedSessionSpec {
   readonly opencode: Readonly<OpenCodeOptions> | null
   /** Frozen copy of the caller's selection for `claude-code`; null otherwise. */
   readonly claudeSdk: Readonly<ClaudeSdkOptions> | null
-  /** Frozen, endpoint-normalized copy of the caller's selection for `openhands`; null otherwise. */
+  /** Frozen native policy for `factory-droid`; null for every other harness. */
+  readonly factoryDroid: Readonly<Required<FactoryDroidOptions>> | null
+  /** Frozen, endpoint-normalized selection for `openhands`; null otherwise. */
   readonly openhands: Readonly<OpenHandsOptions> | null
 }
 
@@ -284,16 +327,16 @@ export type SessionTurnStatus =
   /** `openhands` only: native stuck detection stopped the run. */
   | 'stuck'
 
-/** One native frame, response frames included. Unknown native event types pass through untouched in `raw`; on `sdk`, `raw` is the exact native SDK event, never the bridge/worker wrapper; on `opencode`, `raw` is the decoded SSE `{id, type, properties}` object; on `openhands`, `raw` is the whole session-socket envelope (`seq` retained). */
+/** Native events remain untouched in raw: unwrapped SDK events, OpenCode SSE objects, whole OpenHands socket envelopes (seq retained), or Factory inner notifications / whole request-response envelopes. Unknown event types remain visible. */
 export interface SessionEvent {
   backend: SessionBackend
   harness: SessionHarness
   sessionId: string
   /** Null for frames that arrived while no turn was active, and on `opencode` for message frames of the selected session that do not belong to the active turn's lineage. */
   turnId: string | null
-  /** The native `id` correlation field when the frame carries one; on `opencode` the native message or permission request ID; on `openhands` the inner native event `id`; always null on `amp`. */
+  /** Native correlation ID (stringified on Factory), OpenCode message/permission ID, or OpenHands inner event ID; always null on Amp. */
   requestId: string | null
-  /** Native `type` string; on `openhands` the inner event `kind` for durable/transient frames, the envelope `type` otherwise. */
+  /** Native type; Factory uses inner notification type or request/response; OpenHands uses inner event kind for durable/transient frames and envelope type otherwise. */
   type: string
   raw: JsonObject
 }
@@ -302,7 +345,7 @@ export interface SessionTurnResult {
   sessionId: string
   turnId: string
   status: SessionTurnStatus
-  /** Last `agent_end` payload, the failed `prompt` response, the failing `sdk_settled` bridge frame, on `amp` the last native SDK result the worker reported, on `opencode` the native prompt response (`{info, parts}`) / failing HTTP JSON body, or on `openhands` `{state, terminal_event}` (final native `full_state` and the durable terminal transition) / `{http_status, body}` for a rejected request. */
+  /** Native terminal/failure payload: agent_end, rejected prompt, sdk_settled, Amp result, Factory agent_turn_completed/request rejection, OpenCode prompt response/failing HTTP body, or OpenHands {state, terminal_event}/{http_status, body}. */
   raw: JsonObject | null
   error: string | null
   /** Leader exit code once reaped, else null. Signaled exits report `-signum`. On `amp` the native CLI's exit as observed by the worker (the worker's own exit only when it failed before reporting). Always null on server sessions (no process is observed). */
@@ -332,13 +375,12 @@ const CLAUDE_SESSION_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-f
 const DEFAULT_TIMEOUT_SECONDS = 1800
 const DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
 const DEFAULT_MAX_BUFFER_BYTES = 1_048_576
-/** Largest stdout frame (and, on `opencode`, SSE event / HTTP JSON body) accepted in bytes. */
-export const MAX_FRAME_BYTES = 1_048_576
-const PROBE_MS = 20
 /** Characters of stderr quoted in handshake failure messages. */
 export const STDERR_EXCERPT = 512
 const LF = 0x0a
 const CR = 0x0d
+const UTF8 = new TextDecoder('utf-8', { fatal: true })
+const FACTORY_AUTONOMY: readonly FactoryDroidAutonomy[] = ['off', 'low', 'medium', 'high']
 /** Native OpenCode session IDs: the server validates the prefix only, so the rest is merely required to be safe alphanumerics. */
 const OPENCODE_SESSION_ID = /^ses_[0-9A-Za-z]+$/
 /** Canonical lowercase hyphenated UUID: what this client generates and what the pinned server echoes for conversation IDs. */
@@ -380,11 +422,28 @@ export function requirePrompt(prompt: unknown): string {
   return prompt
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, ms))
+/** Strict UTF-8 text of one stdout frame, shared by the process backends. Throws `protocol-error`. */
+export function decodeFrameText(bytes: Buffer): string {
+  try {
+    return UTF8.decode(bytes)
+  } catch (err) {
+    throw new HarnessError(`stdout frame is not strict UTF-8: ${describeError(err)}`, 'protocol-error')
+  }
 }
 
-function realpathOrSelf(path: string): string {
+/** One JSON object from decoded frame text; arrays, scalars and malformed JSON are `protocol-error`. */
+export function parseFrame(text: string): JsonObject {
+  let frame: unknown
+  try {
+    frame = JSON.parse(text)
+  } catch (err) {
+    throw new HarnessError(`stdout frame is not strict UTF-8 JSON: ${describeError(err)}`, 'protocol-error')
+  }
+  if (!isJsonObject(frame)) throw new HarnessError('stdout frame is not a JSON object', 'protocol-error')
+  return frame
+}
+
+export function realpathOrSelf(path: string): string {
   try {
     return realpathSync(path)
   } catch {
@@ -397,29 +456,16 @@ export function samePath(a: string, b: string): boolean {
   return a === b || realpathOrSelf(a) === realpathOrSelf(b)
 }
 
-/** Signal (or probe with 0) a whole process group; `true` while it still has members (EPERM counts as alive, see lifecycle.ts). */
-function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
-  try {
-    process.kill(-pgid, signal)
-    return true
-  } catch (err) {
-    const code = err instanceof Error && 'code' in err ? err.code : null
-    if (code === 'ESRCH') return false
-    if (code === 'EPERM' && signal !== 'SIGKILL') return true
-    throw err
-  }
-}
-
 /** Owned child environment for the bridge worker: config-root writes stay inside the selected profile. */
 function ompSdkEnv(options: Readonly<OmpSdkOptions>): Readonly<Record<string, string>> {
   return { PI_CODING_AGENT_DIR: options.agentDir, PI_CONFIG_DIR: options.agentDir }
 }
 
 /** Which backend each session harness is qualified on; anything else is `unsupported-backend`. */
-const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', 'claude-code': 'sdk', amp: 'sdk', openhands: 'rpc' }
+const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', 'claude-code': 'sdk', amp: 'sdk', 'factory-droid': 'sdk', openhands: 'rpc' }
 
 function isSessionHarness(name: string): name is SessionHarness {
-  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'claude-code' || name === 'amp' || name === 'openhands'
+  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'claude-code' || name === 'amp' || name === 'factory-droid' || name === 'openhands'
 }
 
 /** Resolve the harness first, then validate the backend before rejecting an unsupported pairing. `openhands` is session-only: it never goes through the adapter registry. */
@@ -430,7 +476,7 @@ function requireSessionHarness(name: unknown, backend: unknown): { harness: Sess
     throw invalid(`Unknown backend: ${JSON.stringify(backend)}. Expected one of: cli, rpc, sdk`)
   }
   if (!isSessionHarness(resolved)) {
-    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "openhands" (rpc), "omp" (sdk), "claude-code" (sdk) and "amp" (sdk) are supported`, 'unsupported-backend')
+    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "openhands" (rpc), "omp" (sdk), "claude-code" (sdk), "amp" (sdk) and "factory-droid" (sdk) are supported`, 'unsupported-backend')
   }
   const qualified = SESSION_BACKENDS[resolved]
   if (backend !== qualified) {
@@ -442,6 +488,12 @@ function requireSessionHarness(name: unknown, backend: unknown): { harness: Sess
 /**
  * Static support report for a harness as a live session. Separate from
  * `getCapabilities`: this documents session operations, not one-shot execution.
+ *
+ * `approval` refers to the generic `respondApproval` method only. Factory
+ * Droid reports `false` there because its permission and question requests
+ * are answered through the backend-specific `factoryDroid.onPermission` /
+ * `onQuestion` callbacks with native replies, never through a mapped generic
+ * reply.
  */
 export function getSessionCapabilities(name: string, backend: Backend = 'rpc'): SessionCapabilities {
   const resolved = requireSessionHarness(name, backend)
@@ -454,6 +506,53 @@ export function getSessionCapabilities(name: string, backend: Backend = 'rpc'): 
     concurrentTurns: false,
     approval: resolved.harness === 'opencode' || resolved.harness === 'claude-code',
   }
+}
+
+/**
+ * Validate the caller's Factory Droid policy: every accepted field is typed,
+ * copied and defaulted to `null` (upstream default); anything else is rejected
+ * by name so no native choice is silently discarded. Pure.
+ */
+function resolveFactoryDroid(raw: unknown): Readonly<Required<FactoryDroidOptions>> {
+  const options: Required<FactoryDroidOptions> = {
+    autonomy: null, disabledTools: null, autoRejectPermissionRequests: null, disableBuiltinSkills: null, onPermission: null, onQuestion: null,
+  }
+  if (raw === undefined) return Object.freeze(options)
+  if (!isJsonObject(raw)) throw invalid('factoryDroid must be a FactoryDroidOptions object')
+  for (const key of Object.keys(raw)) {
+    if (!(key in options)) throw invalid(`factoryDroid.${key} is not a supported option; only autonomy, disabledTools, autoRejectPermissionRequests, disableBuiltinSkills, onPermission and onQuestion are accepted`)
+  }
+  const { autonomy, disabledTools, autoRejectPermissionRequests, disableBuiltinSkills, onPermission, onQuestion } = raw
+  if (autonomy !== undefined && autonomy !== null) {
+    const level = FACTORY_AUTONOMY.find((value) => value === autonomy)
+    if (level === undefined) throw invalid(`factoryDroid.autonomy must be one of off, low, medium, high, got ${JSON.stringify(autonomy)}`)
+    options.autonomy = level
+  }
+  if (disabledTools !== undefined && disabledTools !== null) {
+    if (!Array.isArray(disabledTools)) throw invalid('factoryDroid.disabledTools must be an array of native tool IDs')
+    const copy: string[] = []
+    for (const id of disabledTools) {
+      if (typeof id !== 'string' || id === '' || id.includes('\0')) throw invalid('factoryDroid.disabledTools entries must be non-empty strings without NUL bytes')
+      copy.push(id)
+    }
+    options.disabledTools = Object.freeze(copy)
+  }
+  for (const [name, value] of [['autoRejectPermissionRequests', autoRejectPermissionRequests], ['disableBuiltinSkills', disableBuiltinSkills]] as const) {
+    if (value !== undefined && value !== null && typeof value !== 'boolean') throw invalid(`factoryDroid.${name} must be a boolean`)
+  }
+  if (typeof autoRejectPermissionRequests === 'boolean') options.autoRejectPermissionRequests = autoRejectPermissionRequests
+  if (typeof disableBuiltinSkills === 'boolean') options.disableBuiltinSkills = disableBuiltinSkills
+  for (const [name, value] of [['onPermission', onPermission], ['onQuestion', onQuestion]] as const) {
+    if (value !== undefined && value !== null && !isCallback(value)) throw invalid(`factoryDroid.${name} must be a function returning the native reply object`)
+  }
+  if (isCallback(onPermission)) options.onPermission = onPermission
+  if (isCallback(onQuestion)) options.onQuestion = onQuestion
+  return Object.freeze(options)
+}
+
+/** Only the callable shape is checkable here; the reply object is validated when the native request arrives. */
+function isCallback(value: unknown): value is FactoryDroidCallback {
+  return typeof value === 'function'
 }
 
 /** Validate the caller's SDK selection; every field is explicit and absolute, nothing is probed on disk. */
@@ -743,6 +842,10 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   } else if (rawOpenCode !== undefined) {
     throw invalid('opencode is only accepted for harness "opencode"')
   }
+  const rawFactoryDroid: unknown = spec.factoryDroid
+  let factoryDroid: Readonly<Required<FactoryDroidOptions>> | null = null
+  if (harness === 'factory-droid') factoryDroid = resolveFactoryDroid(rawFactoryDroid)
+  else if (rawFactoryDroid !== undefined) throw invalid('factoryDroid is only accepted for harness "factory-droid" on backend "sdk"')
   const rawOpenHands: unknown = spec.openhands
   let openhands: Readonly<OpenHandsOptions> | null = null
   if (harness === 'openhands') {
@@ -818,7 +921,8 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     ampSdk = resolveAmpSdk(rawAmpSdk, env)
   }
 
-  let executable: string | null = claudeSdk !== null ? process.execPath : harness === 'omp' ? 'bun' : harness === 'amp' ? 'node' : 'pi'
+  let executable: string | null =
+    claudeSdk !== null ? process.execPath : harness === 'omp' ? 'bun' : harness === 'amp' ? 'node' : harness === 'factory-droid' ? 'droid' : 'pi'
   const rawExecutable: unknown = spec.executable
   if (remote) {
     if (rawExecutable !== undefined) throw invalid(`executable is not supported for ${harness}: no local process is launched`)
@@ -863,6 +967,11 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   if (ampSdk !== null && resume !== null && ampSdk.visibility !== undefined) {
     throw invalid('ampSdk.visibility only applies when a thread is created; it cannot be combined with resume')
   }
+  if (resume !== null && factoryDroid !== null) {
+    // The native load request cannot replace the saved model or autonomy; an explicit request to do so must not be silently dropped.
+    if (model !== null) throw invalid('model cannot be combined with resume for factory-droid: a resumed Droid session keeps its saved modelId')
+    if (factoryDroid.autonomy !== null) throw invalid('factoryDroid.autonomy cannot be combined with resume for factory-droid: a resumed Droid session keeps its saved autonomy level')
+  }
 
   let timeoutSeconds: number | null = DEFAULT_TIMEOUT_SECONDS
   const rawTimeout: unknown = spec.timeoutSeconds
@@ -905,6 +1014,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     ampSdk,
     opencode,
     claudeSdk,
+    factoryDroid,
     openhands,
   })
 }
@@ -931,16 +1041,16 @@ function claudeSdkWorkerPath(): string {
 
 /** What the leader process is called in diagnostics. */
 function leaderName(spec: ResolvedSessionSpec): string {
-  return spec.claudeSdk !== null ? 'the Claude SDK worker' : spec.backend === 'sdk' ? 'the OMP SDK bridge' : 'pi'
+  return spec.claudeSdk !== null ? 'the Claude SDK worker' : spec.harness === 'omp' ? 'the OMP SDK bridge' : 'pi'
 }
 
-/** Bounded native header reader; OMP alone permits one leading title record. */
-function readSessionHeader(file: string, allowTitle: boolean): JsonObject {
+/** Bounded native header reader shared by the process backends; OMP alone permits one leading title record. */
+export function readSessionHeader(file: string, allowTitle: boolean): JsonObject {
   let fd: number
   try {
     fd = openSync(file, 'r')
   } catch (err) {
-    throw invalid(`resume.sessionFile ${JSON.stringify(file)} is not readable: ${describeError(err)}`)
+    throw invalid(`session file ${JSON.stringify(file)} is not readable: ${describeError(err)}`)
   }
   const chunks: Buffer[] = []
   let length = 0
@@ -954,7 +1064,7 @@ function readSessionHeader(file: string, allowTitle: boolean): JsonObject {
         const end = at === -1 ? size : at
         const part = chunk.subarray(from, end)
         length += part.length
-        if (length > MAX_FRAME_BYTES) throw invalid(`resume.sessionFile header exceeds ${MAX_FRAME_BYTES} bytes`)
+        if (length > MAX_FRAME_BYTES) throw invalid(`session file ${JSON.stringify(file)} header exceeds ${MAX_FRAME_BYTES} bytes`)
         // The read buffer is reused; only incomplete header fragments need copying.
         if (at === -1 && size !== 0) {
           chunks.push(Buffer.from(part))
@@ -962,7 +1072,7 @@ function readSessionHeader(file: string, allowTitle: boolean): JsonObject {
         }
         const bytes = chunks.length === 0 ? part : Buffer.concat([...chunks, part], length)
         const parsed: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-        if (!isJsonObject(parsed)) throw invalid('resume.sessionFile header is not a JSON object')
+        if (!isJsonObject(parsed)) throw invalid(`session file ${JSON.stringify(file)} header is not a JSON object`)
         if (!allowTitle || parsed.type !== 'title') return parsed
         allowTitle = false
         chunks.length = 0
@@ -972,7 +1082,7 @@ function readSessionHeader(file: string, allowTitle: boolean): JsonObject {
     }
   } catch (err) {
     if (err instanceof HarnessError) throw err
-    throw invalid(`resume.sessionFile ${JSON.stringify(file)} has no readable JSON header: ${describeError(err)}`)
+    throw invalid(`session file ${JSON.stringify(file)} has no readable JSON header: ${describeError(err)}`)
   } finally {
     closeSync(fd)
   }
@@ -1065,36 +1175,6 @@ function verifyClaudeTranscript(reference: SessionReference, sessionFile: string
   throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} names no Claude session identity (sessionId and cwd) within its first ${MAX_FRAME_BYTES} bytes`)
 }
 
-/** Bounded stderr prefix: keeps the first `cap` raw bytes decoded incrementally, counts everything. */
-class BoundedCapture {
-  readonly #decoder = new StringDecoder('utf8')
-  readonly #cap: number
-  #text = ''
-  #kept = 0
-  bytes = 0
-
-  constructor(cap: number) {
-    this.#cap = cap
-  }
-
-  push(chunk: Buffer): void {
-    this.bytes += chunk.length
-    const room = this.#cap - this.#kept
-    if (room <= 0) return
-    const slice = chunk.length > room ? chunk.subarray(0, room) : chunk
-    this.#kept += slice.length
-    this.#text += this.#decoder.write(slice)
-  }
-
-  get text(): string {
-    return this.#text
-  }
-
-  get truncated(): boolean {
-    return this.bytes > this.#cap
-  }
-}
-
 /**
  * Single-consumer async queue bounded by the raw byte size of what sits
  * unconsumed. A waiting consumer receives events directly; otherwise they
@@ -1169,11 +1249,6 @@ interface PendingRequest {
   reject: (err: HarnessError) => void
 }
 
-interface LeaderExit {
-  code: number | null
-  signal: NodeJS.Signals | null
-}
-
 interface AbortState {
   acked: boolean
   confirmed: boolean
@@ -1232,11 +1307,11 @@ function lastAssistantMessage(messages: unknown): JsonObject | null {
 /**
  * An open live session. Obtain one through `openSession`; the native
  * resources (process group, workdir lease and projected instructions for
- * `pi`/`omp`/`amp`; HTTP connections and the event stream or socket for
- * `opencode`/`openhands`) are owned until `close()` (or an internal failure)
- * tears them down. Turns are sequential: the next `startTurn` after a settled
- * result is a follow-up in the same native session. There is no callback API;
- * consume `turn.events` / `events`.
+ * process backends; HTTP connections and event streams/sockets for
+ * OpenCode/OpenHands) are owned until close or failure tears them down.
+ * Turns are sequential; follow-up retains native identity. Consume
+ * turn.events / events; native Factory onPermission/onQuestion are the
+ * only callbacks, not an event-delivery API.
  */
 export abstract class LiveSession {
   readonly spec: ResolvedSessionSpec
@@ -1253,8 +1328,13 @@ export abstract class LiveSession {
       const { OpenCodeSession } = await import('./opencode.js')
       return OpenCodeSession.connect(spec)
     }
+    if (spec.factoryDroid !== null) {
+      // Optional SDK loading must remain isolated from ordinary CLI imports.
+      const { FactoryDroidSession } = await import('./factory-droid-sdk.js')
+      return FactoryDroidSession.launch(spec)
+    }
     if (spec.openhands !== null) {
-      // Lazy by contract: the HTTP/WebSocket transport (and its optional `ws` peer) is only loaded for OpenHands.
+      // Lazy: the optional ws peer is only loaded for OpenHands.
       const { OpenHandsSession } = await import('./openhands.js')
       return OpenHandsSession.connect(spec)
     }
@@ -1293,8 +1373,8 @@ export abstract class LiveSession {
    * `opencode` and `claude-code` support it (`getSessionCapabilities(...).approval`);
    * the request must have been observed as a `permission.asked` (opencode)
    * or `claude_permission` (claude-code) event of the selected session and
-   * still be unanswered. `openhands` refuses: a native
-   * `waiting_for_confirmation` fails the turn instead.
+   * still be unanswered. Factory answers through onPermission/onQuestion.
+   * OpenHands refuses: native waiting_for_confirmation fails the turn.
    */
   abstract respondApproval(requestId: string, response: OpenCodeApprovalResponse): Promise<void>
 
@@ -1305,13 +1385,9 @@ export abstract class LiveSession {
 /** Pi RPC, the OMP SDK bridge and the Claude SDK worker: one owned child process per session. Constructed only through `LiveSession.open`. */
 class ProcessSession extends LiveSession {
   readonly #prepared: PreparedCommand
-  readonly #child: ChildProcess
-  readonly #pid: number | null
-  readonly #stderr: BoundedCapture
+  readonly #child: OwnedChild
   readonly #sessionQueue: EventQueue
   readonly #pending = new Map<string, PendingRequest>()
-  readonly #partial: Buffer[] = []
-  #partialBytes = 0
   #prelude: { frame: JsonObject; requestId: string | null; bytes: number }[] = []
   #preludeBytes = 0
   #reference: SessionReference | null = null
@@ -1320,43 +1396,19 @@ class ProcessSession extends LiveSession {
   #requestSeq = 0
   #turnSeq = 0
   #active: ProcessTurn | null = null
-  #writes: Promise<void> = Promise.resolve()
-  #leader: LeaderExit | null = null
-  #stdoutClosed = false
-  #stderrClosed = false
-  #ending = false
   #dead = false
   #teardown: Promise<void> | null = null
   #cleanupError: unknown = null
-  #onLeaderKnown: (() => void)[] = []
-  #onStdioClosed: (() => void)[] = []
 
   private constructor(spec: ResolvedSessionSpec, prepared: PreparedCommand, child: ChildProcess) {
     super(spec)
     this.#prepared = prepared
-    this.#child = child
-    this.#pid = child.pid ?? null
-    this.#stderr = new BoundedCapture(spec.maxBufferBytes)
     this.#sessionQueue = new EventQueue(spec.maxBufferBytes, () => {
       void this.#invalidate('protocol-error', `unconsumed session events exceeded maxBufferBytes (${spec.maxBufferBytes})`)
     })
-    child.stdin?.on('error', () => {}) // EPIPE surfaces through stdout EOF / leader exit, not as a write failure
-    child.stdout?.on('data', (chunk: Buffer) => this.#onStdout(chunk))
-    child.stderr?.on('data', (chunk: Buffer) => this.#stderr.push(chunk))
-    const stdoutDone = (): void => this.#onStdoutEnd()
-    child.stdout?.once('end', stdoutDone)
-    child.stdout?.once('close', stdoutDone)
-    const stderrDone = (): void => {
-      this.#stderrClosed = true
-      this.#notifyStdio()
-    }
-    child.stderr?.once('end', stderrDone)
-    child.stderr?.once('close', stderrDone)
-    child.once('exit', (code, signal) => this.#onExit({ code, signal }))
-    child.once('error', (err) => {
-      if (this.#dead) return
-      const name = leaderName(this.spec)
-      void this.#invalidate('disconnected', this.#pid === null ? `${name} could not be launched: ${describeError(err)}` : `${name} process error: ${describeError(err)}`)
+    this.#child = new OwnedChild(child, leaderName(spec), spec.maxBufferBytes, {
+      line: (bytes) => this.#onLine(bytes),
+      fail: (status: OwnedChildFailure, error) => void this.#invalidate(status, error),
     })
   }
 
@@ -1403,19 +1455,9 @@ class ProcessSession extends LiveSession {
       instructionsFile: join(spec.workdir, adapter.instructionsFilename),
       ...(spec.instructions === null ? {} : { instructionContent: spec.instructions }),
     })
-    const env: Record<string, string> = {}
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) env[key] = value
-    }
-    Object.assign(env, layered)
     let child: ChildProcess
     try {
-      child = spawn(executable, args, {
-        cwd: spec.workdir,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: true,
-      })
+      child = spawnGroupLeader(executable, args, spec.workdir, inheritedEnv(layered))
     } catch (err) {
       cleanupCommand(prepared)
       throw new HarnessError(`${leaderName(spec)} could not be launched: ${describeError(err)}`, 'launch-failed')
@@ -1597,81 +1639,18 @@ class ProcessSession extends LiveSession {
         void this.#invalidate('protocol-error', `request ${id} (${command}) was not answered within requestTimeoutSeconds (${seconds})`)
       })
       this.#pending.set(id, { command, timer, resolve, reject })
-      this.#write(`${JSON.stringify({ id, type: command, ...payload })}\n`)
+      this.#child.write(`${JSON.stringify({ id, type: command, ...payload })}\n`)
     })
   }
 
-  /** Serialized, backpressured stdin writes; a write failure is a disconnect. */
-  #write(line: string): void {
-    this.#writes = this.#writes.then(async () => {
-      if (this.#dead) return
-      const stdin = this.#child.stdin
-      if (stdin === null || stdin.destroyed || stdin.writableEnded) {
-        throw new Error('stdin is closed')
-      }
-      if (!stdin.write(line, 'utf8')) {
-        await new Promise<void>((done) => {
-          const finish = (): void => {
-            stdin.off('drain', finish)
-            stdin.off('close', finish)
-            stdin.off('error', finish)
-            done()
-          }
-          stdin.on('drain', finish)
-          stdin.on('close', finish)
-          stdin.on('error', finish)
-        })
-      }
-    }).catch((err: unknown) => {
-      void this.#invalidate('disconnected', `stdin write failed: ${describeError(err)}`)
-    })
-  }
-
-  // ---- stdout framing ----
-
-  #onStdout(chunk: Buffer): void {
-    if (this.#dead) return
-    let from = 0
-    while (from < chunk.length) {
-      const at = chunk.indexOf(LF, from)
-      if (at === -1) {
-        const rest = chunk.subarray(from)
-        this.#partial.push(rest)
-        this.#partialBytes += rest.length
-        if (this.#partialBytes > MAX_FRAME_BYTES) {
-          void this.#invalidate('protocol-error', `stdout frame exceeds ${MAX_FRAME_BYTES} bytes`)
-        }
-        return
-      }
-      let line = chunk.subarray(from, at)
-      if (this.#partial.length > 0) {
-        this.#partial.push(line)
-        line = Buffer.concat(this.#partial)
-        this.#partial.length = 0
-        this.#partialBytes = 0
-      }
-      from = at + 1
-      this.#onLine(line)
-      if (this.#dead) return
-    }
-  }
+  // ---- stdout frames ----
 
   #onLine(bytes: Buffer): void {
-    if (bytes.length > 0 && bytes[bytes.length - 1] === CR) bytes = bytes.subarray(0, bytes.length - 1)
-    if (bytes.length === 0) return
-    if (bytes.length > MAX_FRAME_BYTES) {
-      void this.#invalidate('protocol-error', `stdout frame exceeds ${MAX_FRAME_BYTES} bytes`)
-      return
-    }
-    let frame: unknown
+    let frame: JsonObject
     try {
-      frame = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+      frame = parseFrame(decodeFrameText(bytes))
     } catch (err) {
-      void this.#invalidate('protocol-error', `stdout frame is not strict UTF-8 JSON: ${describeError(err)}`)
-      return
-    }
-    if (!isJsonObject(frame)) {
-      void this.#invalidate('protocol-error', 'stdout frame is not a JSON object')
+      void this.#invalidate('protocol-error', err instanceof Error ? err.message : String(err))
       return
     }
     if (typeof frame.type !== 'string' || frame.type === '') {
@@ -1903,76 +1882,21 @@ class ProcessSession extends LiveSession {
     turn.done = true
     clearTimeout(turn.timer)
     if (this.#active === turn) this.#active = null
-    const leader = this.#leader
+    const child = this.#child
     turn.settle({
       sessionId: this.#reference?.sessionId ?? '',
       turnId: turn.id,
       status,
       raw,
       error,
-      exitCode: leader === null ? null : leader.signal !== null ? -osConstants.signals[leader.signal] : leader.code,
-      signal: leader?.signal ?? null,
-      stderr: this.#stderr.text,
-      stderrBytes: this.#stderr.bytes,
-      stderrTruncated: this.#stderr.truncated,
+      exitCode: child.exitCode,
+      signal: child.signal,
+      stderr: child.stderr.text,
+      stderrBytes: child.stderr.bytes,
+      stderrTruncated: child.stderr.truncated,
       eventsTruncated: turn.eventsTruncated,
     })
     turn.queue.end()
-  }
-
-  // ---- process end classification ----
-
-  #onExit(exit: LeaderExit): void {
-    this.#leader = exit
-    for (const fn of this.#onLeaderKnown.splice(0)) fn()
-    if (!this.#dead) void this.#naturalEnd()
-  }
-
-  #onStdoutEnd(): void {
-    if (this.#stdoutClosed) return
-    this.#stdoutClosed = true
-    this.#notifyStdio()
-    if (!this.#dead) void this.#naturalEnd()
-  }
-
-  #notifyStdio(): void {
-    if (this.#stdoutClosed && this.#stderrClosed) for (const fn of this.#onStdioClosed.splice(0)) fn()
-  }
-
-  /**
-   * The leader exited or stdout hit EOF without us asking. Give the other
-   * signal a bounded window (frames still parse meanwhile, so a protocol
-   * violation in the tail wins), then classify: an unterminated frame is a
-   * protocol error, a reaped leader is `exited`/`signaled`, otherwise the
-   * pipe was lost while the leader lives on: `disconnected`.
-   */
-  async #naturalEnd(): Promise<void> {
-    if (this.#ending) return
-    this.#ending = true
-    await Promise.race([
-      new Promise<void>((done) => {
-        if (this.#leader !== null && this.#stdoutClosed) done()
-        else {
-          this.#onLeaderKnown.push(() => this.#stdoutClosed && done())
-          this.#onStdioClosed.push(() => this.#leader !== null && done())
-        }
-      }),
-      sleep(GRACE_MS),
-    ])
-    if (this.#dead) return
-    if (this.#stdoutClosed && this.#partialBytes > 0) {
-      void this.#invalidate('protocol-error', 'stdout ended inside an unterminated frame')
-      return
-    }
-    const leader = this.#leader
-    const name = leaderName(this.spec)
-    if (leader === null) {
-      void this.#invalidate('disconnected', `${name} closed stdout while still running`)
-    } else if (leader.signal !== null) {
-      void this.#invalidate('signaled', `${name} was terminated by ${leader.signal}`)
-    } else {
-      void this.#invalidate('exited', `${name} exited with code ${leader.code ?? -1}`)
-    }
   }
 
   // ---- teardown ----
@@ -1994,10 +1918,12 @@ class ProcessSession extends LiveSession {
   #invalidate(status: SessionTurnStatus, error: string | null, raw: JsonObject | null = null): Promise<void> {
     if (this.#teardown !== null) return this.#teardown
     this.#dead = true
+    const child = this.#child
+    child.stop()
     // Only `openSession` observes these rejections (interrupt awaits the turn result instead).
     const rejectCode: ErrorCode =
       status === 'closed' ? 'session-closed' : status === 'protocol-error' || status === 'timed-out' ? 'protocol-error' : 'launch-failed'
-    const excerpt = this.#stderr.text.trim().slice(0, STDERR_EXCERPT)
+    const excerpt = child.stderr.text.trim().slice(0, STDERR_EXCERPT)
     const message = `${error ?? 'session closed'}${status !== 'closed' && excerpt !== '' ? `; stderr: ${excerpt}` : ''}`
     for (const [id, pending] of this.#pending) {
       clearTimeout(pending.timer)
@@ -2006,8 +1932,8 @@ class ProcessSession extends LiveSession {
     }
     const turn = this.#active
     if (turn !== null) clearTimeout(turn.timer)
-    const disposing = this.spec.backend === 'sdk' && this.#pid !== null && this.#leader === null
-    this.#teardown = this.#stopGroup().catch((err: unknown) => {
+    const disposing = this.spec.backend === 'sdk' && child.pid !== null && child.leader === null
+    this.#teardown = child.stopGroup().catch((err: unknown) => {
       this.#cleanupError = err
     }).then(() => {
       if (turn !== null) this.#finishTurn(turn, status, raw ?? turn.lastAgentEnd, error)
@@ -2020,54 +1946,17 @@ class ProcessSession extends LiveSession {
         this.#cleanupError = err
         return
       }
-      const leader = this.#leader
+      const leader = child.leader
       if (!disposing || leader === null) return
       const name = leaderName(this.spec)
       if (leader.signal !== null) {
         this.#cleanupError = new HarnessError(`${name} did not dispose within the teardown budget and was terminated by ${leader.signal}`, 'adapter-error')
       } else if (leader.code !== 0) {
-        const tail = this.#stderr.text.trim().slice(0, STDERR_EXCERPT)
+        const tail = child.stderr.text.trim().slice(0, STDERR_EXCERPT)
         this.#cleanupError = new HarnessError(`${name} failed to dispose (exit code ${leader.code ?? -1})${tail === '' ? '' : `; stderr: ${tail}`}`, 'adapter-error')
       }
     })
     return this.#teardown
-  }
-
-  /** stdin EOF, TERM the group, GRACE_MS, KILL, then bounded group/leader/stdio drain before force-closing. */
-  async #stopGroup(): Promise<void> {
-    const child = this.#child
-    try {
-      child.stdin?.end()
-    } catch {
-      // already gone
-    }
-    if (this.#pid !== null) {
-      const pgid = this.#pid
-      let alive = signalGroup(pgid, 'SIGTERM')
-      if (alive) {
-        const graceEnd = performance.now() + GRACE_MS
-        while (performance.now() < graceEnd) {
-          await sleep(PROBE_MS)
-          alive = signalGroup(pgid, 0)
-          if (!alive) break
-        }
-        if (alive) signalGroup(pgid, 'SIGKILL')
-      }
-    }
-    const drainEnd = performance.now() + DRAIN_MS
-    while (performance.now() < drainEnd) {
-      const groupGone = this.#pid === null || !signalGroup(this.#pid, 0)
-      const leaderReaped = this.#leader !== null || this.#pid === null
-      if (groupGone && leaderReaped && this.#stdoutClosed && this.#stderrClosed) break
-      await sleep(PROBE_MS)
-    }
-    child.stdout?.destroy()
-    child.stderr?.destroy()
-    child.stdin?.destroy()
-    child.unref()
-    if (this.#pid !== null && this.#leader === null) {
-      throw new HarnessError(`${leaderName(this.spec)} process ${this.#pid} was not reaped within the teardown budget`, 'adapter-error')
-    }
   }
 }
 
@@ -2082,9 +1971,12 @@ class ProcessSession extends LiveSession {
  * `amp`: take the lease, run one finite `open` worker that creates the thread
  * (or verifies the resume target through the SDK) and adopt its identity;
  * rejects with the worker's process group stopped and the lease released.
- * For `opencode`/`openhands`: qualify the caller-owned server (version,
- * profile, directory, session identity) and subscribe to its event stream or
- * session socket; rejects with every owned connection closed, never touching
+ * For `factory-droid`: verify the SDK pin and FACTORY_API_KEY, verify any
+ * saved resume target, take the lease, spawn droid exec stream-jsonrpc and
+ * complete native initialize_session/load_session through the installed SDK.
+ * For OpenCode/OpenHands: qualify the caller-owned server (version, profile,
+ * directory, identity) and subscribe to its stream/socket; failure closes
+ * owned connections without touching
  * the server itself.
  */
 export async function openSession(spec: SessionSpec): Promise<LiveSession> {

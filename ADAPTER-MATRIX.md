@@ -217,6 +217,13 @@ exact resume, interruption and one-shot permission replies; close never
 disposes the server. Source pin and shared mock conformance are separate from
 native-runtime/provider evidence, which has not run. See the
 [OpenCode HTTP session contract](SPEC.md#caller-owned-opencode-http-sessions).
+Factory Droid SDK sessions use `getSessionCapabilities("factory-droid", "sdk")` /
+`get_session_capabilities("factory-droid", "sdk")` with the optional native Python
+0.4.0 or TypeScript 0.9.1 SDK and one owned Droid 0.213.0 CLI. Events,
+interruption, follow-up and exact resume are supported; native permission and
+question callbacks are separate from generic approval responses. Native smoke
+passed with a synthetic provider, not authenticated-provider success. See the
+[Factory SDK contract](SPEC.md#optional-factory-droid-sdk-sessions).
 Pure pane/install helpers exist for the same twelve adapters that have session
 hooks; `aider`, `goose` and `hermes` ship none.
 Amp, Auggie, OMP, Cline, Copilot, Cursor, Kimi Code and mini-SWE-agent add install metadata but no pane or session-log heuristics.
@@ -499,6 +506,7 @@ synthetic success fixtures do not fill that gap.
 - **Command**: `droid exec --output-format json --model <model> --spec-model <model> <prompt>`. A managed model stays unchanged; BYOK requires the caller's exact configured `custom:` ID.
 - **Token/cost source**: the documented JSON envelope omits usage and cost, so ordinary output returns null metrics. Extended `usage` / `total_cost_usd` fields are parsed if present, but only synthetic fixtures cover those fields here.
 - **Fairness**: harness pins `--model` and `--spec-model` to the same normalized model
+- **Optional live backend**: native SDK sessions, separately qualified in the [session contract](SPEC.md#optional-factory-droid-sdk-sessions); the one-shot command above is unchanged.
 
 ---
 

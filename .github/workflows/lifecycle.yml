@@ -60,6 +60,9 @@ jobs:
       - name: Built-package caller-owned OpenCode conformance (Node)
         run: node tests/node-opencode.mjs
         working-directory: ts
+      - name: Built-package Factory Droid SDK conformance (Node)
+        run: node tests/node-droid-sdk.mjs
+        working-directory: ts
       - name: Built-package Claude SDK conformance (Node)
         run: node tests/node-claude-sdk.mjs
         working-directory: ts

@@ -249,6 +249,56 @@ No package/binary/backend fallback occurs. See the
 [full SDK contract](SPEC.md#optional-omp-sdk-sessions) for configuration
 precedence, disposal bounds, native event semantics and qualification limits.
 
+### Optional Factory Droid SDK sessions
+
+Install `harness-cli[factory-droid]` for Python or `@factory/droid-sdk@0.9.1`
+alongside the TypeScript package. Supply an installed **Droid 0.213.0** CLI
+and your selected `FACTORY_API_KEY` in the environment. Nothing is downloaded
+or configured globally. Each session owns one CLI through the native SDK;
+ordinary CLI calls remain SDK-independent.
+
+```python
+from pathlib import Path
+from harness import FactoryDroidOptions, SessionSpec, open_session
+
+async def review(workdir: Path):
+    session = await open_session(SessionSpec(
+        harness="factory-droid", backend="sdk", workdir=workdir,
+        factory_droid=FactoryDroidOptions(autonomy="off"),
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            print(event.type, event.raw)
+        print((await turn.result).status, session.reference.session_id)
+    finally:
+        await session.close()
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+const session = await openSession({
+  harness: 'factory-droid', backend: 'sdk', workdir: '/tmp/scratch',
+  factoryDroid: { autonomy: 'off' },
+})
+try {
+  const turn = session.startTurn('Review this repository without editing files.')
+  for await (const event of turn.events) console.log(event.type, event.raw)
+  console.log((await turn.result).status, session.reference.sessionId)
+} finally {
+  await session.close()
+}
+```
+
+Events, explicit interruption, follow-up and exact resume are supported.
+Native permission/question callbacks are optional; absent callbacks cancel
+requests, not grant them. Breaking event iteration does not interrupt a turn.
+See the [Factory SDK contract](SPEC.md#optional-factory-droid-sdk-sessions)
+for callback schemas, configuration, usage scopes and process ownership.
+Native Python/Bun/Node smoke used a synthetic provider; authenticated-provider
+success remains unqualified.
+
 ### Optional Claude Agent SDK sessions
 
 Select `harness="claude-code", backend="sdk"` explicitly. Python uses

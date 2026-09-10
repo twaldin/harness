@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp SDK bridge sessions, optional native Claude SDK sessions, caller-owned OpenCode HTTP and OpenHands Agent Server sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, Pi RPC, optional OMP/Amp SDK bridges, native Claude/Factory Droid SDK sessions, caller-owned OpenCode/OpenHands sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -1332,7 +1332,7 @@ explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
 Other pairings reject with `unsupported-backend`, except the separately
-documented OMP/Amp/Claude SDK and caller-owned OpenCode/OpenHands sessions below. Unknown
+documented OMP/Amp/Claude/Factory Droid SDK and caller-owned OpenCode/OpenHands sessions below. Unknown
 names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
@@ -2002,6 +2002,131 @@ Pinned sources:
 [permission scope](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/permission/index.ts),
 [compaction](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/session/compaction.ts).
 
+## Optional Factory Droid SDK sessions
+
+`harness="factory-droid", backend="sdk"` uses the native Python **droid-sdk
+0.4.0** or TypeScript **@factory/droid-sdk 0.9.1** (`/node` entrypoint).
+Install `harness-cli[factory-droid]` or the optional npm peer explicitly.
+Ordinary imports and CLI calls do not load the SDK. Missing or incompatible
+SDKs fail with `launch-failed`, without installation or backend fallback.
+
+Harness supplies a local stdio transport through each SDK's public
+`DroidClient` injection API. The SDK handles native requests, schemas and
+callback replies; Harness owns exactly one local child and observes its native
+frames. This is not a Python-to-JavaScript bridge. The qualified CLI is **Droid
+0.213.0**, whose observed protocol is **1.204.0** and API version **1.0.0**;
+incompatible handshakes and native initialization/load rejections fail with
+`protocol-error`. Harness never downloads a CLI. `executable` selects
+the caller's installed binary, default `droid`, invoked as
+`droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc`.
+POSIX process-group ownership is required; Windows is unsupported.
+
+### Configuration and permissions
+
+The common session timeouts, bounded capture, environment overlay, instruction
+lease and exact-reference APIs apply. `model` preserves the caller's native
+managed or configured `custom:` ID; omission preserves upstream selection.
+The effective child environment must contain a nonempty `FACTORY_API_KEY`.
+Harness neither chooses an account nor converts local login state into an API
+key. `HOME` and `FACTORY_HOME_OVERRIDE` remain caller-selected. The SDK-owned
+attribution values `FACTORY_UPSTREAM_CLIENT_TYPE=sdk` and
+`FACTORY_UPSTREAM_SDK=python/0.4.0` or `typescript/0.9.1` are protected from
+conflicting overrides. Neither credentials nor configuration are installed
+globally. The selected workdir, native configuration and tools must be trusted.
+
+`SessionSpec.factory_droid` / `factoryDroid` accepts `FactoryDroidOptions`:
+
+| Python / TypeScript | Native meaning |
+|---|---|
+| `autonomy` | `off`, `low`, `medium` or `high`; omission preserves the native default |
+| `disabled_tools` / `disabledTools` | native tool names to disable |
+| `auto_reject_permission_requests` / `autoRejectPermissionRequests` | explicit native automatic rejection |
+| `disable_builtin_skills` / `disableBuiltinSkills` | explicit native built-in skill setting |
+| `on_permission` / `onPermission` | native permission params to native JSON reply, synchronously or asynchronously |
+| `on_question` / `onQuestion` | native question params to native JSON reply, synchronously or asynchronously |
+
+Callbacks receive copies of the native request params. Replies must satisfy
+the pinned SDK schema and the request's offered outcomes/question indexes.
+Harness never invents an `always` grant. Missing callbacks retain the SDK's
+cancel/cancelled behavior. Invalid replies, exceptions and callback timeouts
+fail closed with `agent-error`, retain the cause and dispose the owned process.
+`request_timeout_seconds` / `requestTimeoutSeconds` bounds callback completion;
+callbacks must not block the runtime's event loop.
+
+The generic `respond_approval` / `respondApproval` capability is **false**;
+native callback handling is a separate channel. Permission bypass, concurrent
+turns, reasoning effort, generic enabled/additional/restrict tool allowlists,
+custom transports, remote/daemon sessions, Missions, MCP provisioning and
+attachments are not exposed. Unsupported options reject explicitly rather
+than silently selecting a different policy or transport.
+
+### Identity, turns and raw events
+
+Initialization takes the native session ID from the SDK result, then verifies
+the saved `session_start` header's ID and cwd. The initialize response itself
+does not contain cwd. Logs live under
+`<FACTORY_HOME_OVERRIDE or HOME>/.factory/sessions/<encoded physical workdir>/<id>.jsonl`.
+Resume requires an explicit `SessionReference` and verifies its file, header,
+ID and workdir before spawn, then the native load result's cwd and SDK session
+ID. An in-progress native session cannot be resumed. Model and autonomy
+overrides on resume are unsupported; load preserves those saved settings.
+Close never deletes native history.
+
+Each turn requires both the prompt acknowledgement and native
+`agent_turn_completed`; neither alone is completion. Native `turnId`, when
+present, must match the submitted message UUID; foreign session IDs and
+uncorrelated responses are protocol errors. Follow-up retains native identity.
+`completed` maps to common `completed`, `cancelled` and `permission_rejected`
+to `interrupted`, and other reasons to `agent-error`. A rejected prompt is an
+`agent-error` and may be followed by another turn. A denied tool request does
+not by itself imply interruption: the qualified CLI can block the tool and
+still report native `completed`, which Harness preserves.
+
+Notification payloads remain native in `SessionEvent.raw`; request/response
+events retain their envelopes, including unknown messages. The terminal
+notification is `SessionTurnResult.raw`. Its `tokenUsage` is per-turn;
+`cumulativeTokenUsage` and `session_token_usage_changed` are session totals.
+Child usage fields retain their native scope. Do not sum snapshots or add
+cumulative totals to per-turn usage. Factory credits are not USD and are not
+converted into monetary cost.
+
+Breaking event iteration does **not** cancel the native turn. Protocol
+processing continues into the bounded event queue; use explicit `interrupt()`
+or `close()`, or continue draining the same iterator. Overflow fails loudly.
+Interrupt requires native acknowledgement and turn completion; a normal
+completion racing interruption remains completed. A missing acknowledgement
+or failure to settle within `request_timeout_seconds` / `requestTimeoutSeconds`
+after acknowledgement fails the session with `protocol-error`, even when the
+turn timeout is disabled.
+
+Close first attempts native `close_session` for at most 500 ms, then closes
+stdin and terminates the owned process group, escalating from TERM to KILL
+after 500 ms with a further 1 s drain/reap budget. Python SDK client shutdown
+has an additional 1 s bound. Instructions are restored only after owned
+teardown. Descendants that escape the owned process group are outside this
+ownership guarantee.
+
+### Qualification evidence
+
+- **Deterministic conformance:** `tests/droid_sdk_cases.json` and the bounded
+  synthetic CLI peer exercise the real pinned SDKs in Python, Bun source and
+  built Node: identity, follow-up/resume, acknowledgement ordering, partial
+  output, usage scopes, callbacks, interruption, framing failures, timeouts,
+  owned descendants and unsupported operations. No provider is contacted.
+- **Native runtime with synthetic provider:** Droid 0.213.0 on macOS ARM64,
+  Python 3.11.15, Bun 1.3.14 and Node 26.6.0 passed generation, follow-up,
+  per-turn/cumulative usage, granted and denied Execute, explicit interruption
+  after partial output, bounded close, instruction restoration and exact
+  resume. The provider was an isolated loopback synthetic endpoint.
+- **Authenticated-provider success: not run/unqualified.** No real API key,
+  account or model was selected. Separate invalid-key probes observed native
+  authentication failure; they do not establish successful provider access.
+
+Pinned dependencies:
+[Python SDK 0.4.0](https://pypi.org/project/droid-sdk/0.4.0/) and
+[TypeScript SDK 0.9.1](https://www.npmjs.com/package/@factory/droid-sdk/v/0.9.1).
+The one-shot Factory CLI adapter remains independent of this optional backend.
+
 ## Caller-owned OpenHands Agent Server sessions
 
 `open_session` / `openSession` accept the **session-only** name
@@ -2199,8 +2324,9 @@ Pinned sources:
 
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC, OMP/Amp SDK, Claude SDK and caller-owned
-OpenCode/OpenHands session implementations above and future backends. They keep the common library small; they do not
+These requirements govern the shipped Pi RPC, OMP/Amp/Claude/Factory Droid SDK
+and caller-owned OpenCode/OpenHands implementations above and future backends.
+They keep the common library small; they do not
 enable additional SDKs or native protocols by themselves.
 
 - Backend selection is explicit and stable for a run/session. SDK dependencies
@@ -2293,9 +2419,8 @@ historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
 now ships under the execution contract above; controlled Pi RPC and optional
-OMP/Amp SDK, Claude SDK and caller-owned OpenCode/OpenHands sessions ship through
-their explicit API. Additional protocols and
-SDKs remain implementation-gated.
+OMP/Amp/Claude/Factory Droid SDK and caller-owned OpenCode/OpenHands sessions
+ship through their explicit APIs. Additional protocols and SDKs remain implementation-gated.
 No package release is implied.
 
 ---
@@ -2354,7 +2479,7 @@ Linear engine or application is not an agent backend.
 - `harness` (py) and ts share the MAJOR.MINOR. Patch versions MAY diverge for implementation-only fixes.
 - Breaking changes to SPEC.md bump both simultaneously, with a coordinated release PR.
 
-Current manifests record Python `0.3.20` and TypeScript `0.2.25`, which do not satisfy the documented MAJOR.MINOR alignment. This factual skew does not change the release requirement above.
+The Python and TypeScript manifests currently have different MAJOR.MINOR versions. Read the manifests for current versions; this recorded skew does not change the release requirement above.
 
 The paired fixture-update patch bumps do not publish packages or create release
 tags. A separately authorized coordinated release must account for the

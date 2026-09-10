@@ -353,17 +353,25 @@ export async function runDroidConformance(api) {
     assert.equal(box.requests().filter((entry) => entry.method === 'droid.interrupt_session').length, 0)
     return session
   })
-  await scenario('abort_hang', async (spec, box, keep) => {
-    const session = await api.openSession({ ...spec, requestTimeoutSeconds: 1 })
-    keep(session)
-    const turn = session.startTurn('go')
-    const { result } = await collect(turn, async (event) => {
-      if (event.type === 'assistant_text_delta') await session.interrupt()
+  for (const name of cases.interrupt_failures) {
+    await scenario(name, async (spec, box, keep) => {
+      const session = await api.openSession({ ...spec, timeoutSeconds: null, requestTimeoutSeconds: 2 })
+      keep(session)
+      const turn = session.startTurn('go')
+      // Bound the regression itself: an acknowledged interrupt without a terminal must not hang with the turn deadline disabled.
+      const watchdog = setTimeout(() => { void session.close() }, 6000)
+      try {
+        const { result } = await collect(turn, async (event) => {
+          if (event.type === 'assistant_text_delta') await session.interrupt()
+        })
+        assert.equal(result.status, 'protocol-error', `${name}: ${result.error}`)
+        assert.equal(session.closed, true)
+      } finally {
+        clearTimeout(watchdog)
+      }
+      return session
     })
-    assert.equal(result.status, 'protocol-error')
-    assert.match(result.error, /droid\.interrupt_session/)
-    return session
-  })
+  }
 
   // ---- bounded teardown: unanswered close, TERM-ignoring leader, descendants ----
   await scenario('close_hang', async (spec, box, keep) => {
@@ -382,8 +390,9 @@ export async function runDroidConformance(api) {
       keep(session)
       const turn = session.startTurn('go')
       const pidFile = join(box.workdir, 'synthetic-child.pid')
-      for (let i = 0; i < 200 && !existsSync(pidFile); i++) await sleep(20)
+      for (let i = 0; i < 200 && (!existsSync(pidFile) || !readFileSync(pidFile, 'utf8').trim()); i++) await sleep(20)
       const child = Number(readFileSync(pidFile, 'utf8'))
+      assert.ok(Number.isSafeInteger(child) && child > 0, `${name}: the peer never published a descendant PID`)
       assert.equal(alive(child), true)
       if (name === 'descendant_exit') {
         const { result } = await collect(turn)

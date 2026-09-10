@@ -25,6 +25,7 @@
     {"name": "disconnect", "status": "disconnected"}
   ],
   "interrupts": ["interrupt", "interrupt_before_ack"],
+  "interrupt_failures": ["abort_hang", "abort_ack_hang"],
   "startup": [
     {"name": "bad_state", "code": "protocol-error"},
     {"name": "bad_protocol", "code": "protocol-error"},
@@ -33,5 +34,5 @@
     {"name": "startup_hang", "code": "protocol-error"}
   ],
   "resume_failures": ["wrong_resume_cwd", "missing_cwd"],
-  "special": ["permission", "question", "hang", "abort_hang", "close_hang", "descendant", "descendant_exit", "flood", "stderr", "idle_unknown"]
+  "special": ["permission", "question", "hang", "close_hang", "descendant", "descendant_exit", "flood", "stderr", "idle_unknown"]
 }

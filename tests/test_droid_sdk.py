@@ -266,15 +266,15 @@ async def test_turn_timeout_tears_the_session_down(sandbox: Sandbox):
     assert not (sandbox.workdir / LOCK_DIRNAME).exists()
 
 
-async def test_unacknowledged_interrupt_is_protocol_error(sandbox: Sandbox):
-    session = await open_session(sandbox.spec("abort_hang", request_timeout_seconds=0.5))
-    turn = session.start_turn("hello")
-    await _until(turn, "synthetic_unknown")
-    await session.interrupt()
-    result = await turn.result
-    assert result.status == "protocol-error"
-    assert session.closed
-    await session.close()
+@pytest.mark.parametrize("case", CASES["interrupt_failures"])
+async def test_unsettled_interrupt_is_protocol_error(case: str, sandbox: Sandbox):
+    async with await open_session(sandbox.spec(case, timeout_seconds=None, request_timeout_seconds=2)) as session:
+        turn = session.start_turn("hello")
+        await _until(turn, "synthetic_unknown")
+        await asyncio.wait_for(session.interrupt(), 6)
+        result = await turn.result
+        assert result.status == "protocol-error"
+        assert session.closed
 
 
 async def test_close_settles_active_turn_and_closes_natively(sandbox: Sandbox):

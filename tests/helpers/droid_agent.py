@@ -96,7 +96,10 @@ def descendant(exit_leader: bool) -> None:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         for fd in (0, 1, 2):
             os.close(fd)
-        Path("synthetic-child.pid").write_text(str(os.getpid()))
+        with Path("synthetic-child.pid").open("w") as stream:
+            # Exercise readers observing a newly created but not yet populated file.
+            time.sleep(0.1)
+            stream.write(str(os.getpid()))
         os.write(write_fd, b"ready")
         os.close(write_fd)
         time.sleep(20)
@@ -189,7 +192,7 @@ for line in sys.stdin.buffer:
         if CASE in ("interrupt", "interrupt_before_ack") and turn_number > 1:
             complete()
             continue
-        if CASE in ("interrupt", "abort_hang", "close_hang", "hang"):
+        if CASE in ("interrupt", "abort_hang", "abort_ack_hang", "close_hang", "hang"):
             continue
         if CASE in ("permission", "permission_completed"):
             emit(envelope("request", id="permission-1", method="droid.request_permission", params={"toolUses": [], "options": [{"label": "Allow once", "value": "proceed_once"}, {"label": "Reject", "value": "cancel"}], "associatedSessionIds": [SID]}))
@@ -238,6 +241,9 @@ for line in sys.stdin.buffer:
             complete()
     elif method == "droid.interrupt_session":
         if CASE == "abort_hang":
+            continue
+        if CASE == "abort_ack_hang":
+            response(request)
             continue
         if pending_prompt is not None:
             response(pending_prompt)

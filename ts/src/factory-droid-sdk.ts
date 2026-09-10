@@ -91,6 +91,7 @@ interface Outstanding {
 
 interface AbortState {
   acked: boolean
+  timer: NodeJS.Timeout | undefined
 }
 
 class DroidTurn extends TurnCore {
@@ -402,18 +403,24 @@ export class FactoryDroidSession extends LiveSession {
    * the interrupt acknowledgement plus the native `agent_turn_completed`
    * (`cancelled` → interrupted; a turn that completed normally first stays
    * completed). An interrupt the CLI rejects or never answers fails the
-   * session as `protocol-error` within `requestTimeoutSeconds`.
+   * session as `protocol-error` within `requestTimeoutSeconds`; after an
+   * acknowledgement, settlement has the same separate deadline even when
+   * the turn timeout is disabled.
    */
   async interrupt(): Promise<void> {
     if (this.#dead) throw new HarnessError('session is closed', 'session-closed')
     const turn = this.#active
     if (turn === null) throw new HarnessError('no active turn to interrupt', 'unsupported-capability')
     if (turn.abort === null) {
-      const abort: AbortState = { acked: false }
+      const abort: AbortState = { acked: false, timer: undefined }
       turn.abort = abort
       this.#client.interruptSession().then(
         () => {
+          if (this.#dead || turn.done) return
           abort.acked = true
+          abort.timer = deadline(this.spec.requestTimeoutSeconds, () => {
+            void this.#invalidate('protocol-error', `droid.interrupt_session was acknowledged but ${turn.id} did not settle within requestTimeoutSeconds (${this.spec.requestTimeoutSeconds})`)
+          })
           this.#maybeComplete(turn)
         },
         (err: unknown) => {
@@ -784,6 +791,7 @@ export class FactoryDroidSession extends LiveSession {
     if (turn.done) return
     turn.done = true
     clearTimeout(turn.timer)
+    clearTimeout(turn.abort?.timer)
     if (this.#active === turn) this.#active = null
     const child = this.#child
     turn.settle({
@@ -825,7 +833,10 @@ export class FactoryDroidSession extends LiveSession {
     const excerpt = child.stderr.text.trim().slice(0, STDERR_EXCERPT)
     this.#failure = new HarnessError(`${error ?? 'session closed'}${status !== 'closed' && excerpt !== '' ? `; stderr: ${excerpt}` : ''}`, rejectCode)
     const turn = this.#active
-    if (turn !== null) clearTimeout(turn.timer)
+    if (turn !== null) {
+      clearTimeout(turn.timer)
+      clearTimeout(turn.abort?.timer)
+    }
     const graceful = status === 'closed' && this.#reference !== null && child.leader === null && !child.stopped
     this.#teardown = (async () => {
       if (graceful) {

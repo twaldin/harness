@@ -213,30 +213,33 @@ export class OwnedChild {
     } catch {
       // already gone
     }
-    if (this.pid !== null) {
-      const pgid = this.pid
-      let alive = signalGroup(pgid, 'SIGTERM')
-      if (alive) {
-        const graceEnd = performance.now() + GRACE_MS
-        while (performance.now() < graceEnd) {
-          await sleep(PROBE_MS)
-          alive = signalGroup(pgid, 0)
-          if (!alive) break
+    try {
+      if (this.pid !== null) {
+        const pgid = this.pid
+        let alive = signalGroup(pgid, 'SIGTERM')
+        if (alive) {
+          const graceEnd = performance.now() + GRACE_MS
+          while (performance.now() < graceEnd) {
+            await sleep(PROBE_MS)
+            alive = signalGroup(pgid, 0)
+            if (!alive) break
+          }
+          if (alive) signalGroup(pgid, 'SIGKILL')
         }
-        if (alive) signalGroup(pgid, 'SIGKILL')
       }
+      const drainEnd = performance.now() + DRAIN_MS
+      while (performance.now() < drainEnd) {
+        const groupGone = this.pid === null || !signalGroup(this.pid, 0)
+        const leaderReaped = this.leader !== null || this.pid === null
+        if (groupGone && leaderReaped && this.stdoutClosed && this.stderrClosed) break
+        await sleep(PROBE_MS)
+      }
+    } finally {
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      child.stdin?.destroy()
+      child.unref()
     }
-    const drainEnd = performance.now() + DRAIN_MS
-    while (performance.now() < drainEnd) {
-      const groupGone = this.pid === null || !signalGroup(this.pid, 0)
-      const leaderReaped = this.leader !== null || this.pid === null
-      if (groupGone && leaderReaped && this.stdoutClosed && this.stderrClosed) break
-      await sleep(PROBE_MS)
-    }
-    child.stdout?.destroy()
-    child.stderr?.destroy()
-    child.stdin?.destroy()
-    child.unref()
     if (this.pid !== null && this.leader === null) {
       throw new HarnessError(`${this.#name} process ${this.pid} was not reaped within the teardown budget`, 'adapter-error')
     }

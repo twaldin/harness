@@ -2094,7 +2094,10 @@ Breaking event iteration does **not** cancel the native turn. Protocol
 processing continues into the bounded event queue; use explicit `interrupt()`
 or `close()`, or continue draining the same iterator. Overflow fails loudly.
 Interrupt requires native acknowledgement and turn completion; a normal
-completion racing interruption remains completed.
+completion racing interruption remains completed. A missing acknowledgement
+or failure to settle within `request_timeout_seconds` / `requestTimeoutSeconds`
+after acknowledgement fails the session with `protocol-error`, even when the
+turn timeout is disabled.
 
 Close first attempts native `close_session` for at most 500 ms, then closes
 stdin and terminates the owned process group, escalating from TERM to KILL

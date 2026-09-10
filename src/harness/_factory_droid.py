@@ -204,6 +204,7 @@ class _DroidTurn(_TurnBase):
     prompt_response: dict[str, object] | None = None
     interrupting: bool = False
     interrupt_acked: bool = False
+    interrupt_timer: asyncio.TimerHandle | None = None
     #: The native `agent_turn_completed` notification for `message_id`.
     terminal: dict[str, object] | None = None
     #: Message of the last native `error` notification seen during the turn.
@@ -332,6 +333,12 @@ class _FactoryDroidSession(LiveSession):
         if self._child.proc is not None:
             self._fail("closed", None)
 
+    def _finish(self, turn: _TurnBase, status: SessionTurnStatus, raw: dict[str, object] | None, error: str | None) -> None:
+        assert isinstance(turn, _DroidTurn)
+        if turn.interrupt_timer is not None:
+            turn.interrupt_timer.cancel()
+        super()._finish(turn, status, raw, error)
+
     # ---- requests ---------------------------------------------------------
 
     async def _submit(self, turn: _DroidTurn, prompt: str) -> None:
@@ -364,7 +371,15 @@ class _FactoryDroidSession(LiveSession):
             if self._failure is None:
                 self._fail("protocol-error", f"interrupt_session failed: {_describe(exc)}")
             return
+        if turn.finished or self._failure is not None:
+            return
         turn.interrupt_acked = True
+        turn.interrupt_timer = self._loop.call_later(
+            self._rt,
+            self._fail,
+            "protocol-error",
+            f"interrupt_session was acknowledged but turn {turn.handle.id} did not settle within {self._rt}s",
+        )
         self._maybe_finish(turn)
 
     def _maybe_finish(self, turn: _DroidTurn) -> None:

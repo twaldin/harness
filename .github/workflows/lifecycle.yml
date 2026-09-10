@@ -91,5 +91,5 @@ jobs:
           uv pip install --python "$consumer/.venv/bin/python" dist/*.whl mypy==2.3.1
           cp tests/typing/consumer.py "$consumer/consumer.py"
           cd "$consumer"
-          .venv/bin/python -I -c 'import harness, pathlib, sys; assert pathlib.Path(harness.__file__).is_relative_to(pathlib.Path(sys.prefix)); print(harness.__file__)'
+          .venv/bin/python -I -c 'import harness, pathlib, sys; from importlib.metadata import version; assert pathlib.Path(harness.__file__).is_relative_to(pathlib.Path(sys.prefix)); assert harness.__version__ == version("harness-cli"); print(harness.__file__, harness.__version__)'
           .venv/bin/mypy --strict consumer.py

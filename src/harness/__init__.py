@@ -5,6 +5,8 @@ Public API:
 
 Importing this package registers every shipped adapter.
 """
+from importlib.metadata import PackageNotFoundError, version
+
 from harness.base import (
     Adapter,
     AgentStatus,
@@ -172,4 +174,8 @@ __all__ = [
     "strip_ansi",
     "write_instructions",
 ]
-__version__ = "0.3.19"
+try:
+    __version__ = version("harness-cli")
+except PackageNotFoundError:
+    # Direct source-tree imports need not have installed distribution metadata.
+    __version__ = "0+unknown"

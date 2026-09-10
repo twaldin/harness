@@ -79,6 +79,11 @@ ownership, errors, telemetry and session/backend requirements. These APIs
 describe the source tree; published packages are not updated by a documentation
 or implementation merge.
 
+Codex app-server sessions remain **deferred/unsupported** after native
+tool-containment qualification; the existing Codex CLI adapter is unchanged.
+Neither official Codex SDK is enabled as a Harness session backend. See the
+[qualification finding and version limits](ADAPTER-MATRIX.md#codex-app-server-unsupported-after-qualification).
+
 ### Subprocess lifecycle
 
 Python `run()` blocks; Python `run_async()` and TypeScript `run()` / `runAsync()`
@@ -243,6 +248,86 @@ and exact native resume; concurrent turns and approval responses are unsupported
 No package/binary/backend fallback occurs. See the
 [full SDK contract](SPEC.md#optional-omp-sdk-sessions) for configuration
 precedence, disposal bounds, native event semantics and qualification limits.
+
+### Optional Claude Agent SDK sessions
+
+Select `harness="claude-code", backend="sdk"` explicitly. Python uses
+**`claude-agent-sdk==0.2.152` with Claude Code 2.1.259**; TypeScript uses
+**`@anthropic-ai/claude-agent-sdk@0.3.263` with Claude Code 2.1.263**.
+Install the Python `harness-cli[claude-sdk]` extra or the TypeScript SDK
+separately. Harness checks these exact pairs and never installs or falls back.
+Ordinary CLI imports and capability queries do not load either SDK.
+
+```python
+from harness import ClaudeSdkOptions, SessionSpec, open_session
+
+async def review(workdir, package_root, cli_path, config_dir):
+    session = await open_session(SessionSpec(
+        harness="claude-code", backend="sdk", workdir=workdir,
+        model="claude-sonnet-4-6",
+        claude_sdk=ClaudeSdkOptions(
+            package_root=package_root, cli_path=cli_path,
+            config_dir=config_dir, setting_sources=(),
+        ),
+    ))
+    try:
+        turn = session.start_turn("Review this repository without editing files.")
+        async for event in turn.events:
+            if event.type == "claude_permission":
+                await session.respond_approval(event.request_id, "reject")
+            print(event.type)
+        print((await turn.result).status)
+        return session.reference
+    finally:
+        await session.close()
+```
+
+```typescript
+import { openSession } from '@twaldin/harness-ts'
+
+async function review(workdir: string, packageRoot: string, cliPath: string, configDir: string) {
+  const session = await openSession({
+    harness: 'claude-code', backend: 'sdk', workdir,
+    model: 'claude-sonnet-4-6',
+    claudeSdk: { packageRoot, cliPath, configDir, settingSources: [] },
+  })
+  try {
+    const turn = session.startTurn('Review this repository without editing files.')
+    for await (const event of turn.events) {
+      if (event.type === 'claude_permission') {
+        await session.respondApproval(event.requestId!, 'reject')
+      }
+      console.log(event.type)
+    }
+    console.log((await turn.result).status)
+    return session.reference
+  } finally {
+    await session.close()
+  }
+}
+```
+
+All four paths are absolute. `packageRoot` is the SDK package directory, not
+its parent: Python `site-packages/claude_agent_sdk`, TypeScript
+`node_modules/@anthropic-ai/claude-agent-sdk`. `cliPath` selects the native CLI;
+`executable` instead selects the worker interpreter (Python's current interpreter,
+or TypeScript's current Node/Bun runtime by default).
+
+`settingSources` explicitly selects native `user`, `project`, `local` settings;
+empty does not disable managed policy or all native configuration/authentication.
+`settingsFile` optionally selects native `--settings`. Projected `instructions`
+require the `project` source. These options and the no-edit prompt are **not a
+sandbox**; existing native permission rules remain authoritative. Only
+`"once"` / `"reject"` replies are supported; no implicit permission bypass.
+
+Follow-up, interrupt receipts and exact transcript-path resume use the shared
+session API. The UUID is selected at open; the native transcript path remains
+null until a hook reports it, and persistence may be lazy. Native result errors,
+unknown events and fields remain in `raw`. Cumulative `modelUsage` and
+`total_cost_usd` estimates must not be summed across results or labelled billed
+cost. See the [full Claude SDK contract](SPEC.md#optional-claude-agent-sdk-sessions)
+for the intentional Python internal-protocol dependency, disposal bounds,
+unsupported native features and separate synthetic/native/provider evidence.
 
 ### Optional Amp SDK sessions
 

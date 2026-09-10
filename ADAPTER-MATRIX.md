@@ -195,6 +195,14 @@ OMP SDK sessions use `getSessionCapabilities("omp", "sdk")` /
 `get_session_capabilities("omp", "sdk")`, qualified for the optional 18.1.14
 package on Bun >=1.3.14. Python and Node use the same owned bridge worker;
 ordinary CLI imports have no SDK dependency.
+Claude SDK sessions use `getSessionCapabilities("claude-code", "sdk")` /
+`get_session_capabilities("claude-code", "sdk")`. Python hosts its native
+0.2.152 SDK/2.1.259 CLI through a pinned raw `Transport`; TypeScript hosts its
+native 0.3.263 SDK/2.1.263 CLI under Node/Bun. Both preserve raw events,
+follow-up, exact transcript resume, interrupt receipts and one-shot permission
+replies. Actual native pairs passed local synthetic-provider lifecycle checks;
+authenticated-provider generation is not claimed. See the
+[Claude SDK configuration, internal dependency and limits](SPEC.md#optional-claude-agent-sdk-sessions).
 Amp SDK sessions use `getSessionCapabilities("amp", "sdk")` /
 `get_session_capabilities("amp", "sdk")` with an explicit local executor, mode,
 SDK package and pinned Neo CLI. Both languages use one isolated Node >=22
@@ -511,6 +519,56 @@ synthetic success fixtures do not fill that gap.
 {"type":"turn.completed", "usage":{"input_tokens":200,"output_tokens":88}}
 ...
 ```
+
+### Codex app-server: unsupported after qualification
+
+**Decision — [TWA-103](https://linear.app/twaldin/issue/TWA-103), September 10,
+2026:** defer Codex app-server sessions rather than accept surviving native
+tools after owned teardown. The CLI adapter above remains shipped and unchanged;
+no Codex RPC/SDK session backend or dependency is enabled. Implementation is
+deferred to [TWA-107](https://linear.app/twaldin/issue/TWA-107), not dispatched.
+
+The tested runtime is **Codex CLI 0.153.4**, launched directly as
+`codex app-server --listen stdio://`. This is a qualification pin, **not a
+supported Harness session version range**. Upstream labels app-server
+[experimental and unsupported for production workloads](https://developers.openai.com/codex/app-server/).
+The official SDKs are not equivalent execution models: at the
+[`rust-v0.153.4` source tag, TypeScript](https://github.com/openai/codex/blob/rust-v0.153.4/sdk/typescript/src/exec.ts)
+spawns `exec --experimental-json` per run; the
+[Python SDK](https://developers.openai.com/codex/sdk/) controls app-server,
+and its [manifest at that tag](https://github.com/openai/codex/blob/rust-v0.153.4/sdk/python/pyproject.toml)
+pins `openai-codex-cli-bin==0.147.0`. Neither SDK was substituted for the tested
+direct-stdio runtime.
+
+**Native-runtime synthetic-provider evidence:** macOS arm64, **Python 3.14.3**,
+**Bun 1.3.14**, **Node 26.6.0**, disposable configuration and an owned loopback
+Responses provider. The finite tool used `workspace-write` sandboxing and an
+explicit `never` approval policy; this is not permission-enforcement coverage.
+
+| Scenario | Observed result |
+|---|---|
+| Startup and turn request, all three runtimes | Native thread/turn IDs returned; `turn/start` acknowledged an in-progress turn, not completion. |
+| Native interruption, all three runtimes | Empty-object `turn/interrupt` acknowledgement, then distinct `turn/completed` with `interrupted`; the tool stopped. |
+| Stdin close plus TERM, and stopped-leader TERM → 500 ms → KILL attempt, all three runtimes | App-server exited by SIGTERM; ordinary `exec_command` tool survived in its own process group until its finite self-exit. No turn-completion event was received. |
+| Cooperative EOF-only shutdown, Python | App-server exited 0 and the tool stopped; this does not cover a dead/unresponsive server. |
+
+The synthetic tool did not detach itself. Codex's
+[native pipe execution](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/utils/pty/src/pipe.rs)
+creates a new session via
+[`setsid`; parent-death signalling is Linux-only](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/utils/pty/src/process_group.rs).
+Cooperative cleanup is not proof of containment after server failure. All
+probe children subsequently stopped and owned listeners closed; raw logs remain
+private. The general [process-group boundary](SPEC.md#ownership-and-execution)
+still excludes detached descendants; that exclusion is not used to waive the
+native-tool containment requirement for this proposed backend.
+
+**Not qualified:** Linux or other CLI versions, authenticated-provider execution,
+Harness app-server conformance or packaged-Node app-server support, follow-up/
+resume, approval rejection, full protocol/error/partial-output coverage or token
+accounting. Existing CLI provider evidence in the ledger is separate.
+Reconsider only when reliable native containment satisfies the shared session
+gates, with Python/TypeScript parity and separately recorded provider evidence.
+No daemon, remote-listener or hosted Code Mode replacement is enabled.
 
 ---
 

@@ -511,6 +511,7 @@ export async function runOpenHandsConformance(api) {
     for (const override of [
       { instructions: 'must not write' }, { env: { HOME: '/synthetic' } }, { executable: 'python3' }, { permissionPolicy: 'bypass' },
       { openhands: undefined }, { model: undefined }, { model: '   ' }, { ompSdk: spec.openhands }, { backend: 'sdk' }, { backend: 'cli' },
+      { claudeSdk: spec.openhands },
     ]) {
       await assert.rejects(api.openSession({ ...spec, ...override }))
     }

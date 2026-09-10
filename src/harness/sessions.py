@@ -1,7 +1,8 @@
-"""Live sessions — an owned child driven over JSONL, a caller-owned OpenCode
-server driven over HTTP + SSE, or Amp threads driven through one-shot workers.
+"""Live sessions — an owned child driven over JSONL, a caller-owned
+OpenCode / OpenHands server driven over HTTP plus a live event stream,
+or Amp threads driven through one-shot workers.
 
-Four (harness, backend) pairs share one public surface:
+Six (harness, backend) pairs share one public surface:
 
 - `pi` / `rpc`: `pi --mode rpc`, the native JSONL protocol on stdio.
 - `omp` / `sdk`: an owned Bun child running the sibling `_omp_sdk.mjs` bridge,
@@ -28,6 +29,9 @@ Four (harness, backend) pairs share one public surface:
 - `opencode` / `rpc`: direct HTTP requests plus the `GET /event` SSE stream of
   an `opencode serve` instance the caller already runs and owns
   (`OpenCodeOptions.endpoint`). No process is spawned; see `_opencode`.
+- `openhands` / `rpc`: direct HTTP requests plus the `/sockets/session/{id}`
+  WebSocket of an OpenHands Agent Server 1.45.0 the caller already runs and
+  owns (`OpenHandsOptions.endpoint`). Nothing is spawned; see `_openhands`.
 - `amp` / `sdk`: one finite Node worker (`_amp_sdk.mjs`) per operation, loading
   the caller-installed `@ampcode/sdk` from `AmpSdkOptions.package_root` and
   driving the pinned native CLI at `AmpSdkOptions.cli_path`. See `_amp`.
@@ -59,9 +63,9 @@ loses its native child reports `sdk_failure` (status `exited` / `signaled` /
 `disconnected` / `protocol-error`, native exit metadata in the frame's `raw`)
 and the turn settles with that status; `SessionTurnResult.exit_code` /
 `signal` always describe the owned worker, never the native child. An
-OpenCode failure only closes the client-side connections: the server and its
-session history belong to the caller and are never aborted, disposed or
-deleted by this module.
+OpenCode / OpenHands failure only closes the client-side connections: the
+server and its session history belong to the caller and are never aborted,
+disposed or deleted by this module.
 """
 from __future__ import annotations
 
@@ -95,6 +99,7 @@ from harness.registry import _adapter_class
 SessionTurnStatus = Literal[
     "completed",
     "agent-error",
+    "stuck",
     "interrupted",
     "protocol-error",
     "disconnected",
@@ -106,7 +111,10 @@ SessionTurnStatus = Literal[
 
 #: Byte cap on queued-but-unconsumed events per turn / idle stream (1 MiB).
 DEFAULT_MAX_BUFFER_BYTES = 1_048_576
-#: Largest single JSONL frame / SSE event / HTTP JSON body (bytes) accepted.
+#: Largest single JSONL frame / SSE event / WebSocket message / HTTP JSON
+#: body (bytes) accepted by this client. The OpenHands server's own frame
+#: budget is larger (4 MiB); anything above this client cap is a protocol
+#: failure here regardless of what the server would emit.
 MAX_FRAME_BYTES = 1_048_576
 #: Pi distribution whose RPC protocol this module is qualified against.
 SUPPORTED_PI_DISTRIBUTION = "@earendil-works/pi-coding-agent 0.85.1"
@@ -127,13 +135,18 @@ DEFAULT_AMP_ENDPOINT = "https://ampcode.com"
 #: Exact `GET /global/health` version of the OpenCode server this module is
 #: qualified against (anomalyco/opencode v1.18.29); any other is rejected.
 SUPPORTED_OPENCODE_SERVER_VERSION = "1.18.29"
+#: Exact `GET /server_info` version (server, sdk, tools and workspace
+#: packages alike) of the OpenHands Agent Server this module is qualified
+#: against (OpenHands/software-agent-sdk v1.45.0); any other is rejected.
+SUPPORTED_OPENHANDS_SERVER_VERSION = "1.45.0"
 
 _READ_SIZE = 65536
 _TICK = 0.02
 _TERM_GRACE = 0.5
 _DRAIN_BUDGET = 1.0
 #: Qualified (harness, backend) pairs; every other combination is rejected.
-_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc", "claude-code": "sdk", "amp": "sdk"}
+#: `openhands` is session-only: it has no CLI adapter and no one-shot run.
+_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc", "openhands": "rpc", "claude-code": "sdk", "amp": "sdk"}
 _SDK_WORKER = Path(__file__).with_name("_omp_sdk.mjs")
 _CLAUDE_WORKER = Path(__file__).with_name("_claude_sdk.py")
 #: Child environment the SDK bridge owns (both pinned to `agent_dir` so the
@@ -162,6 +175,15 @@ _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 #: full ID is verified with `GET /session/{id}`, never prefix-matched).
 _OPENCODE_SESSION_ID = re.compile(r"ses_[0-9A-Za-z]+")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+#: Server-side profile name as both OpenHands profile stores validate it
+#: (`PROFILE_NAME_PATTERN`): 1–64 chars, leading alphanumeric, then
+#: alphanumerics, '.', '_' or '-'. Applied to `agent_profile` before any I/O
+#: and to the referenced LLM profile name before it is fetched.
+_OPENHANDS_PROFILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+#: Canonical lowercase hyphenated UUID, the only conversation identity form
+#: the OpenHands server emits and this module generates.
+_OPENHANDS_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_PRINTABLE_ASCII = re.compile(r"[\x21-\x7e]+")
 #: Amp thread identity: `T-` plus a canonical lowercase UUID, never a prefix.
 _AMP_SESSION_ID = re.compile(r"T-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 AmpEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -277,6 +299,41 @@ class OpenCodeOptions:
     username: str | None = None
     password: str | None = field(default=None, repr=False)
 
+@dataclass(frozen=True)
+class OpenHandsOptions:
+    """Where the caller's OpenHands Agent Server is, how to authenticate and
+    which server-side agent profile to launch. Every field is required.
+
+    `endpoint`      — absolute `http(s)://host[:port]` origin, normalized like
+                      `OpenCodeOptions.endpoint` (no credentials, path, query
+                      or fragment). No redirects, proxies or netrc.
+    `api_key`       — session API key sent as `X-Session-API-Key` on every
+                      HTTP request and as the first WebSocket frame
+                      (`{"type": "auth", "session_api_key": ...}`), never in a
+                      URL. Non-empty printable ASCII without whitespace
+                      (0x21–0x7E); diagnostics never contain it and it is
+                      hidden from `repr`. No ambient / environment lookup.
+    `agent_profile` — exact name of the caller-selected server-side agent
+                      profile (`GET /api/agent-profiles/{name}`); matches the
+                      server's profile-name pattern. Nothing is listed,
+                      discovered or seeded; the profile must be a native
+                      `openhands` profile whose LLM profile's model equals
+                      `SessionSpec.model`. Provider credentials stay on the
+                      caller's server and are never read or copied.
+    `confirm_no_unwanted_callbacks` — must be exactly True: the caller attests
+                      the server has no webhook / callback configuration it
+                      does not want triggered by this conversation. The
+                      pinned server offers no way to verify or disable
+                      server-level webhooks per conversation; this module
+                      registers none and checks nothing.
+    """
+
+    endpoint: str
+    api_key: str = field(repr=False)
+    agent_profile: str
+    confirm_no_unwanted_callbacks: bool
+
+
 
 @dataclass(frozen=True)
 class AmpSdkOptions:
@@ -314,41 +371,47 @@ class AmpSdkOptions:
 class SessionSpec:
     """Everything needed to open a live session.
 
-    `harness`         — "pi" / "opencode" (rpc), or "omp" / "amp" /
-                        "claude-code" (sdk). Other registered harnesses raise
-                        `unsupported-backend`; unknown names `unknown-harness`.
+    `harness`         — "pi" / "opencode" / "openhands" (rpc), or "omp" /
+                        "amp" / "claude-code" (sdk). Other registered harnesses
+                        raise `unsupported-backend`; unknown names
+                        `unknown-harness`. "openhands" exists only here:
+                        it has no CLI adapter / one-shot run.
     `workdir`         — cwd for the child (absolute against the process cwd).
-                        OpenCode: the explicit absolute POSIX directory on the
-                        server, retained literally (no local resolution,
-                        existence check or preparation); noncanonical forms
-                        (`.`/`..` segments, empty segments, trailing slash)
-                        are `invalid-options`.
-    `backend`         — "rpc" with "pi" / "opencode" or "sdk" with "omp" /
-                        "amp" / "claude-code"; other pairings and "cli"
-                        raise `unsupported-backend`.
+                        OpenCode / OpenHands: the explicit absolute POSIX
+                        directory on the server, retained literally (no local
+                        resolution, existence check or preparation);
+                        noncanonical forms (`.`/`..` segments, empty segments,
+                        trailing slash) are `invalid-options`.
+    `backend`         — "rpc" with "pi" / "opencode" / "openhands" or "sdk"
+                        with "omp" / "amp" / "claude-code"; other pairings and
+                        "cli" raise `unsupported-backend`.
     `model`           — trimmed native selector for Pi / OMP / Claude;
                         OpenCode requires provider/model. None preserves
                         native selection; empty is invalid. Amp rejects model
                         because amp_sdk.mode owns routing.
+                        OpenHands: REQUIRED exact native selector that must
+                        equal the selected profile's `config.model`; it is
+                        never normalized, defaulted or sent to the server.
     `env`             — additions layered over the inherited environment. The
                         omp sdk backend owns `PI_CODING_AGENT_DIR` and
                         `PI_CONFIG_DIR` (both agent_dir); Claude owns
                         `CLAUDE_CONFIG_DIR` (config_dir). Conflicting explicit
                         entries reject. Amp reads AMP_URL from the overlay or
                         inherited environment and pins AMP_SKIP_UPDATE_CHECK=1.
-                        OpenCode rejects a non-empty env.
+                        OpenCode / OpenHands reject a non-empty env.
     `executable`      — bare binary name or absolute path; default "pi" for
                         pi, "bun" for omp, "node" for amp, and
                         sys.executable for claude-code (an interpreter with
                         the selected SDK dependencies). This selects the
-                        worker runtime, not the native SDK CLI. OpenCode rejects it.
+                        worker runtime, not the native SDK CLI.
+                        OpenCode / OpenHands reject it.
     `permission_policy` — only "upstream"; "bypass" raises `unsupported-capability`.
     `instructions`    — projected to the adapter's instructions file
                         (`AGENTS.md`; `CLAUDE.md` for claude-code, which
                         requires "project" in `claude_sdk.setting_sources`)
                         under the workdir lease for the life of the process
-                        tree. Rejected for OpenCode (no local filesystem to
-                        project into).
+                        tree. Rejected for OpenCode / OpenHands (no local
+                        filesystem to project into).
     `resume`          — existing session to continue. Pi / OMP require
                         `session_file`; the file header is verified before
                         spawn and the native `get_state` ID after startup.
@@ -358,20 +421,30 @@ class SessionSpec:
                         the ID and transcript against every native hook.
                         OpenCode requires `session_file=None`, the same
                         `endpoint` / `workdir` and a full `ses_` ID, verified
-                        with GET /session/{id} before anything else. Amp
-                        requires session_file=None, the same workdir and
-                        AMP_URL endpoint, and a full T-UUID verified by the SDK.
+                        with `GET /session/{id}` before anything else.
+                        OpenHands requires `session_file=None`, the same
+                        `endpoint` / `workdir` and the full canonical UUID,
+                        verified with `GET /api/conversations/{uuid}` (never
+                        created when missing). Amp requires `session_file=None`,
+                        the same `workdir`, the computed `AMP_URL` endpoint
+                        and a full `T-` UUID, verified through the SDK before
+                        the first turn.
     `omp_sdk`         — required with harness "omp", rejected otherwise.
     `claude_sdk`      — required with harness "claude-code", rejected otherwise.
     `amp_sdk`         — required with harness "amp", rejected otherwise.
     `opencode`        — required with harness "opencode", rejected otherwise.
+    `openhands`       — required with harness "openhands", rejected otherwise.
     `timeout_seconds` — wall-clock cap per turn (default 1800). None disables
                         it. Expiry tears the session down (`timed-out`).
     `request_timeout_seconds` — cap on every correlated request (default 30).
                         OpenCode: bounds every HTTP request except the
                         long-running prompt response (bounded by
                         `timeout_seconds`), the SSE handshake and the
-                        settlement after an interrupt. Amp: bounds the open
+                        settlement after an interrupt. OpenHands: bounds
+                        every HTTP request, the WebSocket handshake / first
+                        sync frame, user-message submission through its echo,
+                        and settlement after an interrupt; the run itself is
+                        bounded by `timeout_seconds`. Amp: bounds the open
                         worker and each turn's native initialization.
     `max_buffer_bytes` — cap on queued, unconsumed event bytes per turn and for
                         the idle stream (default 1 MiB). Overflow is never
@@ -392,6 +465,7 @@ class SessionSpec:
     max_buffer_bytes: int = DEFAULT_MAX_BUFFER_BYTES
     omp_sdk: OmpSdkOptions | None = None
     opencode: OpenCodeOptions | None = None
+    openhands: OpenHandsOptions | None = None
     amp_sdk: AmpSdkOptions | None = None
     claude_sdk: ClaudeSdkOptions | None = None
 
@@ -413,13 +487,14 @@ class SessionCapabilities:
 class SessionEvent:
     """One native frame. `raw` is the parsed JSON object, untouched: the Pi
     RPC frame, native SDK event unwrapped from sdk_event (OMP / Claude)
-    or amp_event (Amp), or the OpenCode SSE event. Claude also reports
-    claude_permission / claude_permission_cancelled / claude_session_hook /
-    claude_interrupt; permission request_id is explicitly bridge-local. OpenCode:
-    (`{"id", "type", "properties"}`)."""
+    or amp_event (Amp), the OpenCode SSE event (`{"id", "type", "properties"}`)
+    or the whole OpenHands session-socket envelope
+    (`{"type", "seq"?, "event"?, ...}`). Claude also reports claude_permission /
+    claude_permission_cancelled / claude_session_hook / claude_interrupt;
+    permission request_id is explicitly bridge-local."""
 
     backend: Literal["rpc", "sdk"]
-    harness: Literal["pi", "omp", "opencode", "claude-code", "amp"]
+    harness: Literal["pi", "omp", "opencode", "openhands", "claude-code", "amp"]
     session_id: str
     turn_id: str | None
     request_id: str | None
@@ -538,7 +613,7 @@ def get_session_capabilities(name: str, backend: Backend = "rpc") -> SessionCapa
     backend the harness is not qualified on, and `invalid-options` for
     unknown backends.
     """
-    _adapter_class(name)
+    _require_session_harness(name)
     _validate_session_backend(name, backend)
     return SessionCapabilities(
         backend=_SESSION_BACKENDS[name],
@@ -549,6 +624,13 @@ def get_session_capabilities(name: str, backend: Backend = "rpc") -> SessionCapa
         concurrent_turns=False,
         approval=name in ("opencode", "claude-code"),
     )
+
+
+def _require_session_harness(name: str) -> None:
+    """`unknown-harness` unless `name` is a CLI adapter or a session-only
+    harness (`openhands`, which registers nothing in the CLI registry)."""
+    if name not in _SESSION_BACKENDS:
+        _adapter_class(name)
 
 
 def _validate_session_backend(name: str, backend: object) -> None:
@@ -613,17 +695,39 @@ def _validate_opencode_reference(reference: object, endpoint: str, workdir: Path
     return SessionReference(session_id=session_id, session_file=None, workdir=workdir, endpoint=endpoint)
 
 
+def _validate_openhands_reference(reference: object, endpoint: str, workdir: Path) -> SessionReference:
+    """OpenHands resume identity: the full canonical conversation UUID on the
+    same endpoint / server directory, no local file. The conversation itself
+    is verified with `GET /api/conversations/{uuid}` and never created."""
+    if not isinstance(reference, SessionReference):
+        raise HarnessError("resume must be a SessionReference", code="invalid-options")
+    session_id = reference.session_id
+    if not isinstance(session_id, str) or _OPENHANDS_UUID.fullmatch(session_id) is None:
+        raise HarnessError("resume.session_id must be the full canonical lowercase OpenHands conversation UUID", code="invalid-options")
+    if reference.session_file is not None:
+        raise HarnessError("resume.session_file must be None for OpenHands; history lives on the server", code="invalid-options")
+    if reference.endpoint is None:
+        raise HarnessError("resume.endpoint is required for OpenHands sessions", code="invalid-options")
+    normalized = _normalize_endpoint(reference.endpoint, "resume.endpoint")
+    if normalized != endpoint:
+        raise HarnessError(f"resume.endpoint {normalized!r} does not match openhands.endpoint {endpoint!r}", code="invalid-options")
+    if not isinstance(reference.workdir, (str, PurePath)) or _posix_dir(reference.workdir) != _posix_dir(workdir):
+        raise HarnessError(f"resume.workdir {os.fspath(reference.workdir)!r} does not match the session workdir {_posix_dir(workdir)!r}", code="invalid-options")
+    return SessionReference(session_id=session_id, session_file=None, workdir=workdir, endpoint=endpoint)
+
+
 def _posix_dir(value: str | PurePath) -> str:
     return value.as_posix() if isinstance(value, PurePath) else value
 
 
 def _validate_server_workdir(value: object) -> Path:
-    """OpenCode server directory: absolute, canonical POSIX, retained literally."""
+    """Remote (OpenCode / OpenHands) server directory: absolute, canonical
+    POSIX, retained literally."""
     if not isinstance(value, (str, PurePath)):
         raise HarnessError("workdir must be a path", code="invalid-options")
     raw = _posix_dir(value)
     if not raw.startswith("/") or _CONTROL_CHARS.search(raw) is not None:
-        raise HarnessError(f"workdir {raw!r} must be an absolute POSIX directory on the OpenCode server", code="invalid-options")
+        raise HarnessError(f"workdir {raw!r} must be an absolute POSIX directory on the server", code="invalid-options")
     if raw != "/":
         segments = raw[1:].split("/")
         if any(segment in ("", ".", "..") for segment in segments):
@@ -655,7 +759,7 @@ def _normalize_endpoint(value: object, field: str = "opencode.endpoint") -> str:
     if scheme not in ("http", "https"):
         raise HarnessError(f"{field} must use http or https", code="invalid-options")
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
-        raise HarnessError(f"{field} must not embed credentials; use auth='basic' with username / password", code="invalid-options")
+        raise HarnessError(f"{field} must not embed credentials; authenticate through the harness options", code="invalid-options")
     if not hostname or parts.netloc.endswith(":"):
         raise HarnessError(f"{field} has no host", code="invalid-options")
     if parts.path not in ("", "/"):
@@ -758,7 +862,7 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
     """Validate and snapshot `spec` (absolute workdir, trimmed model, copied env)."""
     if not isinstance(spec, SessionSpec):
         raise HarnessError("open_session requires a SessionSpec", code="invalid-options")
-    _adapter_class(spec.harness)
+    _require_session_harness(spec.harness)
     _validate_session_backend(spec.harness, spec.backend)
     if spec.permission_policy not in PERMISSION_POLICIES:
         raise HarnessError(
@@ -798,8 +902,12 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
         raise HarnessError(f"max_buffer_bytes must be a non-negative safe integer, got {buffer!r}", code="invalid-options")
     if spec.harness == "opencode":
         return _validate_opencode_spec(spec, model)
+    if spec.harness == "openhands":
+        return _validate_openhands_spec(spec, model)
     if spec.opencode is not None:
         raise HarnessError(f"opencode applies only to opencode rpc sessions, not {spec.harness} {spec.backend}", code="invalid-options")
+    if spec.openhands is not None:
+        raise HarnessError(f"openhands applies only to openhands rpc sessions, not {spec.harness} {spec.backend}", code="invalid-options")
     if spec.harness == "amp":
         return _validate_amp_spec(spec, model)
     if spec.amp_sdk is not None:
@@ -831,6 +939,8 @@ def _validate_opencode_spec(spec: SessionSpec, model: str | None) -> SessionSpec
         raise HarnessError("instructions cannot be projected into an OpenCode server directory; leave instructions unset", code="invalid-options")
     if spec.omp_sdk is not None:
         raise HarnessError("omp_sdk applies only to omp sdk sessions, not opencode rpc", code="invalid-options")
+    if spec.openhands is not None:
+        raise HarnessError("openhands applies only to openhands rpc sessions, not opencode rpc", code="invalid-options")
     if spec.claude_sdk is not None:
         raise HarnessError("claude_sdk applies only to claude-code sdk sessions, not opencode rpc", code="invalid-options")
     if spec.amp_sdk is not None:
@@ -843,6 +953,55 @@ def _validate_opencode_spec(spec: SessionSpec, model: str | None) -> SessionSpec
     workdir = _validate_server_workdir(spec.workdir)
     resume = _validate_opencode_reference(spec.resume, opencode.endpoint, workdir) if spec.resume is not None else None
     return replace(spec, workdir=workdir, model=model, env={}, resume=resume, opencode=opencode)
+
+
+def _validate_openhands_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
+    """OpenHands owns no process either: process-shaped options are rejected
+    before any network side effect, the model selector is mandatory and the
+    server directory is kept literally."""
+    if spec.env:
+        raise HarnessError("env applies to spawned children; openhands sessions talk to a caller-owned server and reject a non-empty env", code="invalid-options")
+    if spec.executable is not None:
+        raise HarnessError("executable applies to spawned children; openhands sessions spawn nothing", code="invalid-options")
+    if spec.instructions is not None:
+        raise HarnessError("instructions cannot be projected into an OpenHands server directory; leave instructions unset", code="invalid-options")
+    if spec.omp_sdk is not None:
+        raise HarnessError("omp_sdk applies only to omp sdk sessions, not openhands rpc", code="invalid-options")
+    if spec.claude_sdk is not None:
+        raise HarnessError("claude_sdk applies only to claude-code sdk sessions, not openhands rpc", code="invalid-options")
+    if spec.amp_sdk is not None:
+        raise HarnessError("amp_sdk applies only to amp sdk sessions, not openhands rpc", code="invalid-options")
+    if spec.opencode is not None:
+        raise HarnessError("opencode applies only to opencode rpc sessions, not openhands rpc", code="invalid-options")
+    if model is None:
+        raise HarnessError("model is required for openhands sessions: the exact native selector the selected profile's LLM uses", code="invalid-options")
+    openhands = _validate_openhands_options(spec.openhands)
+    workdir = _validate_server_workdir(spec.workdir)
+    resume = _validate_openhands_reference(spec.resume, openhands.endpoint, workdir) if spec.resume is not None else None
+    return replace(spec, workdir=workdir, model=model, env={}, resume=resume, openhands=openhands)
+
+
+def _validate_openhands_options(options: object) -> OpenHandsOptions:
+    """Every field explicit and well-formed; the key is never echoed."""
+    if not isinstance(options, OpenHandsOptions):
+        raise HarnessError("openhands rpc sessions require openhands=OpenHandsOptions(endpoint, api_key, agent_profile, confirm_no_unwanted_callbacks)", code="invalid-options")
+    if options.confirm_no_unwanted_callbacks is not True:
+        raise HarnessError(
+            "openhands.confirm_no_unwanted_callbacks must be exactly True: the caller attests the server has no unwanted webhook / callback configuration;"
+            " the pinned server cannot verify or disable server-level webhooks per conversation",
+            code="invalid-options",
+        )
+    endpoint = _normalize_endpoint(options.endpoint, "openhands.endpoint")
+    api_key = options.api_key
+    if not isinstance(api_key, str) or _PRINTABLE_ASCII.fullmatch(api_key) is None:
+        raise HarnessError("openhands.api_key must be a non-empty printable ASCII token without whitespace", code="invalid-options")
+    profile = options.agent_profile
+    if not isinstance(profile, str) or _OPENHANDS_PROFILE_NAME.fullmatch(profile) is None:
+        raise HarnessError(
+            "openhands.agent_profile must be the exact server-side profile name: 1-64 characters, leading letter or digit, then letters, digits, '.', '_' or '-'",
+            code="invalid-options",
+        )
+    return OpenHandsOptions(endpoint=endpoint, api_key=api_key, agent_profile=profile, confirm_no_unwanted_callbacks=True)
 
 
 def _validate_opencode_options(options: object) -> OpenCodeOptions:
@@ -1264,7 +1423,9 @@ class LiveSession(abc.ABC):
     async def respond_approval(self, request_id: str, response: OpenCodeApprovalResponse) -> None:
         """Answer an outstanding native permission request (`approval`
         capability): OpenCode `permission.asked` (see `_opencode`) or a Claude
-        `claude_permission` event (see `_ProcessSession`)."""
+        `claude_permission` event (see `_ProcessSession`). OpenHands has no
+        approval channel here: a native `waiting_for_confirmation` fails the
+        turn explicitly instead."""
         raise HarnessError(f"{self._spec.harness} {self._spec.backend} sessions have no approval channel; permissions stay upstream", code="unsupported-capability")
 
     async def close(self) -> None:
@@ -2084,8 +2245,9 @@ def _claude_result_error(result: dict[str, object]) -> str:
 async def open_session(spec: SessionSpec) -> LiveSession:
     """Open the live session for `spec`: spawn the session child (`pi --mode
     rpc`, the OMP Bun bridge, or the native Python Claude SDK worker),
-    connect to the caller-owned OpenCode server, or open the Amp Node worker.
-    Each backend verifies its explicit native identity before accepting turns.
+    connect to the caller-owned OpenCode or OpenHands server, or open the Amp
+    Node worker. Each backend verifies its explicit native identity before
+    accepting turns.
 
     Validation (harness, backend, options, resume header) happens before any
     filesystem, process or network side effect. Instructions are projected
@@ -2098,6 +2260,10 @@ async def open_session(spec: SessionSpec) -> LiveSession:
         from harness._opencode import open_opencode_session  # optional httpx dependency
 
         return await open_opencode_session(spec)
+    if spec.harness == "openhands":
+        from harness._openhands import open_openhands_session  # optional httpx + websockets dependencies
+
+        return await open_openhands_session(spec)
     if sys.platform not in ("darwin", "linux"):
         raise NotImplementedError("Owned subprocess groups require macOS or Linux")
     if spec.harness == "amp":
@@ -2152,6 +2318,7 @@ __all__ = [
     "OpenCodeApprovalResponse",
     "OpenCodeAuth",
     "OpenCodeOptions",
+    "OpenHandsOptions",
     "SessionCapabilities",
     "SessionEvent",
     "SessionReference",

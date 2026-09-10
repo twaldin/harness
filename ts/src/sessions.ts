@@ -291,7 +291,7 @@ const PI_ARGS: readonly string[] = ['--mode', 'rpc']
 /** Bun flags ahead of a worker script: never load a `.env` from the workdir. Only Bun accepts the flag; Node runs the Claude worker without it. */
 const BUN_ARGS: readonly string[] = ['--no-env-file']
 /** Native Claude session IDs are UUIDs; the worker selects one explicitly at open and a resume must name one exactly. */
-const CLAUDE_SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const CLAUDE_SESSION_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 const DEFAULT_TIMEOUT_SECONDS = 1800
 const DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
 const DEFAULT_MAX_BUFFER_BYTES = 1_048_576

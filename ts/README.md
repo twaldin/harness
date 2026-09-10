@@ -45,6 +45,11 @@ One-shot backend selection defaults to `cli`; selecting `rpc` or `sdk` through
 `RunSpec` throws `unsupported-backend`, without CLI fallback. Controlled Pi RPC
 uses `openSession` below. See the [shared migration](../SPEC.md#permission-policy-and-migration).
 
+Codex app-server sessions remain **deferred/unsupported** after native
+tool-containment qualification; the existing Codex CLI adapter is unchanged.
+Neither official Codex SDK is enabled as a Harness session backend. See the
+[qualification finding and version limits](../ADAPTER-MATRIX.md#codex-app-server-unsupported-after-qualification).
+
 ## Controlled RPC sessions
 
 `openSession({ harness: 'pi', backend: 'rpc', workdir, model? })` opens a native

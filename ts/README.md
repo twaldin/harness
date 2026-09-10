@@ -82,6 +82,25 @@ a sandbox. Always close in `finally`; resume passes the exact native reference.
 See the [paired SDK examples](../README.md#optional-oh-my-pi-sdk-sessions) and
 [SDK contract](../SPEC.md#optional-omp-sdk-sessions).
 
+## Optional Claude Agent SDK backend
+
+`openSession({ harness: 'claude-code', backend: 'sdk', workdir, claudeSdk })`
+uses native `query` with streaming input in an owned Node/Bun worker.
+Install **`@anthropic-ai/claude-agent-sdk@0.3.263`** separately and explicitly
+select **Claude Code 2.1.263**. `claudeSdk` requires absolute `packageRoot`,
+`cliPath`, `configDir` and an explicit `settingSources` array (`user`, `project`,
+`local`, or empty); `settingsFile` is optional. Wrong/missing dependencies fail
+without fallback. Ordinary imports do not load the SDK.
+
+The same session API supports follow-up, exact native transcript resume,
+interrupt receipts and `"once"` / `"reject"` permission replies. Native defaults
+remain authoritative; empty settings sources are not a sandbox. `executable`
+selects the worker runtime, not the native CLI. Always close in `finally`.
+Python uses its own SDK and intentionally pinned internal transport protocol,
+not this JavaScript worker. See the
+[paired examples](../README.md#optional-claude-agent-sdk-sessions) and
+[version/configuration/event contract](../SPEC.md#optional-claude-agent-sdk-sessions).
+
 ## Caller-owned OpenCode HTTP backend
 
 `openSession({ harness: 'opencode', backend: 'rpc', workdir, opencode })`

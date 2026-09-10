@@ -14,6 +14,15 @@
 //   as `{type:'sdk_event', event}` and reports turn completion through the
 //   internal `{type:'sdk_settled', error?}` frame; the native `agent_settled`
 //   event never completes an SDK turn.
+// - `claude-code` on `sdk`: an owned Node (or Bun) child running
+//   `claude-sdk-worker.mjs`, which loads the caller-installed
+//   @anthropic-ai/claude-agent-sdk 0.3.263 and drives the caller-selected
+//   Claude Code 2.1.263 executable through `query` with streaming input. Same
+//   request framing plus `approval`; native SDK messages arrive as
+//   `sdk_event`, a turn completes on `{type:'sdk_settled', result}` carrying
+//   the exact native `result` message, the persisted transcript is learned
+//   from `{type:'sdk_reference'}` once a native hook observed it, and fatal
+//   native failures arrive as `{type:'sdk_failure', status, error, raw?}`.
 //
 // Ownership mirrors the one-shot engine in lifecycle.ts: the child leads a
 // fresh POSIX process group, teardown is TERM → GRACE_MS → KILL → bounded
@@ -39,11 +48,11 @@ import type { PreparedCommand } from './instructions.js'
 import { DRAIN_MS, GRACE_MS, assertSupportedPlatform, describeError } from './lifecycle.js'
 import { getAdapter } from './registry.js'
 
-/** `rpc` drives `pi` (and `opencode` over HTTP); `sdk` drives `omp` through the owned Bun bridge. Any other pairing (and `cli`) is `unsupported-backend`. */
+/** `rpc` drives `pi` (and `opencode` over HTTP); `sdk` drives `omp` through the owned Bun bridge and `claude-code` through the owned SDK worker. Any other pairing (and `cli`) is `unsupported-backend`. */
 export type SessionBackend = 'rpc' | 'sdk'
 
 /** The harnesses with a live session backend. */
-type SessionHarness = 'pi' | 'omp' | 'opencode'
+type SessionHarness = 'pi' | 'omp' | 'opencode' | 'claude-code'
 
 /**
  * Selection of the caller-installed OMP SDK. Nothing here is guessed: the
@@ -56,6 +65,29 @@ export interface OmpSdkOptions {
   agentDir: string
   /** `local` opens the profile credential DB; `environment` uses an in-memory DB. Both retain native environment/dotenv/models.yml auth resolution. */
   auth: 'local' | 'environment'
+}
+
+/** Native Claude Code settings sources, passed verbatim as `--setting-sources`. */
+export type ClaudeSettingSource = 'user' | 'project' | 'local'
+
+/**
+ * Selection of the caller-installed Claude Agent SDK and Claude Code
+ * executable. Nothing is discovered, downloaded or configured: the package,
+ * the executable, the config directory and the settings sources are all
+ * explicit, and the exact versions (SDK 0.3.263, CLI 2.1.263) are qualified by
+ * the worker before the session opens.
+ */
+export interface ClaudeSdkOptions {
+  /** Absolute path to the caller-installed `@anthropic-ai/claude-agent-sdk` package directory (loaded by the worker, never by this process). */
+  packageRoot: string
+  /** Absolute path of the Claude Code executable the SDK spawns; its `--version` must report exactly 2.1.263. */
+  cliPath: string
+  /** Absolute caller-selected `CLAUDE_CONFIG_DIR`, layered over the inherited environment for the worker and the native process. Not a sandbox: nothing else is isolated or copied. */
+  configDir: string
+  /** Exact native `--setting-sources` selection; empty disables filesystem settings. `instructions` require `project` (CLAUDE.md is only read from that source). */
+  settingSources: ClaudeSettingSource[]
+  /** Optional absolute settings JSON file passed as native `--settings`. */
+  settingsFile?: string
 }
 
 export type OpenCodeAuth = 'none' | 'basic'
@@ -74,7 +106,7 @@ export interface OpenCodeOptions {
   password?: string
 }
 
-/** Native OpenCode permission replies this session forwards. `always` is refused: upstream stores it as an instance-wide rule shared by every client. */
+/** Native permission replies this session forwards (`opencode` and `claude-code`). `always` is refused: upstream stores it as a rule beyond the session. */
 export type OpenCodeApprovalResponse = 'once' | 'reject'
 
 /** A parsed JSON object frame; array and scalar frames are protocol errors. */
@@ -84,7 +116,7 @@ export type JsonObject = Record<string, unknown>
 export interface SessionReference {
   /** Full native session ID; never a prefix. */
   sessionId: string
-  /** Absolute session file, or null while the native session has not been persisted yet (always null on `opencode`). */
+  /** Absolute session file, or null while the native session has not been persisted yet (always null on `opencode`; on `claude-code` null until a native hook reported the transcript, typically after the first turn). */
   sessionFile: string | null
   /** Absolute working directory the session was opened in; the literal server-side directory on `opencode`. */
   workdir: string
@@ -96,13 +128,13 @@ export interface SessionSpec {
   harness: string
   /** Local absolute directory for `pi`/`omp`; for `opencode` the literal absolute POSIX directory on the server (never resolved or created locally). */
   workdir: string
-  /** Required; `rpc` for `pi` and `opencode`, `sdk` for `omp`. */
+  /** Required; `rpc` for `pi` and `opencode`, `sdk` for `omp` and `claude-code`. */
   backend: SessionBackend
   /** Passed through as `--model <trimmed>` (rpc), to the SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. */
   model?: string
-  /** Layered over the inherited process env; never mutated. On `sdk`, entries conflicting with the owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected. Must be empty on `opencode`. */
+  /** Layered over the inherited process env; never mutated. On `sdk`, entries conflicting with the session-owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` (omp) or `CLAUDE_CONFIG_DIR` (claude-code) are rejected. Must be empty on `opencode`. */
   env?: Record<string, string>
-  /** Replaces the `pi` binary (rpc) or the `bun` binary running the bridge worker (sdk): a bare name resolved on PATH or an absolute path. Rejected on `opencode`. */
+  /** Replaces the `pi` binary (rpc), the `bun` binary running the OMP bridge, or the JavaScript runtime running the Claude SDK worker (defaults to this process's `execPath`; a `bun` runtime gets `--no-env-file`): a bare name resolved on PATH or an absolute path. Rejected on `opencode`. */
   executable?: string
   /** Only `upstream` is supported; `bypass` is rejected. */
   permissionPolicy?: PermissionPolicy
@@ -116,10 +148,12 @@ export interface SessionSpec {
   requestTimeoutSeconds?: number
   /** Bytes of unconsumed events buffered per turn (and for idle session events); defaults to 1 MiB. Overflow is a protocol error, never a silent drop. */
   maxBufferBytes?: number
-  /** Required on `sdk`, rejected on `rpc`. */
+  /** Required for harness `omp` (backend `sdk`), rejected otherwise. */
   ompSdk?: OmpSdkOptions
   /** Required for harness `opencode`, rejected otherwise. */
   opencode?: OpenCodeOptions
+  /** Required for harness `claude-code` (backend `sdk`), rejected otherwise. */
+  claudeSdk?: ClaudeSdkOptions
 }
 
 /** `SessionSpec` after defaults and validation; the read-only snapshot a `LiveSession` exposes. */
@@ -137,10 +171,12 @@ export interface ResolvedSessionSpec {
   readonly timeoutSeconds: number | null
   readonly requestTimeoutSeconds: number
   readonly maxBufferBytes: number
-  /** Frozen copy of the caller's selection on `sdk`; null otherwise. */
+  /** Frozen copy of the caller's selection for `omp`; null otherwise. */
   readonly ompSdk: Readonly<OmpSdkOptions> | null
   /** Frozen, endpoint-normalized copy of the caller's selection for `opencode`; null otherwise. */
   readonly opencode: Readonly<OpenCodeOptions> | null
+  /** Frozen copy of the caller's selection for `claude-code`; null otherwise. */
+  readonly claudeSdk: Readonly<ClaudeSdkOptions> | null
 }
 
 /** What a harness supports as a live session on a backend. Static; never probes installs or credentials. */
@@ -206,8 +242,10 @@ export interface SessionTurn {
 }
 
 const PI_ARGS: readonly string[] = ['--mode', 'rpc']
-/** Bun flags ahead of the bridge worker script: never load a `.env` from the workdir. */
+/** Bun flags ahead of a worker script: never load a `.env` from the workdir. Only Bun accepts the flag; Node runs the Claude worker without it. */
 const BUN_ARGS: readonly string[] = ['--no-env-file']
+/** Native Claude session IDs are UUIDs; the worker selects one explicitly at open and a resume must name one exactly. */
+const CLAUDE_SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const DEFAULT_TIMEOUT_SECONDS = 1800
 const DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
 const DEFAULT_MAX_BUFFER_BYTES = 1_048_576
@@ -229,6 +267,10 @@ export function invalid(message: string): HarnessError {
 
 export function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isClaudeSettingSource(value: unknown): value is ClaudeSettingSource {
+  return value === 'user' || value === 'project' || value === 'local'
 }
 
 /** Bounded `setTimeout` for second-valued deadlines (clamped to the platform maximum). */
@@ -280,10 +322,10 @@ function ompSdkEnv(options: Readonly<OmpSdkOptions>): Readonly<Record<string, st
 }
 
 /** Which backend each session harness is qualified on; anything else is `unsupported-backend`. */
-const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc' }
+const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', 'claude-code': 'sdk' }
 
 function isSessionHarness(name: string): name is SessionHarness {
-  return name === 'pi' || name === 'omp' || name === 'opencode'
+  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'claude-code'
 }
 
 /** Resolve the harness first, then validate the backend before rejecting an unsupported pairing. */
@@ -294,7 +336,7 @@ function requireSessionHarness(name: unknown, backend: unknown): { harness: Sess
     throw invalid(`Unknown backend: ${JSON.stringify(backend)}. Expected one of: cli, rpc, sdk`)
   }
   if (!isSessionHarness(adapter.name)) {
-    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc) and "omp" (sdk) are supported`, 'unsupported-backend')
+    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "omp" (sdk) and "claude-code" (sdk) are supported`, 'unsupported-backend')
   }
   const qualified = SESSION_BACKENDS[adapter.name]
   if (backend !== qualified) {
@@ -316,7 +358,7 @@ export function getSessionCapabilities(name: string, backend: Backend = 'rpc'): 
     followUp: true,
     resume: true,
     concurrentTurns: false,
-    approval: resolved.harness === 'opencode',
+    approval: resolved.harness === 'opencode' || resolved.harness === 'claude-code',
   }
 }
 
@@ -337,6 +379,41 @@ function resolveOmpSdk(raw: unknown): Readonly<OmpSdkOptions> {
     throw invalid(`ompSdk.auth must be "local" or "environment", got ${JSON.stringify(auth)}`)
   }
   return Object.freeze({ packageRoot, agentDir, auth })
+}
+
+/** Validate the caller's Claude SDK selection; every path is explicit and absolute, nothing is probed on disk here (the worker qualifies versions). */
+function resolveClaudeSdk(raw: unknown): Readonly<ClaudeSdkOptions> {
+  if (!isJsonObject(raw)) throw invalid('claudeSdk must be a ClaudeSdkOptions object')
+  if (Object.keys(raw).some((key) => !['packageRoot', 'cliPath', 'configDir', 'settingSources', 'settingsFile'].includes(key))) {
+    throw invalid('claudeSdk contains an unsupported option')
+  }
+  const { packageRoot, cliPath, configDir, settingSources, settingsFile } = raw
+  if (typeof packageRoot !== 'string' || !isAbsolute(packageRoot) || packageRoot.includes('\0')) {
+    throw invalid('claudeSdk.packageRoot must be the absolute path of the installed @anthropic-ai/claude-agent-sdk package')
+  }
+  if (typeof cliPath !== 'string' || !isAbsolute(cliPath) || cliPath.includes('\0')) {
+    throw invalid('claudeSdk.cliPath must be the absolute path of the Claude Code executable')
+  }
+  if (typeof configDir !== 'string' || !isAbsolute(configDir) || configDir.includes('\0')) {
+    throw invalid('claudeSdk.configDir must be the absolute path of the caller-selected CLAUDE_CONFIG_DIR')
+  }
+  if (!Array.isArray(settingSources)) throw invalid('claudeSdk.settingSources must be an array chosen from user, project, local (empty allowed)')
+  const sources: ClaudeSettingSource[] = []
+  for (const source of settingSources as unknown[]) {
+    if (!isClaudeSettingSource(source)) throw invalid(`claudeSdk.settingSources contains ${JSON.stringify(source)}; expected user, project or local`)
+    if (sources.includes(source)) throw invalid(`claudeSdk.settingSources lists ${JSON.stringify(source)} twice`)
+    sources.push(source)
+  }
+  if (settingsFile !== undefined && (typeof settingsFile !== 'string' || !isAbsolute(settingsFile) || settingsFile.includes('\0'))) {
+    throw invalid('claudeSdk.settingsFile must be an absolute path when given')
+  }
+  return Object.freeze({
+    packageRoot,
+    cliPath,
+    configDir,
+    settingSources: sources,
+    ...(settingsFile === undefined ? {} : { settingsFile }),
+  })
 }
 
 /**
@@ -453,11 +530,21 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   const { harness, backend } = requireSessionHarness(spec.harness, spec.backend)
   const rawOmpSdk: unknown = spec.ompSdk
   let ompSdk: Readonly<OmpSdkOptions> | null = null
-  if (backend === 'sdk') {
+  if (harness === 'omp') {
     if (rawOmpSdk === undefined) throw invalid('ompSdk is required on backend "sdk": packageRoot, agentDir and auth are never guessed')
     ompSdk = resolveOmpSdk(rawOmpSdk)
   } else if (rawOmpSdk !== undefined) {
     throw invalid('ompSdk is only accepted for harness "omp" on backend "sdk"')
+  }
+  const rawClaudeSdk: unknown = spec.claudeSdk
+  let claudeSdk: Readonly<ClaudeSdkOptions> | null = null
+  if (harness === 'claude-code') {
+    if (rawClaudeSdk === undefined) {
+      throw invalid('claudeSdk is required for harness "claude-code" on backend "sdk": packageRoot, cliPath, configDir and settingSources are never guessed')
+    }
+    claudeSdk = resolveClaudeSdk(rawClaudeSdk)
+  } else if (rawClaudeSdk !== undefined) {
+    throw invalid('claudeSdk is only accepted for harness "claude-code" on backend "sdk"')
   }
   const rawOpenCode: unknown = spec.opencode
   let opencode: Readonly<OpenCodeOptions> | null = null
@@ -512,8 +599,14 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
       }
     }
   }
+  if (claudeSdk !== null) {
+    const explicit = env.CLAUDE_CONFIG_DIR
+    if (explicit !== undefined && explicit !== claudeSdk.configDir) {
+      throw invalid(`env.CLAUDE_CONFIG_DIR ${JSON.stringify(explicit)} conflicts with claudeSdk.configDir ${JSON.stringify(claudeSdk.configDir)}`)
+    }
+  }
 
-  let executable: string | null = backend === 'sdk' ? 'bun' : 'pi'
+  let executable: string | null = claudeSdk !== null ? process.execPath : backend === 'sdk' ? 'bun' : 'pi'
   const rawExecutable: unknown = spec.executable
   if (opencode !== null) {
     if (rawExecutable !== undefined) throw invalid('executable is not supported for opencode: no local process is launched')
@@ -541,10 +634,16 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   if (rawInstructions !== undefined && opencode !== null) {
     throw invalid('instructions are not supported for opencode: the session has no local workdir to project AGENTS.md into')
   }
+  if (rawInstructions !== undefined && claudeSdk !== null && !claudeSdk.settingSources.includes('project')) {
+    throw invalid('instructions require claudeSdk.settingSources to include "project": Claude Code only reads the projected CLAUDE.md from that source')
+  }
 
   let resume: SessionReference | null = null
   if (spec.resume !== undefined) {
     resume = opencode === null ? resolveReference(spec.resume, workdir) : resolveServerReference(spec.resume, workdir, opencode.endpoint)
+    if (claudeSdk !== null && !CLAUDE_SESSION_ID.test(resume.sessionId)) {
+      throw invalid(`resume.sessionId ${JSON.stringify(resume.sessionId)} is not a native Claude session UUID`)
+    }
   }
 
   let timeoutSeconds: number | null = DEFAULT_TIMEOUT_SECONDS
@@ -586,6 +685,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     maxBufferBytes,
     ompSdk,
     opencode,
+    claudeSdk,
   })
 }
 
@@ -600,9 +700,18 @@ function ompSdkWorkerPath(): string {
   return fileURLToPath(new URL(source ? '../../src/harness/_omp_sdk.mjs' : './omp-sdk.mjs', import.meta.url))
 }
 
+/**
+ * The Claude SDK worker `claude-sdk-worker.mjs` sits beside this module both
+ * in source (`ts/src`) and in the build (copied next to the bundle). Resolved
+ * by path only; the optional SDK is loaded by the worker, never imported here.
+ */
+function claudeSdkWorkerPath(): string {
+  return fileURLToPath(new URL('./claude-sdk-worker.mjs', import.meta.url))
+}
+
 /** What the leader process is called in diagnostics. */
 function leaderName(spec: ResolvedSessionSpec): string {
-  return spec.backend === 'sdk' ? 'the OMP SDK bridge' : 'pi'
+  return spec.claudeSdk !== null ? 'the Claude SDK worker' : spec.backend === 'sdk' ? 'the OMP SDK bridge' : 'pi'
 }
 
 /** Bounded native header reader; OMP alone permits one leading title record. */
@@ -659,6 +768,81 @@ function verifySessionHeader(reference: SessionReference, sessionFile: string, b
   if (typeof header.cwd !== 'string' || !samePath(header.cwd, reference.workdir)) {
     throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} was recorded in ${JSON.stringify(header.cwd)}, not ${JSON.stringify(reference.workdir)}`)
   }
+}
+
+/**
+ * Pre-spawn identity check for a Claude transcript (`<sessionId>.jsonl`): the
+ * native records name the session (`sessionId` / `session_id`) and `cwd`; the
+ * first of each, found within a bounded prefix, must match the reference. A
+ * file naming no session, or another one, is rejected, so `resume` can never
+ * silently open a different or fresh transcript.
+ */
+function verifyClaudeTranscript(reference: SessionReference, sessionFile: string): void {
+  let fd: number
+  try {
+    fd = openSync(sessionFile, 'r')
+  } catch (err) {
+    throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} is not readable: ${describeError(err)}`)
+  }
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const chunk = Buffer.allocUnsafe(65_536)
+  const partial: Buffer[] = []
+  let scanned = 0
+  let identified = false
+  const record = (line: Buffer): void => {
+    if (line.length === 0) return
+    let parsed: unknown
+    try {
+      const text = decoder.decode(line)
+      if (text.trim() === '') return
+      parsed = JSON.parse(text)
+    } catch (err) {
+      throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} is not Claude JSONL: ${describeError(err)}`)
+    }
+    if (!isJsonObject(parsed)) throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} contains a non-object record`)
+    const id = 'sessionId' in parsed ? parsed.sessionId : parsed.session_id
+    if (id !== undefined && id !== null && id !== reference.sessionId) {
+      throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} belongs to session ${JSON.stringify(id)}, not ${JSON.stringify(reference.sessionId)}`)
+    }
+    if (parsed.cwd !== undefined && parsed.cwd !== null
+      && (typeof parsed.cwd !== 'string' || !samePath(parsed.cwd, reference.workdir))) {
+      throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} was recorded in ${JSON.stringify(parsed.cwd)}, not ${JSON.stringify(reference.workdir)}`)
+    }
+    identified = id === reference.sessionId && typeof parsed.cwd === 'string'
+  }
+  try {
+    // Bounded by bytes consumed, partial lines included: identity sits in the first records of every Claude transcript.
+    while (scanned < MAX_FRAME_BYTES) {
+      const size = readSync(fd, chunk, 0, Math.min(chunk.length, MAX_FRAME_BYTES - scanned), null)
+      if (size === 0) break
+      let from = 0
+      while (from < size) {
+        const at = chunk.subarray(0, size).indexOf(LF, from)
+        if (at === -1) {
+          partial.push(Buffer.from(chunk.subarray(from, size)))
+          scanned += size - from
+          break
+        }
+        let line = chunk.subarray(from, at)
+        if (partial.length > 0) {
+          partial.push(line)
+          line = Buffer.concat(partial)
+          partial.length = 0
+        }
+        if (line.length > 0 && line[line.length - 1] === CR) line = line.subarray(0, line.length - 1)
+        scanned += at + 1 - from
+        record(line)
+        if (identified) return
+        from = at + 1
+      }
+    }
+  } catch (err) {
+    if (err instanceof HarnessError) throw err
+    throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} could not be read: ${describeError(err)}`)
+  } finally {
+    closeSync(fd)
+  }
+  throw invalid(`resume.sessionFile ${JSON.stringify(sessionFile)} names no Claude session identity (sessionId and cwd) within its first ${MAX_FRAME_BYTES} bytes`)
 }
 
 /** Bounded stderr prefix: keeps the first `cap` raw bytes decoded incrementally, counts everything. */
@@ -773,6 +957,9 @@ interface LeaderExit {
 interface AbortState {
   acked: boolean
   confirmed: boolean
+  /** Explicit native refusal of the interrupt (claude-code): `interrupt()` rejects with it instead of pretending the abort took. */
+  refused: string | null
+  acknowledgement: Promise<void> | null
 }
 
 /** The backend-independent turn: ID, bounded event queue, deadline timer and the single settlement. */
@@ -808,6 +995,8 @@ class ProcessTurn extends TurnCore {
   lastAgentEnd: JsonObject | null = null
   /** Last assistant message from the last `agent_end`; earlier retries do not determine the result. */
   lastAssistant: JsonObject | null = null
+  /** The exact native Claude `result` message delivered by `sdk_settled` (claude-code only). */
+  result: JsonObject | null = null
   abort: AbortState | null = null
 }
 
@@ -847,7 +1036,7 @@ export abstract class LiveSession {
     return ProcessSession.launch(spec)
   }
 
-  /** Native identity; available once `openSession` resolved. */
+  /** Native identity; available once `openSession` resolved. On `claude-code` the ID is selected explicitly at open (`--session-id`), and `sessionFile` fills in once a native hook observed the transcript. */
   abstract get reference(): SessionReference
 
   /** Frames that arrive while no turn is active (single-consumer; ends when the session closes). */
@@ -870,10 +1059,11 @@ export abstract class LiveSession {
   abstract interrupt(): Promise<void>
 
   /**
-   * Answer an outstanding native permission request of this session. Only
-   * `opencode` supports it (`getSessionCapabilities(...).approval`); the
-   * request must have been observed as a `permission.asked` event of the
-   * selected session and still be unanswered.
+   * Answer an outstanding native permission request of this session.
+   * `opencode` and `claude-code` support it (`getSessionCapabilities(...).approval`);
+   * the request must have been observed as a `permission.asked` (opencode)
+   * or `claude_permission` (claude-code) event of the selected session and
+   * still be unanswered.
    */
   abstract respondApproval(requestId: string, response: OpenCodeApprovalResponse): Promise<void>
 
@@ -881,7 +1071,7 @@ export abstract class LiveSession {
   abstract close(): Promise<void>
 }
 
-/** Pi RPC and the OMP SDK bridge: one owned child process per session. Constructed only through `LiveSession.open`. */
+/** Pi RPC, the OMP SDK bridge and the Claude SDK worker: one owned child process per session. Constructed only through `LiveSession.open`. */
 class ProcessSession extends LiveSession {
   readonly #prepared: PreparedCommand
   readonly #child: ChildProcess
@@ -894,6 +1084,8 @@ class ProcessSession extends LiveSession {
   #prelude: { frame: JsonObject; requestId: string | null; bytes: number }[] = []
   #preludeBytes = 0
   #reference: SessionReference | null = null
+  /** Bridge-local `claude_permission` IDs observed and not yet answered or cancelled (claude-code only). */
+  readonly #pendingApprovals = new Set<string>()
   #requestSeq = 0
   #turnSeq = 0
   #active: ProcessTurn | null = null
@@ -943,20 +1135,33 @@ class ProcessSession extends LiveSession {
     if (executable === null) throw invalid(`harness "${spec.harness}" resolved without a leader executable`)
     assertSupportedPlatform()
     const resume = spec.resume
-    if (resume !== null && resume.sessionFile !== null) verifySessionHeader(resume, resume.sessionFile, spec.backend)
+    if (resume !== null && resume.sessionFile !== null) {
+      if (spec.claudeSdk === null) verifySessionHeader(resume, resume.sessionFile, spec.backend)
+      else verifyClaudeTranscript(resume, resume.sessionFile)
+    }
     const args: string[] = []
     // Explicit layering, never a parent mutation: inherited env, then the caller's entries, then the session-owned ones.
     const layered: Record<string, string> = { ...spec.env }
-    if (spec.ompSdk === null) {
-      args.push(...PI_ARGS)
-      if (spec.model !== null) args.push('--model', spec.model)
-      if (resume !== null && resume.sessionFile !== null) args.push('--session', resume.sessionFile)
-    } else {
+    if (spec.ompSdk !== null) {
       const worker = ompSdkWorkerPath()
       if (!existsSync(worker)) throw new HarnessError(`OMP SDK bridge worker is missing at ${worker}`, 'launch-failed')
       const { packageRoot, agentDir, auth } = spec.ompSdk
       args.push(...BUN_ARGS, worker, JSON.stringify({ packageRoot, agentDir, auth, cwd: spec.workdir, model: spec.model, resume }))
       Object.assign(layered, ompSdkEnv(spec.ompSdk))
+    } else if (spec.claudeSdk !== null) {
+      const worker = claudeSdkWorkerPath()
+      if (!existsSync(worker)) throw new HarnessError(`Claude SDK worker is missing at ${worker}`, 'launch-failed')
+      const { packageRoot, cliPath, configDir, settingSources, settingsFile } = spec.claudeSdk
+      // Only Bun understands `--no-env-file`; Node (the default runtime) never loads a `.env` on its own.
+      if (basename(executable).replace(/\.exe$/, '') === 'bun') args.push(...BUN_ARGS)
+      args.push(worker, JSON.stringify({
+        packageRoot, cliPath, configDir, settingSources, settingsFile: settingsFile ?? null, cwd: spec.workdir, model: spec.model, resume,
+      }))
+      layered.CLAUDE_CONFIG_DIR = configDir
+    } else {
+      args.push(...PI_ARGS)
+      if (spec.model !== null) args.push('--model', spec.model)
+      if (resume !== null && resume.sessionFile !== null) args.push('--session', resume.sessionFile)
     }
     const adapter = getAdapter(spec.harness)
     const prepared = prepareCommand({
@@ -1081,31 +1286,65 @@ class ProcessSession extends LiveSession {
   /**
    * Abort the active turn. Resolves once the turn settled, which requires both
    * the native abort acknowledgement and the turn's settlement (`agent_settled`
-   * on rpc, the worker's `sdk_settled` on sdk); the result reports
-   * `interrupted` only when the harness confirmed the abort.
+   * on rpc, the worker's `sdk_settled` on sdk). On `pi`/`omp` the result
+   * reports `interrupted` only when the harness confirmed the abort; on
+   * `claude-code` the native `result` decides (`terminal_reason`), and an
+   * interrupt the SDK refused (no native receipt, still-queued work) rejects
+   * with `adapter-error` while the turn runs on.
    */
   async interrupt(): Promise<void> {
     if (this.#dead) throw new HarnessError('session is closed', 'session-closed')
     const turn = this.#active
     if (turn === null) throw new HarnessError('no active turn to interrupt', 'unsupported-capability')
-    if (turn.abort === null) {
-      const abort: AbortState = { acked: false, confirmed: false }
-      turn.abort = abort
-      this.#request('abort', {}).then(
+    let abort = turn.abort
+    if (abort === null) {
+      const state: AbortState = { acked: false, confirmed: false, refused: null, acknowledgement: null }
+      abort = state
+      turn.abort = state
+      state.acknowledgement = this.#request('abort', {}).then(
         (frame) => {
-          abort.acked = true
-          abort.confirmed = frame.success === true
+          state.acked = true
+          state.confirmed = frame.success === true
+          if (!state.confirmed && this.spec.claudeSdk !== null) {
+            state.refused = typeof frame.error === 'string' && frame.error !== '' ? frame.error : 'the Claude SDK refused the interrupt'
+          }
           this.#maybeComplete(turn)
         },
         () => {},
       )
     }
+    if (this.spec.claudeSdk !== null && abort.acknowledgement !== null) await abort.acknowledgement
+    if (abort.refused !== null) throw new HarnessError(`interrupt of ${turn.id} was refused: ${abort.refused}`, 'adapter-error')
     await turn.promise
   }
 
-  /** Neither Pi RPC nor the OMP SDK bridge exposes native permission replies; approvals stay inside the harness. */
-  respondApproval(): Promise<void> {
-    return Promise.reject(new HarnessError(`${this.spec.harness} live sessions cannot answer permission requests; only "opencode" supports respondApproval`, 'unsupported-capability'))
+  /**
+   * Answer an outstanding `claude_permission` request (claude-code only) with
+   * `once` (native allow with the original input) or `reject` (native deny
+   * with a fixed message). The request must have been observed as an event of
+   * this session and be neither answered nor cancelled; the worker validates
+   * it again before resolving the native `canUseTool` callback. Pi RPC and the
+   * OMP SDK bridge expose no native permission replies.
+   */
+  async respondApproval(requestId: string, response: OpenCodeApprovalResponse): Promise<void> {
+    if (this.spec.claudeSdk === null) {
+      throw new HarnessError(`${this.spec.harness} live sessions cannot answer permission requests; only "opencode" and "claude-code" support respondApproval`, 'unsupported-capability')
+    }
+    const reply: unknown = response
+    if (reply === 'always') {
+      throw new HarnessError('permission reply "always" is unsupported: it would store a permission rule beyond this session', 'unsupported-capability')
+    }
+    if (reply !== 'once' && reply !== 'reject') throw invalid(`response must be "once" or "reject", got ${JSON.stringify(reply)}`)
+    if (typeof requestId !== 'string' || requestId === '') throw invalid('requestId must be the bridge approval ID of an observed claude_permission event')
+    if (this.#dead) throw new HarnessError('session is closed', 'session-closed')
+    if (!this.#pendingApprovals.has(requestId)) {
+      throw invalid(`no outstanding permission request ${JSON.stringify(requestId)} was observed for session ${this.reference.sessionId}`)
+    }
+    this.#pendingApprovals.delete(requestId)
+    const frame = await this.#request('approval', { approvalId: requestId, response: reply })
+    if (frame.success !== true) {
+      throw invalid(`permission request ${JSON.stringify(requestId)} could not be answered: ${typeof frame.error === 'string' ? frame.error : 'worker refused'}`)
+    }
   }
 
   /** Idempotent, concurrent-safe teardown: stdin EOF, TERM → KILL the group, bounded drain, then release the lease. Cleanup failures are rethrown. */
@@ -1259,15 +1498,22 @@ class ProcessSession extends LiveSession {
         turn.settled = true
       }
     }
+    if (this.spec.claudeSdk !== null && typeof frame.id === 'string') {
+      if (frame.type === 'claude_permission') this.#pendingApprovals.add(frame.id)
+      else if (frame.type === 'claude_permission_cancelled') this.#pendingApprovals.delete(frame.id)
+    }
     this.#route(frame, typeof frame.id === 'string' ? frame.id : null, bytes)
     if (turn !== null && settles) this.#maybeComplete(turn)
   }
 
   /**
-   * Frames from the OMP SDK bridge worker other than responses: `sdk_event`
-   * unwraps to the exact native event and goes through event routing;
-   * `sdk_settled` is the worker's authoritative turn completion and is never
-   * exposed as an event. Anything else is a protocol violation.
+   * Frames from an SDK worker other than responses: `sdk_event` unwraps to
+   * the exact native event and goes through event routing; `sdk_settled` is
+   * the worker's authoritative turn completion (carrying the exact native
+   * `result` on claude-code) and is never exposed as an event. The Claude
+   * worker additionally reports the persisted transcript (`sdk_reference`)
+   * and fatal native failures (`sdk_failure`). Anything else is a protocol
+   * violation.
    */
   #onBridgeFrame(frame: JsonObject, bytes: number): void {
     if (frame.type === 'sdk_event') {
@@ -1279,6 +1525,24 @@ class ProcessSession extends LiveSession {
       this.#onEvent(event, bytes)
       return
     }
+    const claude = this.spec.claudeSdk !== null
+    if (claude && frame.type === 'sdk_reference') {
+      this.#onReference(frame)
+      return
+    }
+    if (claude && frame.type === 'sdk_failure') {
+      const { status, error, raw } = frame
+      if (typeof error !== 'string' || error === '') {
+        void this.#invalidate('protocol-error', 'sdk_failure frame has no non-empty "error"')
+      } else if (raw !== undefined && !isJsonObject(raw)) {
+        void this.#invalidate('protocol-error', 'sdk_failure frame "raw" is not an object')
+      } else if (status === 'protocol-error' || status === 'disconnected' || status === 'exited' || status === 'signaled') {
+        void this.#invalidate(status, error, frame)
+      } else {
+        void this.#invalidate('protocol-error', `sdk_failure frame has unknown status ${JSON.stringify(status)}`)
+      }
+      return
+    }
     if (frame.type !== 'sdk_settled') {
       void this.#invalidate('protocol-error', `unknown bridge frame type ${JSON.stringify(frame.type)}`)
       return
@@ -1288,11 +1552,50 @@ class ProcessSession extends LiveSession {
       void this.#invalidate('protocol-error', 'sdk_settled frame has a non-string or empty "error"')
       return
     }
+    const result = frame.result
+    if (claude && result !== undefined) {
+      if (!isJsonObject(result) || result.type !== 'result') {
+        void this.#invalidate('protocol-error', 'sdk_settled "result" is not a native Claude result message')
+        return
+      }
+      if (result.session_id !== this.#reference?.sessionId) {
+        void this.#invalidate('protocol-error', `sdk_settled result belongs to session ${JSON.stringify(result.session_id)}, not ${JSON.stringify(this.#reference?.sessionId)}`)
+        return
+      }
+    }
     const turn = this.#active
-    if (turn === null || turn.done) return // idle settle: nothing to complete, mirrors an idle agent_settled
+    if (turn === null || turn.done) {
+      // OMP: an idle settle mirrors an idle agent_settled. Claude: exactly one result per prompt, so a stray settle is a violation.
+      if (claude) void this.#invalidate('protocol-error', 'sdk_settled arrived without an active turn')
+      return
+    }
+    if (claude && typeof error !== 'string' && result === undefined) {
+      void this.#invalidate('protocol-error', 'sdk_settled carries neither a native result nor an error')
+      return
+    }
     turn.settled = true
     if (typeof error === 'string') turn.failure = frame
+    else if (isJsonObject(result)) turn.result = result
     this.#maybeComplete(turn)
+  }
+
+  /** The Claude worker observed the persisted transcript through a native hook: same selected ID and workdir, the file is adopted. */
+  #onReference(frame: JsonObject): void {
+    const reference = this.#reference
+    const { sessionId, sessionFile, workdir } = frame
+    if (reference === null) {
+      void this.#invalidate('protocol-error', 'sdk_reference arrived before the session identity')
+    } else if (sessionId !== reference.sessionId) {
+      void this.#invalidate('protocol-error', `sdk_reference names session ${JSON.stringify(sessionId)}, not ${JSON.stringify(reference.sessionId)}`)
+    } else if (typeof workdir !== 'string' || !samePath(workdir, this.spec.workdir)) {
+      void this.#invalidate('protocol-error', `sdk_reference names workdir ${JSON.stringify(workdir)}, not ${JSON.stringify(this.spec.workdir)}`)
+    } else if (typeof sessionFile !== 'string' || !isAbsolute(sessionFile) || sessionFile.includes('\0')) {
+      void this.#invalidate('protocol-error', 'sdk_reference has no absolute sessionFile')
+    } else if (reference.sessionFile !== null && !samePath(reference.sessionFile, sessionFile)) {
+      void this.#invalidate('protocol-error', `sdk_reference moved the transcript from ${JSON.stringify(reference.sessionFile)} to ${JSON.stringify(sessionFile)}`)
+    } else {
+      this.#reference = Object.freeze({ sessionId: reference.sessionId, sessionFile, workdir: reference.workdir })
+    }
   }
 
   #route(frame: JsonObject, requestId: string | null, bytes: number): void {
@@ -1304,6 +1607,10 @@ class ProcessSession extends LiveSession {
       }
       this.#preludeBytes += bytes
       this.#prelude.push({ frame, requestId, bytes })
+      return
+    }
+    if (this.spec.claudeSdk !== null && typeof frame.session_id === 'string' && frame.session_id !== this.#reference.sessionId) {
+      void this.#invalidate('protocol-error', `native event ${JSON.stringify(frame.type)} belongs to session ${JSON.stringify(frame.session_id)}, not ${JSON.stringify(this.#reference.sessionId)}`)
       return
     }
     const turn = this.#active
@@ -1330,6 +1637,22 @@ class ProcessSession extends LiveSession {
       return
     }
     if (!turn.settled) return
+    if (this.spec.claudeSdk !== null) {
+      const result = turn.result
+      if (result === null) return
+      const reason = result.terminal_reason
+      if (reason === 'aborted_streaming' || reason === 'aborted_tools') {
+        this.#finishTurn(turn, 'interrupted', result, null)
+      } else if (result.is_error === true || result.subtype !== 'success') {
+        const text = result.result
+        const errors = Array.isArray(result.errors) ? result.errors.filter((entry): entry is string => typeof entry === 'string' && entry !== '') : []
+        const message = typeof text === 'string' && text !== '' ? text : errors.length > 0 ? errors.join('; ') : `native result subtype ${JSON.stringify(result.subtype)}`
+        this.#finishTurn(turn, 'agent-error', result, message)
+      } else {
+        this.#finishTurn(turn, 'completed', result, null)
+      }
+      return
+    }
     const assistant = turn.lastAssistant
     const stopReason = assistant?.stopReason
     if (stopReason === 'aborted') {
@@ -1433,8 +1756,11 @@ class ProcessSession extends LiveSession {
    * killed did not dispose cleanly, which `close()` reports as
    * `adapter-error` after the owned teardown and lease cleanup. A worker
    * that had already ended is reported through the session status instead.
+   * The exit metadata of `SessionTurnResult` always describes the owned
+   * leader (worker); a native Claude exit is described by the `sdk_failure`
+   * frame passed as `raw`.
    */
-  #invalidate(status: SessionTurnStatus, error: string | null): Promise<void> {
+  #invalidate(status: SessionTurnStatus, error: string | null, raw: JsonObject | null = null): Promise<void> {
     if (this.#teardown !== null) return this.#teardown
     this.#dead = true
     // Only `openSession` observes these rejections (interrupt awaits the turn result instead).
@@ -1453,7 +1779,7 @@ class ProcessSession extends LiveSession {
     this.#teardown = this.#stopGroup().catch((err: unknown) => {
       this.#cleanupError = err
     }).then(() => {
-      if (turn !== null) this.#finishTurn(turn, status, turn.lastAgentEnd, error)
+      if (turn !== null) this.#finishTurn(turn, status, raw ?? turn.lastAgentEnd, error)
       this.#sessionQueue.end()
       // A failed reap/termination must not release ownership of live resources.
       if (this.#cleanupError !== null) return
@@ -1465,11 +1791,12 @@ class ProcessSession extends LiveSession {
       }
       const leader = this.#leader
       if (!disposing || leader === null) return
+      const name = leaderName(this.spec)
       if (leader.signal !== null) {
-        this.#cleanupError = new HarnessError(`the OMP SDK bridge did not dispose within the teardown budget and was terminated by ${leader.signal}`, 'adapter-error')
+        this.#cleanupError = new HarnessError(`${name} did not dispose within the teardown budget and was terminated by ${leader.signal}`, 'adapter-error')
       } else if (leader.code !== 0) {
         const tail = this.#stderr.text.trim().slice(0, STDERR_EXCERPT)
-        this.#cleanupError = new HarnessError(`the OMP SDK bridge failed to dispose (exit code ${leader.code ?? -1})${tail === '' ? '' : `; stderr: ${tail}`}`, 'adapter-error')
+        this.#cleanupError = new HarnessError(`${name} failed to dispose (exit code ${leader.code ?? -1})${tail === '' ? '' : `; stderr: ${tail}`}`, 'adapter-error')
       }
     })
     return this.#teardown
@@ -1514,11 +1841,13 @@ class ProcessSession extends LiveSession {
 }
 
 /**
- * Validate the spec and open the native session. For `pi`/`omp`: verify any
- * resume target, take the workdir lease (projecting `instructions` into
- * AGENTS.md), spawn the leader (`pi --mode rpc`, or `bun` running the OMP SDK
- * bridge worker) and complete the `get_state` handshake; rejects with the
- * lease released and the process group stopped when any step fails. For
+ * Validate the spec and open the native session. For `pi`/`omp`/`claude-code`:
+ * verify any resume target, take the workdir lease (projecting `instructions`
+ * into AGENTS.md / CLAUDE.md), spawn the leader (`pi --mode rpc`, `bun`
+ * running the OMP SDK bridge worker, or the JavaScript runtime running the
+ * Claude SDK worker, which qualifies the SDK/CLI versions and selects the
+ * native session ID) and complete the `get_state` handshake; rejects with
+ * the lease released and the process group stopped when any step fails. For
  * `opencode`: qualify the caller-owned server (health/version, directory,
  * session identity) and subscribe to its event stream; rejects with every
  * owned connection closed, never touching the server itself.

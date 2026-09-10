@@ -195,6 +195,14 @@ OMP SDK sessions use `getSessionCapabilities("omp", "sdk")` /
 `get_session_capabilities("omp", "sdk")`, qualified for the optional 18.1.14
 package on Bun >=1.3.14. Python and Node use the same owned bridge worker;
 ordinary CLI imports have no SDK dependency.
+Claude SDK sessions use `getSessionCapabilities("claude-code", "sdk")` /
+`get_session_capabilities("claude-code", "sdk")`. Python hosts its native
+0.2.152 SDK/2.1.259 CLI through a pinned raw `Transport`; TypeScript hosts its
+native 0.3.263 SDK/2.1.263 CLI under Node/Bun. Both preserve raw events,
+follow-up, exact transcript resume, interrupt receipts and one-shot permission
+replies. Actual native pairs passed local synthetic-provider lifecycle checks;
+authenticated-provider generation is not claimed. See the
+[Claude SDK configuration, internal dependency and limits](SPEC.md#optional-claude-agent-sdk-sessions).
 OpenCode HTTP sessions use `getSessionCapabilities("opencode", "rpc")` /
 `get_session_capabilities("opencode", "rpc")` against an explicitly selected
 caller-owned 1.18.29 endpoint. Both languages implement native HTTP/SSE,

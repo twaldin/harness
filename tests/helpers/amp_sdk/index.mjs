@@ -30,7 +30,15 @@ export async function* execute({ prompt, options }) {
   child.stdin.end(prompt + '\n')
   const input = createInterface({ input: child.stdout, crlfDelay: Infinity })
   try {
-    for await (const line of input) yield JSON.parse(line)
+    if (prompt === 'wrong-id-exit') {
+      // SDK delivery can lag native process exit; make that ordering deterministic.
+      const events = []
+      for await (const line of input) events.push(JSON.parse(line))
+      await closed
+      yield* events
+    } else {
+      for await (const line of input) yield JSON.parse(line)
+    }
     const { code, signal } = await closed
     if (signal) throw new Error(`Amp CLI process was killed by signal ${signal}`)
     if (code !== 0) throw new Error(`Amp CLI process exited with code ${code}`)

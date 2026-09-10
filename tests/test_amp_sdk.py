@@ -106,7 +106,7 @@ async def _read_until(turn: SessionTurn, kind: str) -> list[str]:
 
 @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
 async def test_shared_case(case: dict, sandbox: Sandbox):
-    async with await open_session(sandbox.spec()) as session:
+    async with await open_session(sandbox.spec(amp_sdk=sandbox.options(mode=case.get("mode", "low")))) as session:
         assert session.reference.session_id == THREAD_ID
         turn = session.start_turn(case["prompt"])
         events = [event async for event in turn.events]
@@ -124,6 +124,8 @@ async def test_shared_case(case: dict, sandbox: Sandbox):
     if "rawType" in case:
         assert result.raw is not None and result.raw["type"] == case["rawType"]
         assert result.raw == next(event.raw for event in events if event.type == case["rawType"])
+    if "result" in case:
+        assert result.raw is not None and result.raw["result"] == case["result"]
     if result.status == "completed":
         assert result.error is None
     else:
@@ -392,7 +394,7 @@ def _reference(**overrides: object) -> SessionReference:
         ({"permission_policy": "bypass"}, "unsupported-capability"),
         ({"executable": "bin/node"}, "invalid-options"),
         ({"resume": _reference(session_id="T-11111111")}, "invalid-options"),
-        ({"resume": _reference(session_file=Path("/tmp/thread.jsonl"))}, "invalid-options"),
+        ({"resume": _reference(session_file=Path("/nonexistent/thread.jsonl"))}, "invalid-options"),
         ({"resume": _reference(endpoint=None)}, "invalid-options"),
         ({"resume": _reference(endpoint="https://amp.example.test")}, "invalid-options"),
         ({"resume": _reference(workdir=Path("/elsewhere"))}, "invalid-options"),

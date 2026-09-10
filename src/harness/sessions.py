@@ -289,7 +289,7 @@ class AmpSdkOptions:
     `cli_path`      — absolute path of the pinned native `amp` CLI the SDK
                       executes; nothing is looked up on PATH.
     `executor`      — only "local".
-    `mode`          — non-blank, NUL-free native agent mode passed verbatim
+    `mode`          — non-blank, NUL-free native agent mode, trimmed
                       (the SDK would otherwise select `medium` silently).
     `effort`        — optional native effort level.
     `visibility`    — optional visibility of a newly created thread; rejected
@@ -995,7 +995,7 @@ def _validate_amp_options(options: object, resuming: bool) -> AmpSdkOptions:
         package_root=package_root,
         cli_path=cli_path,
         executor="local",
-        mode=mode,
+        mode=mode.strip(),
         effort=effort,
         visibility=visibility,
         settings_file=settings_file,

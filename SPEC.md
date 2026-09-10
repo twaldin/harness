@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp/Cline SDK bridge sessions, optional native Claude SDK sessions, caller-owned OpenCode HTTP sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp/Cline SDK bridge sessions, optional native Claude SDK sessions, caller-owned OpenCode HTTP and OpenHands Agent Server sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -258,8 +258,8 @@ returning a result that falsely implies completed cleanup. See
 `harness` identifies the agent; `backend` identifies its execution integration.
 Omitted backend means CLI for existing callers. No preference order, dependency
 probe or failure path may silently change CLI into SDK/RPC, or vice versa.
-Selecting `rpc` or `sdk` through the one-shot `RunSpec` API raises
-`unsupported-backend` in both languages. Controlled RPC uses the separate
+Selecting `rpc` or `sdk` for a registered CLI adapter through the one-shot
+`RunSpec` API raises `unsupported-backend` in both languages. Controlled RPC uses the separate
 [session API](#controlled-rpc-sessions); no one-shot call changes into a session.
 Importing Harness loads no optional SDK and does not initialize upstream settings.
 
@@ -565,7 +565,11 @@ default. The adapter's empty-string default-model metadata denotes no selection.
 
 ### pi
 
-Cost and tokens are summed from assistant messages in the `--mode json` event stream.
+Cost and tokens are summed from assistant messages in the `--mode json` event
+stream, once per agent cycle: each terminal `agent_end.messages` snapshot
+replaces that cycle's incremental `message_end` / `turn_end` records without
+discarding earlier cycles, and a cut-off final cycle keeps its completed
+messages.
 
 ```json
 {
@@ -1328,7 +1332,7 @@ explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
 Other pairings reject with `unsupported-backend`, except the separately
-documented OMP/Amp/Claude/Cline SDK and caller-owned OpenCode HTTP sessions below. Unknown
+documented OMP/Amp/Claude/Cline SDK and caller-owned OpenCode/OpenHands sessions below. Unknown
 names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
@@ -2144,10 +2148,205 @@ Pinned sources:
 [permission scope](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/permission/index.ts),
 [compaction](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/session/compaction.ts).
 
+## Caller-owned OpenHands Agent Server sessions
+
+`open_session` / `openSession` accept the **session-only** name
+`harness: "openhands", backend: "rpc"`. RPC means direct Agent Server HTTP
+requests and its WebSocket session channel, not the legacy CLI, Canvas, a
+native TypeScript agent, or runtime provisioning. The CLI adapter registry
+and one-shot API are unchanged; `getAdapter("openhands")` is still
+`unknown-harness`. No CLI/SDK fallback occurs.
+
+### Explicit caller-owned configuration
+
+The source pin is **OpenHands Agent Server 1.45.0**, release commit
+`49ea74587c376b90700f6eff128c3d9b57585d27`. Startup requires `/server_info` to
+report server, SDK, tools and workspace package versions all equal to
+`1.45.0`; mismatches fail explicitly. This metadata is a compatibility check,
+not proof of an installed-runtime qualification or a trustworthy deployment.
+The upstream server/SDK packages require Python >=3.12; Harness uses the
+protocol directly and does not import them into its Python >=3.10 client.
+The upstream TypeScript package is a remote client, not an in-process agent;
+Harness does not depend on it.
+
+Both package roots export `OpenHandsOptions`. `SessionSpec.openhands` is
+required for this pairing and rejected elsewhere:
+
+| TypeScript / Python field | required meaning |
+|---|---|
+| `endpoint` | HTTP(S) origin; no embedded credentials, path prefix, query, fragment or discovery; normalized as for OpenCode |
+| `apiKey` / `api_key` | nonempty caller-supplied **server session key**, never a provider credential; printable ASCII token without whitespace (`0x21..0x7E`) |
+| `agentProfile` / `agent_profile` | exact existing server-side agent profile name, not the active/default/newest profile |
+| `confirmNoUnwantedCallbacks` / `confirm_no_unwanted_callbacks` | must be exactly `true`: caller confirms the supplied server has no unwanted automation callbacks/webhooks |
+
+**The confirmation is a caller prerequisite, not client-enforced exclusion.**
+Harness registers no automation callbacks, but this API cannot inspect or
+disable server-configured webhooks. The caller must trust and check its
+server's configuration. Agent profile tools, MCP servers, skills and server
+memory preferences likewise remain upstream configuration, not a sandbox.
+Harness does not change server settings or authentication to satisfy the
+prerequisite.
+
+`model` is also required: the exact native model selector, without CLI model
+normalization. `workdir` is the literal canonical absolute POSIX directory
+in the caller's existing **server** workspace; no local stat, mkdir, instruction
+projection or path discovery occurs. Nonempty `env`, `executable`, `instructions`, other backend
+options and permission bypass reject before network activity.
+
+Startup reads only the named `/api/agent-profiles/{name}` and its referenced
+`/api/profiles/{name}`, verifies an OpenHands (not ACP) profile and the selected
+model, then sends the profile UUID in the conversation request. It never lists,
+seeds, activates or edits profiles, requests exposed secrets, or copies local
+provider settings/credentials to the server. Provider authentication remains
+in the caller-selected server profile. Profile/model selection is checked
+against the returned conversation and before a turn; mismatches fail rather
+than silently switching.
+
+REST uses `X-Session-API-Key`; WebSocket authentication uses the first
+`{"type":"auth","session_api_key":"..."}` frame, never a query-string token.
+Redirects are not followed. Python disables ambient proxy/netrc discovery.
+Sending a key does **not** prove the server requires authentication: upstream
+accepts requests unconditionally when its key list is empty. The caller owns
+TLS, endpoint trust and authentication enforcement; HTTP is not encrypted.
+
+Python loads `httpx` 0.28.x and `websockets` 15.x only when this backend opens
+(`harness-cli[openhands]`). TypeScript lazily loads the `ws` module: packaged
+Node requires the optional `ws` 8.x peer; Bun supplies its runtime implementation.
+Missing dependencies are explicit
+prerequisite failures. Ordinary imports and capability queries perform no
+network, credential/configuration lookup or upstream SDK initialization.
+
+### Identity, turns and native events
+
+A new conversation uses a fresh full UUID, the explicit server workdir and
+selected profile. Creation disables unrequested automatic title generation,
+does not request a worktree and sends no initial message. Only a `201` new
+conversation response is accepted; a collision is not a resume.
+Creation is not transactional with client transport startup: a conversation
+can already be persisted if a later socket handshake fails. Harness does not
+delete that history to roll back a client error.
+
+The reference contains canonical `sessionId` UUID, null `sessionFile`,
+literal `workdir` and normalized `endpoint`. Resume requires that exact
+association and verifies `GET /api/conversations/{id}` plus profile
+provenance/model. **A resume 404 fails; it never POSTs a replacement.**
+No latest-session search, fork, history deletion or local persistence is used.
+The caller must retain exclusive write access to this conversation and its
+selected configuration while the handle is used. HTTP preflight checks do
+not provide an atomic cross-client lease.
+
+`getSessionCapabilities("openhands", "rpc")` reports events, interrupt,
+follow-up and resume true; concurrent turns and approval false. Common
+serial `startTurn`, event streams, result, interrupt and close operations
+apply. A turn appends a user message with `run: false`, observes its matching
+native echo, then calls `/run`. This deliberately avoids upstream's
+`run: true` behavior, which can queue a rerun instead of surfacing busy.
+HTTP `409` is a non-success outcome with the numeric status retained, not a
+retry or permission to interrupt another caller.
+Every HTTP request, including its response body, has the configured request
+deadline. The prompt's HTTP acknowledgement and matching socket echo share
+one deadline starting at submission; receiving the acknowledgement does not
+grant another full wait for the echo. An unanswered turn request is a
+`protocol-error`, distinct from a transport disconnect. Native execution
+itself uses the longer turn deadline.
+
+The live-only `/sockets/session/{id}` subscription uses the initial `sync`
+frame's sequence baseline. Startup also waits for the initial native
+`full_state` snapshot within the request deadline; missing readiness fails.
+Durable events must advance contiguously;
+duplicates, backwards sequences and gaps fail rather than silently skipping
+history. Harness does not reconnect/replay automatically. A `sync` frame,
+HTTP acknowledgement, stale state snapshot or `idle` transition is not turn
+completion.
+
+Completion requires the matched user message, successful `/run`
+acknowledgement, a current-run durable terminal `execution_status` transition,
+and a subsequent native `full_state` snapshot with matching terminal state.
+This conservative barrier retains final native errors and cumulative stats;
+a missing barrier reaches the configured deadline rather than inventing
+success. Native `finished` maps to `completed`, `error` to `agent-error`,
+`stuck` to the distinct `stuck` result, and `paused` to `interrupted`.
+Normal completion racing interruption remains completed.
+
+Every received event retains the complete WebSocket envelope in `raw`,
+including durable `seq` and the opaque native event. `type` is the inner
+event `kind` for durable/transient envelopes, otherwise the outer frame
+type; native event IDs supply `requestId` when present. Unknown well-shaped
+types remain visible in wire order. Events retain native session and local
+turn correlation; events outside a turn use null `turnId`.
+The pinned session channel does **not** produce token-delta frames: upstream
+intentionally drops `StreamingDeltaEvent` on this channel. No incremental
+token delivery or lossless upstream-history guarantee is claimed.
+
+HTTP JSON bodies and WebSocket messages are bounded to 1 MiB. Invalid UTF-8,
+JSON, known frame shapes, binary messages and oversized input fail as
+protocol-error; disconnect remains distinct. Existing single-consumer byte
+queues retain prior events and expose overflow through `eventsTruncated`.
+Native cumulative stats and estimated cost stay in
+`result.raw = {state, terminal_event}` and native events. Repeated totals
+are never summed, turned into per-turn deltas or represented as billed USD.
+There is no owned process: exitCode/signal are null and stderr is empty.
+
+### Permission and transport ownership
+
+Permissions preserve upstream defaults; the native default is `NeverConfirm`,
+not a sandbox. Harness does not change that policy or expose the native
+batch-approval endpoint. `respondApproval` is unsupported; a native
+`waiting_for_confirmation` state yields an explicit agent-error with native
+evidence, without granting/rejecting authority behind the caller's back.
+The server can remain waiting after the client releases its transport.
+Arbitrary commands/tools, profile/model switching, forks, goals, history
+management, provisioning and native callback registration have no API mapping.
+
+`interrupt()` sends `/interrupt` at most once, only after this handle's `/run`
+is accepted. An early call waits for submission; a rejected/busy run is never
+interrupted. It waits for acknowledgement plus native paused/terminal evidence,
+bounded by the request deadline. A complete terminal snapshot is latched while
+an interrupt reply is pending, so later pause frames cannot overwrite normal
+completion. A failed ancillary interrupt request does not discard that latched
+`finished`/`error`/`stuck` result; the local handle closes instead, so no
+follow-up turn runs against a handle whose remote interrupt state is unknown.
+While an interrupt mutation is still pending, the turn is not reported as
+settled. Native `paused` reports the agent state; it does not prove every
+remote tool process has exited. An HTTP success alone is insufficient:
+upstream may return after its bounded wait while native work still exists.
+
+`close()` is idempotent, settles an active local turn as `closed`, and releases
+only owned HTTP/WebSocket connections and client tasks. It never sends pause,
+interrupt, DELETE, server shutdown or configuration requests. Timeouts,
+protocol failures and disconnects likewise do not prove remote work stopped.
+Python cancellation waits for shielded local cleanup. Never kill the
+caller-owned server or its tools to escalate client disposal. Persisted
+conversation history and continuing remote work belong to the caller.
+
+### Qualification evidence
+
+`tests/openhands_cases.json`, the finite-lifetime synthetic HTTP/WebSocket
+peer, Python tests, Bun source tests and `node tests/node-openhands.mjs`
+cover the shared client protocol and ownership contract. These are
+**mock-server conformance**, not execution of OpenHands or a provider.
+
+- **Native-runtime synthetic-provider evidence: not run/unqualified.**
+  1.45.0 is the source pin; no caller-owned native endpoint was supplied.
+- **Authenticated-provider evidence: not run/unqualified.** No native endpoint,
+  workspace, model/profile or server auth was supplied for execution.
+  Fixture success does not qualify native tools, provider generation or cleanup.
+
+Pinned sources:
+[server metadata](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/server_details_router.py),
+[conversation requests](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-sdk/openhands/sdk/conversation/request.py),
+[conversation routes](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/conversation_router.py),
+[event execution](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/event_service.py),
+[session envelope](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/session_protocol.py),
+[ordered socket](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/session_socket.py),
+[profile API](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/agent_profiles_router.py),
+[LLM profile API](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/profiles_router.py),
+[server webhooks and memory policy](https://github.com/OpenHands/software-agent-sdk/blob/49ea74587c376b90700f6eff128c3d9b57585d27/openhands-agent-server/openhands/agent_server/conversation_service.py).
+
 ## Backend and session implementation gates
 
 These requirements govern the shipped Pi RPC, OMP/Amp/Cline SDK, Claude SDK and caller-owned
-OpenCode HTTP session implementations above and future backends. They keep the common library small; they do not
+OpenCode/OpenHands session implementations above and future backends. They keep the common library small; they do not
 enable additional SDKs or native protocols by themselves.
 
 - Backend selection is explicit and stable for a run/session. SDK dependencies
@@ -2240,7 +2439,8 @@ historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
 now ships under the execution contract above; controlled Pi RPC and optional
-OMP/Amp/Cline SDK, Claude SDK and caller-owned OpenCode HTTP sessions ship through their explicit API. Additional protocols and
+OMP/Amp/Cline SDK, Claude SDK and caller-owned OpenCode/OpenHands sessions ship through
+their explicit API. Additional protocols and
 SDKs remain implementation-gated.
 No package release is implied.
 
@@ -2277,9 +2477,10 @@ Harness provides CLI command construction, output parsing and headless execution
 
 Optional agent SDK/protocol integrations are now in scope for the library.
 This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
-consumer-owned host/fleet boundary. The optional OMP/Amp/Cline SDK bridges and native Claude SDK sessions implement the
-dependency and behavior requirements above. A raw model API,
-fleet manager, Linear engine or application is not an agent backend.
+consumer-owned host/fleet boundary. The optional OMP/Amp/Cline SDK bridges, native
+Claude SDK sessions and caller-owned OpenCode/OpenHands clients implement the
+dependency and behavior requirements above. A raw model API, fleet manager,
+Linear engine or application is not an agent backend.
 
 ---
 

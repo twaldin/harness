@@ -42,7 +42,7 @@ approval/bypass flags automatically. Unattended callers intentionally requiring
 the former behavior must set `permissionPolicy: 'bypass'`. Codex bypass also
 disables sandboxing. Unsupported bypass fails rather than being ignored.
 One-shot backend selection defaults to `cli`; selecting `rpc` or `sdk` through
-`RunSpec` throws `unsupported-backend`, without CLI fallback. Controlled Pi RPC
+`RunSpec` for a registered CLI adapter throws `unsupported-backend`, without CLI fallback. Controlled Pi RPC
 uses `openSession` below. See the [shared migration](../SPEC.md#permission-policy-and-migration).
 
 Codex app-server sessions remain **deferred/unsupported** after native
@@ -144,6 +144,34 @@ provider; those checks have not run. See the
 [paired examples](../README.md#caller-owned-opencode-http-sessions) and
 [full contract](../SPEC.md#caller-owned-opencode-http-sessions), including
 single-writer and auto-compaction limits.
+
+## Caller-owned OpenHands Agent Server backend
+
+`openSession({ harness: 'openhands', backend: 'rpc', workdir, model, openhands })`
+connects directly to a caller-owned **Agent Server 1.45.0** over HTTP/WebSocket.
+Node needs the optional `ws` 8.x peer; Bun supplies its runtime implementation.
+`OpenHandsOptions` requires `endpoint`,
+`apiKey` (server session key), `agentProfile` (existing server profile name) and
+`confirmNoUnwantedCallbacks: true`. Model and canonical absolute server
+workdir are explicit; provider credentials stay on the server.
+
+The confirmation means the caller checked that the server has no unwanted
+automation callbacks/webhooks. Harness registers none but **cannot inspect
+or disable server-configured webhooks**. Native profile tools and server
+configuration remain trusted, not isolated by the client.
+
+This is a session-only name, not a CLI adapter or native TypeScript agent.
+Resume preserves the exact UUID and never creates on 404. Busy 409, native
+stuck/error, interruption and disconnect are explicit. Approval and permission
+bypass are unsupported. A failed interrupt keeps an already-latched native
+result and closes the handle rather than permitting follow-up. Close/timeout
+clean up only local transport; remote work can continue and history is never
+deleted.
+
+Mock-server conformance is separate from native-server/provider qualification;
+neither native evidence category has run. See the
+[paired examples](../README.md#caller-owned-openhands-agent-server-sessions) and
+[full contract](../SPEC.md#caller-owned-openhands-agent-server-sessions).
 
 ## API reference
 

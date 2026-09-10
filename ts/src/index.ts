@@ -12,7 +12,7 @@ export type { RunSubprocessOptions } from './subproc.js'
 export type {
   SessionBackend, JsonObject, SessionReference, OmpSdkOptions, ClaudeSdkOptions, ClaudeSettingSource, AmpSdkOptions, AmpEffort, AmpVisibility,
   ClineSdkOptions, ClineApproval, ClineFeatures,
-  OpenCodeOptions, OpenCodeAuth, OpenCodeApprovalResponse, SessionSpec,
+  OpenCodeOptions, OpenCodeAuth, OpenCodeApprovalResponse, OpenHandsOptions, SessionSpec,
   SessionCapabilities, SessionTurnStatus, SessionEvent, SessionTurnResult, SessionTurn,
 } from './sessions.js'
 export { HarnessError, validateRunSpec } from './base.js'

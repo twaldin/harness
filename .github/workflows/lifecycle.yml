@@ -66,3 +66,6 @@ jobs:
       - name: Built-package Cline SDK conformance (Node)
         run: node tests/node-cline-sdk.mjs
         working-directory: ts
+      - name: Built-package caller-owned OpenHands conformance (Node)
+        run: node tests/node-openhands.mjs
+        working-directory: ts

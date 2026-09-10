@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import signal
-import subprocess
 import sys
 
 import pytest
@@ -21,22 +20,35 @@ pytestmark = pytest.mark.skipif(sys.platform not in ("darwin", "linux") or not S
 
 
 @pytest.fixture
-def configuration(tmp_path):
+async def configuration(tmp_path):
     providers = []
 
-    def make(scenario):
+    async def make(scenario):
         directory = tmp_path / scenario
         workdir = directory / "work"
         workdir.mkdir(parents=True)
         home = directory / "home"
         home.mkdir()
-        provider = subprocess.Popen(
-            [sys.executable, str(ROOT / "helpers/cline_provider.py"), str(workdir), scenario],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        provider = await asyncio.create_subprocess_exec(
+            sys.executable, str(ROOT / "helpers/cline_provider.py"), str(workdir), scenario,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
-        providers.append(provider)
-        endpoint = json.loads(provider.stdout.readline())["endpoint"]
+        errors = bytearray()
+
+        async def drain_errors():
+            while chunk := await provider.stderr.read(4096):
+                errors.extend(chunk)
+                del errors[:-8192]
+
+        draining = asyncio.create_task(drain_errors())
+        providers.append((provider, draining))
+        try:
+            handshake = await asyncio.wait_for(provider.stdout.readline(), 5)
+        except asyncio.TimeoutError as error:
+            raise AssertionError(f"synthetic provider readiness deadline; stderr: {errors.decode(errors='replace')}") from error
+        assert handshake, f"synthetic provider produced no endpoint; stderr: {errors.decode(errors='replace')}"
+        endpoint = json.loads(handshake)["endpoint"]
         config = directory / "config"
         settings = config / "data/settings"
         settings.mkdir(parents=True)
@@ -50,16 +62,15 @@ def configuration(tmp_path):
         )
 
     yield make
-    for provider in providers:
+    for provider, draining in providers:
         provider.stdin.close()
         try:
-            provider.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            assert provider.poll() is None and os.getpgid(provider.pid) == provider.pid
+            await asyncio.wait_for(provider.wait(), 5)
+        except asyncio.TimeoutError:
+            assert provider.returncode is None and os.getpgid(provider.pid) == provider.pid
             os.killpg(provider.pid, signal.SIGKILL)
-            provider.wait(timeout=2)
-        provider.stdout.close()
-        provider.stderr.close()
+            await asyncio.wait_for(provider.wait(), 2)
+        await draining
 
 
 async def collect(turn):
@@ -68,7 +79,7 @@ async def collect(turn):
 
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 async def test_native_cline_contract(configuration, case):
-    spec = configuration(case["name"])
+    spec = await configuration(case["name"])
     session = await open_session(spec)
     events = []
     operation = None
@@ -109,7 +120,7 @@ async def test_native_cline_contract(configuration, case):
 
 
 async def test_native_cline_followup_resume_and_identity_refusal(configuration):
-    spec = replace(configuration("followup"), instructions="Cline-owned instruction sentinel 8f26")
+    spec = replace(await configuration("followup"), instructions="Cline-owned instruction sentinel 8f26")
     instruction_file = spec.workdir / "CLINE.md"
     instruction_file.write_text("original caller instructions")
     session = await open_session(spec)
@@ -152,7 +163,7 @@ async def test_native_cline_followup_resume_and_identity_refusal(configuration):
 
 
 async def test_cline_rejects_unsupported_features_and_missing_dependency(configuration):
-    spec = configuration("invalid")
+    spec = await configuration("invalid")
     with pytest.raises(HarnessError) as unsupported:
         await open_session(replace(spec, cline_sdk=replace(spec.cline_sdk, features="native-hooks")))
     assert unsupported.value.code == "unsupported-capability"

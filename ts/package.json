@@ -17,7 +17,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=node --external @factory/droid-sdk/node && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && cp ../src/harness/_amp_sdk.mjs dist/amp-sdk.mjs && cp src/claude-sdk-worker.mjs dist/claude-sdk-worker.mjs && tsc -p tsconfig.build.json",
+    "build": "bun build src/index.ts --outdir=dist --target=node --external @factory/droid-sdk/node --external ws && cp ../src/harness/_omp_sdk.mjs dist/omp-sdk.mjs && cp ../src/harness/_amp_sdk.mjs dist/amp-sdk.mjs && cp src/claude-sdk-worker.mjs dist/claude-sdk-worker.mjs && tsc -p tsconfig.build.json",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test"
@@ -26,16 +26,20 @@
     "better-sqlite3": "^12.0.0"
   },
   "peerDependencies": {
-    "@factory/droid-sdk": "0.9.1"
+    "@factory/droid-sdk": "0.9.1",
+    "ws": "^8.18.0"
   },
   "peerDependenciesMeta": {
-    "@factory/droid-sdk": { "optional": true }
+    "@factory/droid-sdk": { "optional": true },
+    "ws": { "optional": true }
   },
   "devDependencies": {
     "@factory/droid-sdk": "0.9.1",
     "@anthropic-ai/claude-agent-sdk": "0.3.263",
     "@types/better-sqlite3": "^7.6.0",
     "@types/bun": "latest",
-    "typescript": "^5.0.0"
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.0.0",
+    "ws": "^8.18.0"
   }
 }

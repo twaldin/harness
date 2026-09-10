@@ -11,7 +11,7 @@ export type { InstructionProjection, ProjectInstructionsOptions, PreparedCommand
 export type { RunSubprocessOptions } from './subproc.js'
 export type {
   SessionBackend, JsonObject, SessionReference, OmpSdkOptions, ClaudeSdkOptions, ClaudeSettingSource, AmpSdkOptions, AmpEffort, AmpVisibility,
-  OpenCodeOptions, OpenCodeAuth, OpenCodeApprovalResponse,
+  OpenCodeOptions, OpenCodeAuth, OpenCodeApprovalResponse, OpenHandsOptions,
   FactoryDroidOptions, FactoryDroidCallback, FactoryDroidAutonomy, SessionSpec,
   SessionCapabilities, SessionTurnStatus, SessionEvent, SessionTurnResult, SessionTurn,
 } from './sessions.js'

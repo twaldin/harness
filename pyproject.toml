@@ -13,6 +13,7 @@ dependencies = [
 [project.optional-dependencies]
 opencode = ["httpx>=0.28,<0.29"]
 factory-droid = ["droid-sdk==0.4.0"]
+openhands = ["httpx>=0.28,<0.29", "websockets>=15,<16"]
 claude-sdk = ["claude-agent-sdk==0.2.152"]
 dev = [
     "pytest>=8.0",
@@ -20,6 +21,7 @@ dev = [
     "pytest-mock>=3.10",
     "httpx>=0.28,<0.29",
     "droid-sdk==0.4.0",
+    "websockets>=15,<16",
     "claude-agent-sdk==0.2.152",
 ]
 

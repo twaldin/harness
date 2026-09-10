@@ -1,6 +1,6 @@
 # Contributing to harness
 
-Harness is a small library for uniform coding-agent integration. CLI execution, controlled Pi RPC sessions, an optional OMP SDK bridge and caller-owned OpenCode HTTP/SSE and OpenHands HTTP/WebSocket sessions ship today; additional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
+Harness is a small library for uniform coding-agent integration. CLI execution, controlled Pi RPC sessions, optional OMP/Amp SDK bridges and caller-owned OpenCode HTTP/SSE and OpenHands HTTP/WebSocket sessions ship today; additional agent SDK/protocol backends must satisfy the shared [SPEC](SPEC.md#backend-and-session-implementation-gates) without adding a fleet manager or application.
 
 ## Before you open a PR
 
@@ -37,12 +37,13 @@ The `subprocess lifecycle` workflow gates macOS and Linux (GitHub
 `macos-latest` / `ubuntu-latest`) with Python 3.10, Bun 1.3.14 and Node 22.
 After `bun run build`, run `node tests/node-lifecycle.mjs` and
 `node tests/node-sessions.mjs`, `node tests/node-omp-sdk.mjs`,
-`node tests/node-opencode.mjs` and `node tests/node-openhands.mjs` from `ts/`
-to check packaged subprocess, RPC, optional SDK-bridge and HTTP/SSE/WebSocket
-behavior under Node as well as source under Bun.
-The SDK cases use a synthetic package through the
-real Bun worker, not an installed OMP/provider. No Windows lifecycle support
-is claimed.
+`node tests/node-amp-sdk.mjs`, `node tests/node-opencode.mjs` and
+`node tests/node-openhands.mjs` from `ts/` to check packaged subprocess, RPC,
+optional SDK-bridge and HTTP/SSE/WebSocket behavior under Node as well as
+source under Bun. OMP uses the real Bun worker with a synthetic SDK; Amp uses
+the real Node worker with a synthetic SDK and finite native CLI fixture.
+Neither requires an installed provider or account. No Windows lifecycle
+support is claimed.
 The remote cases share `tests/opencode_cases.json` and `tests/openhands_cases.json`
 with isolated synthetic peers, finite lifetimes and handle-owned cleanup.
 They are not native OpenCode/OpenHands or authenticated-provider qualification;
@@ -202,7 +203,7 @@ Add a row to [ADAPTER-MATRIX.md](ADAPTER-MATRIX.md) covering: CLI binary name, i
 Streaming, controlled sessions and optional agent SDK integrations are eligible
 when they implement the [SPEC gates](SPEC.md#backend-and-session-implementation-gates)
 in both languages. This supersedes the historical blanket SDK exclusion.
-Pi RPC, the OMP SDK bridge, caller-owned OpenCode HTTP/SSE and OpenHands
+Pi RPC, the OMP/Amp SDK bridges, caller-owned OpenCode HTTP/SSE and OpenHands
 HTTP/WebSocket are implemented; other protocols/SDKs need qualification.
 Keep optional SDK loading isolated from ordinary CLI imports and preserve
 existing caller-selected configuration.

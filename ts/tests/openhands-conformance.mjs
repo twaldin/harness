@@ -200,6 +200,7 @@ export async function runOpenHandsConformance(api) {
           assert.deepEqual(events.find((event) => event.type === 'SyntheticFutureEvent').raw.event.nested, { value: 42 })
           assert.equal(events.find((event) => event.type === 'item_started').raw.attempt, 1)
         }
+        if (scenario.error_envelope) assert.deepEqual(events.at(-1).raw, scenario.error_envelope)
         if (scenario.terminal) {
           assert.equal(result.raw.state.execution_status, scenario.terminal)
           assert.equal(result.raw.state.id, session.reference.sessionId)
@@ -217,7 +218,7 @@ export async function runOpenHandsConformance(api) {
           assert.equal(result.raw.http_status, scenario.http_status)
           assert.match(result.error, new RegExp(String(scenario.http_status)))
         }
-        if (scenario.error_contains) assert.match(result.error, new RegExp(scenario.error_contains))
+        if ('error' in scenario) assert.equal(result.error, scenario.error)
         if (scenario.closes_session) assert.equal(session.closed, true)
         // Native outcomes and HTTP rejections are turn results; the transport stays usable.
         else if (scenario.terminal || scenario.http_status) assert.equal(session.closed, false)
@@ -228,6 +229,7 @@ export async function runOpenHandsConformance(api) {
       const seen = await requests()
       preserved(seen)
       assert.equal(paths(seen, '/interrupt').length, 0)
+      if (scenario.no_run) assert.equal(paths(seen, '/run').length, 0)
     })
   }
 
@@ -308,6 +310,32 @@ export async function runOpenHandsConformance(api) {
     assert.equal(paths(await requests(), '/interrupt').length, 1)
     assert.equal(child.exitCode, null)
   })
+
+  for (const prompt of ['interrupt-http-error', 'interrupt-http-timeout', 'interrupt-http-disconnect']) {
+    await peer(async (spec, requests, child) => {
+      const session = await api.openSession(spec)
+      try {
+        let interrupted
+        const { result } = await collect(session.startTurn(prompt), (event) => {
+          if (isRunningEvent(event)) {
+            nudge(child, 1)
+            interrupted = session.interrupt()
+          }
+          if (isFinalState(event, 'finished')) nudge(child, 3)
+        })
+        assert.ok(interrupted)
+        await interrupted
+        assert.equal(result.status, 'completed', prompt)
+        assert.equal(result.raw.state.execution_status, 'finished')
+        assert.equal(session.closed, true)
+        assert.throws(() => session.startTurn('must not follow a failed interrupt mutation'))
+      } finally { await session.close() }
+      const seen = await requests()
+      assert.equal(paths(seen, '/interrupt').length, 1)
+      assert.equal(paths(seen, '/run').length, 1)
+      assert.equal(child.exitCode, null)
+    })
+  }
 
   await peer(async (spec, requests, child) => {
     const session = await api.openSession(spec)

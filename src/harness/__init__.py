@@ -59,6 +59,9 @@ from harness._instructions import (
 )
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.sessions import (
+    AmpEffort,
+    AmpSdkOptions,
+    AmpVisibility,
     LiveSession,
     OmpSdkOptions,
     OpenCodeApprovalResponse,
@@ -82,7 +85,10 @@ import harness.adapters  # noqa: E402,F401 — registers the shipped adapters
 __all__ = [
     "Adapter",
     "AgentStatus",
+    "AmpEffort",
     "AmpOptions",
+    "AmpSdkOptions",
+    "AmpVisibility",
     "Backend",
     "BuildCommand",
     "Capabilities",

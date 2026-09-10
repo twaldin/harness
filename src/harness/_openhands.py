@@ -69,6 +69,10 @@ class _TransportError(Exception):
     """Connection, timeout or decoding failure; the message never carries body bytes."""
 
 
+class _RequestTimeout(_TransportError):
+    """No bounded HTTP reply; a protocol failure after startup."""
+
+
 class _ProtocolError(Exception):
     """The server answered, but not with the pinned protocol."""
 
@@ -196,10 +200,20 @@ class _OpenHandsSession(LiveSession):
     async def _exchange(self, method: str, path: str, *, body: object | None = None) -> tuple[int, bytes]:
         """One request bounded by `request_timeout_seconds`; `(status, body
         bytes)` with the body capped at `MAX_FRAME_BYTES`."""
+        request = asyncio.create_task(self._exchange_once(method, path, body))
         try:
-            return await asyncio.wait_for(self._exchange_once(method, path, body), self._rt)
+            return await asyncio.wait_for(request, self._rt)
         except asyncio.TimeoutError:
-            raise _TransportError(f"{method} {path} exceeded request_timeout_seconds={self._rt}") from None
+            raise _RequestTimeout(f"{method} {path} exceeded request_timeout_seconds={self._rt}") from None
+        finally:
+            # Own the inner task even when cancellation races its exception;
+            # Python 3.10 wait_for can otherwise leave that failure unobserved.
+            if not request.done():
+                request.cancel()
+            try:
+                await request
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def _exchange_once(self, method: str, path: str, body: object | None) -> tuple[int, bytes]:
         assert self._client is not None
@@ -282,12 +296,13 @@ class _OpenHandsSession(LiveSession):
                 return
             turn.submitted = True
             body = {"role": "user", "content": [{"type": "text", "text": turn.prompt}], "run": False}
+            echo_deadline = self._loop.time() + self._rt
             status_code, data = await self._exchange("POST", f"{conversation}/events", body=body)
             if turn.finished or self._failure is not None or not self._acknowledged(turn, f"POST {conversation}/events", status_code, data):
                 return
             assert turn.echo is not None
             try:
-                await asyncio.wait_for(asyncio.shield(turn.echo), self._rt)
+                await asyncio.wait_for(asyncio.shield(turn.echo), max(0, echo_deadline - self._loop.time()))
             except asyncio.TimeoutError:
                 raise _ProtocolError(f"the user message was not echoed on the session socket within request_timeout_seconds={self._rt}") from None
             if turn.finished or self._failure is not None:
@@ -297,11 +312,11 @@ class _OpenHandsSession(LiveSession):
             if turn.finished or self._failure is not None or not self._acknowledged(turn, f"POST {conversation}/run", status_code, data):
                 return
             turn.run_accepted = True
+        except (_RequestTimeout, _ProtocolError) as exc:
+            self._fail("protocol-error", str(exc))
+            return
         except _TransportError as exc:
             self._fail("disconnected", f"turn request failed: {exc}")
-            return
-        except _ProtocolError as exc:
-            self._fail("protocol-error", str(exc))
             return
         self._maybe_finish(turn)
         if turn.abort_requested and not turn.finished and self._failure is None:
@@ -363,14 +378,15 @@ class _OpenHandsSession(LiveSession):
             raise _ProtocolError(f'{what} did not acknowledge with {{"success": true}}')
         return True
 
-    def _maybe_finish(self, turn: _WsTurn) -> None:
+    def _maybe_finish(self, turn: _WsTurn, *, interrupt_failed: bool = False) -> None:
         if turn.finished or self._failure is not None:
             return
         if not turn.run_accepted or turn.terminal is None or turn.state is None:
             return
-        if turn.abort_sent and not turn.abort_acknowledged:
-            return
         status = turn.terminal_status
+        if turn.abort_sent and not turn.abort_acknowledged:
+            if not interrupt_failed or status not in ("finished", "error", "stuck"):
+                return
         raw: dict[str, object] = {"state": turn.state, "terminal_event": turn.terminal}
         if status == "finished":
             self._finish(turn, "completed", raw, None)
@@ -379,10 +395,18 @@ class _OpenHandsSession(LiveSession):
         elif status == "stuck":
             self._finish(turn, "stuck", raw, "conversation ended with execution_status 'stuck' (native stuck detection)")
         elif status == "paused":
-            self._finish(turn, "interrupted", raw, None if turn.abort_requested else "run paused on the server without a local interrupt")
+            self._finish(turn, "interrupted", raw, None)
         else:
             self._finish(turn, "agent-error", raw, _UNSUPPORTED_APPROVAL)
             self._fail("agent-error", _UNSUPPORTED_APPROVAL)
+
+    def _interrupt_failed(self, turn: _WsTurn, status: SessionTurnStatus, error: str) -> None:
+        if turn.finished or self._failure is not None:
+            return
+        # Preserve observed native completion, but close in the same loop tick:
+        # a failed mutation must never release a usable follow-up slot.
+        self._maybe_finish(turn, interrupt_failed=True)
+        self._fail(status, error)
 
     async def _send_interrupt(self, turn: _WsTurn) -> None:
         if turn.finished or self._failure is not None or turn.abort_sent:
@@ -391,17 +415,17 @@ class _OpenHandsSession(LiveSession):
         path = f"/api/conversations/{self.reference.session_id}/interrupt"
         try:
             status, data = await self._exchange("POST", path)
-        except _TransportError as exc:
-            self._fail("disconnected", f"interrupt request failed: {exc}")
+        except (_RequestTimeout, _ProtocolError) as exc:
+            self._interrupt_failed(turn, "protocol-error", str(exc))
             return
-        except _ProtocolError as exc:
-            self._fail("protocol-error", str(exc))
+        except _TransportError as exc:
+            self._interrupt_failed(turn, "disconnected", f"interrupt request failed: {exc}")
             return
         if turn.finished or self._failure is not None:
             return
         parsed = self._parse_json(data)
         if status != 200 or not isinstance(parsed, dict) or parsed.get("success") is not True:
-            self._fail("protocol-error", f"interrupt was not acknowledged with HTTP 200 {{\"success\": true}} (HTTP {status})")
+            self._interrupt_failed(turn, "protocol-error", f"interrupt was not acknowledged with HTTP 200 {{\"success\": true}} (HTTP {status})")
             return
         turn.abort_acknowledged = True
         self._maybe_finish(turn)
@@ -409,7 +433,7 @@ class _OpenHandsSession(LiveSession):
     def _on_abort_timeout(self, turn: _WsTurn) -> None:
         if turn.finished:
             return
-        self._fail("protocol-error", f"turn {turn.handle.id} did not reach paused / a terminal execution_status within request_timeout_seconds={self._rt} after interrupt")
+        self._interrupt_failed(turn, "protocol-error", f"turn {turn.handle.id} did not reach paused / a terminal execution_status within request_timeout_seconds={self._rt} after interrupt")
 
     # ---- events --------------------------------------------------------------
 
@@ -600,7 +624,7 @@ class _OpenHandsSession(LiveSession):
         self._client = self._httpx.AsyncClient(
             base_url=self._options.endpoint,
             headers={"accept": "application/json", "x-session-api-key": self._options.api_key},
-            timeout=self._httpx.Timeout(self._rt),
+            timeout=None,  # _exchange owns the single end-to-end request deadline.
             trust_env=False,
             follow_redirects=False,
         )

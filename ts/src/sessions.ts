@@ -26,7 +26,11 @@
 // shares the spec validation, `EventQueue`, `TurnCore` and result shapes
 // declared here, never a child process.
 //
-// `openhands` on `rpc` is the fourth: direct HTTP + WebSocket against a
+// `amp` on `sdk` is the fourth: one finite Node worker (`_amp_sdk.mjs`,
+// loading the caller-installed @ampcode/sdk) per operation, driven through
+// the shared subprocess runner. Implemented in amp.ts and loaded lazily.
+//
+// `openhands` on `rpc` is the fifth: direct HTTP + WebSocket against a
 // caller-owned OpenHands Agent Server (openhands.ts, loaded lazily together
 // with the optional `ws` peer). It is session-only: there is no one-shot
 // adapter, so `getAdapter('openhands')` stays unknown-harness.
@@ -44,11 +48,11 @@ import type { PreparedCommand } from './instructions.js'
 import { DRAIN_MS, GRACE_MS, assertSupportedPlatform, describeError } from './lifecycle.js'
 import { getAdapter } from './registry.js'
 
-/** `rpc` drives `pi` (and `opencode`/`openhands` over HTTP); `sdk` drives `omp` through the owned Bun bridge. Any other pairing (and `cli`) is `unsupported-backend`. */
+/** `rpc` drives `pi` (and `opencode`/`openhands` over HTTP); `sdk` drives `omp` through the owned Bun bridge and `amp` through the Node SDK worker. Any other pairing (and `cli`) is `unsupported-backend`. */
 export type SessionBackend = 'rpc' | 'sdk'
 
 /** The harnesses with a live session backend. `openhands` has no CLI adapter and exists only here. */
-type SessionHarness = 'pi' | 'omp' | 'opencode' | 'openhands'
+type SessionHarness = 'pi' | 'omp' | 'opencode' | 'amp' | 'openhands'
 
 /**
  * Selection of the caller-installed OMP SDK. Nothing here is guessed: the
@@ -61,6 +65,44 @@ export interface OmpSdkOptions {
   agentDir: string
   /** `local` opens the profile credential DB; `environment` uses an in-memory DB. Both retain native environment/dotenv/models.yml auth resolution. */
   auth: 'local' | 'environment'
+}
+
+/** Native Amp reasoning effort; omitted leaves the CLI default. */
+export type AmpEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** Native Amp thread visibility; only applied when a thread is created. */
+export type AmpVisibility = 'private' | 'unlisted' | 'workspace' | 'group'
+
+/**
+ * Selection of the caller-installed Amp TypeScript SDK (pinned
+ * @ampcode/sdk 0.1.0-20260823161614-g3631dc6 driving the pinned native CLI
+ * 0.0.1788883237-g0b98e3). Nothing is discovered: the SDK package, the CLI
+ * binary and the mode are all explicit. No model option exists; Amp routes
+ * models through `mode`.
+ */
+export interface AmpSdkOptions {
+  /** Absolute path to the caller-installed `@ampcode/sdk` package directory (loaded by the worker, never by this process). */
+  packageRoot: string
+  /** Absolute path of the native `amp` CLI the SDK executes; the worker verifies its version through `--version`. */
+  cliPath: string
+  /** Only `local` is supported: the SDK runs the CLI on this machine. */
+  executor: 'local'
+  /** Native Amp mode, required so the SDK never silently selects its own default. Passed through verbatim (trimmed); the CLI validates it. */
+  mode: string
+  effort?: AmpEffort
+  /** Thread visibility at creation. Rejected together with `resume`: an existing thread's visibility is never changed. */
+  visibility?: AmpVisibility
+  /** Absolute path of a caller-owned Amp settings file (`--settings-file`). */
+  settingsFile?: string
+}
+
+/** `AmpSdkOptions` after validation plus the derived native endpoint. */
+export interface ResolvedAmpSdkOptions extends AmpSdkOptions {
+  readonly effort: AmpEffort | undefined
+  readonly visibility: AmpVisibility | undefined
+  readonly settingsFile: string | undefined
+  /** Normalized origin of `AMP_URL` (the session's `env`, else the inherited process env, else `https://ampcode.com`); the worker enforces it. */
+  readonly endpoint: string
 }
 
 export type OpenCodeAuth = 'none' | 'basic'
@@ -122,30 +164,35 @@ export interface SessionReference {
 
 export interface SessionSpec {
   harness: string
-  /** Local absolute directory for `pi`/`omp`; for `opencode` and `openhands` the literal absolute POSIX directory on the server (never resolved or created locally). */
+  /** Local absolute directory for `pi`/`omp`/`amp`; for `opencode` and `openhands` the literal absolute POSIX directory on the server (never resolved or created locally). */
   workdir: string
-  /** Required; `rpc` for `pi`, `opencode` and `openhands`, `sdk` for `omp`. */
+  /** Required; `rpc` for `pi`, `opencode` and `openhands`, `sdk` for `omp` and `amp`. */
   backend: SessionBackend
-  /** Passed through as `--model <trimmed>` (rpc), to the SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. Required on `openhands`: the exact native model the selected profile's LLM profile must declare. */
+  /** Passed through as `--model <trimmed>` (rpc), to the OMP SDK worker (sdk) or as `provider/model` (opencode); absent leaves the model to the harness's own defaults. Rejected for `amp`, which routes models through `ampSdk.mode`. Required on `openhands`: the exact native model the selected profile's LLM profile must declare. */
   model?: string
-  /** Layered over the inherited process env; never mutated. On `sdk`, entries conflicting with the owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected. Must be empty on `opencode` and `openhands`. */
+  /** Layered over the inherited process env; never mutated. For `omp`, entries conflicting with the owned `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR` are rejected; for `amp`, `AMP_SKIP_UPDATE_CHECK` may only be `"1"` and `AMP_URL` selects the endpoint. Must be empty on `opencode` and `openhands`. */
   env?: Record<string, string>
-  /** Replaces the `pi` binary (rpc) or the `bun` binary running the bridge worker (sdk): a bare name resolved on PATH or an absolute path. Rejected on server sessions. */
+  /** Replaces the `pi` binary (rpc), the `bun` binary running the OMP bridge worker or the `node` binary running the Amp SDK worker: a bare name resolved on PATH or an absolute path. Rejected on server sessions. */
   executable?: string
   /** Only `upstream` is supported; `bypass` is rejected. */
   permissionPolicy?: PermissionPolicy
   /** Projected into `AGENTS.md` for the session's lifetime. Rejected on server sessions (no local workdir). */
   instructions?: string
-  /** Resume an existing native session; needs `sessionFile` and the full `sessionId` (on `opencode`/`openhands`: a null `sessionFile`, the matching `endpoint` and the full native ID). */
+  /** Resume an existing native session; needs `sessionFile` and the full `sessionId` (on `opencode`/`amp`/`openhands`: a null `sessionFile`, the matching `endpoint` and the full native ID). */
   resume?: SessionReference
   /** Wall-clock limit per turn; defaults to 1800. `null` disables it. */
   timeoutSeconds?: number | null
-  /** Bound on every native request/response round trip; defaults to 30. */
+  /** Bound on every native request/response round trip; defaults to 30.
+   * On `amp` it also bounds `open` and each turn's native initialization (until
+   * the worker reports the thread identity). On `openhands`, submission through
+   * the matching socket echo shares one deadline; interruption is also bounded. */
   requestTimeoutSeconds?: number
   /** Bytes of unconsumed events buffered per turn (and for idle session events); defaults to 1 MiB. Overflow is a protocol error, never a silent drop. */
   maxBufferBytes?: number
-  /** Required on `sdk`, rejected on `rpc`. */
+  /** Required for harness `omp`, rejected otherwise. */
   ompSdk?: OmpSdkOptions
+  /** Required for harness `amp`, rejected otherwise. */
+  ampSdk?: AmpSdkOptions
   /** Required for harness `opencode`, rejected otherwise. */
   opencode?: OpenCodeOptions
   /** Required for harness `openhands`, rejected otherwise. */
@@ -159,7 +206,7 @@ export interface ResolvedSessionSpec {
   readonly backend: SessionBackend
   readonly model: string | null
   readonly env: Readonly<Record<string, string>>
-  /** Leader binary for process sessions; null on server sessions. */
+  /** Leader binary for process sessions (the worker runtime on `sdk`); null on server sessions. */
   readonly executable: string | null
   readonly permissionPolicy: PermissionPolicy
   readonly instructions: string | null
@@ -167,8 +214,10 @@ export interface ResolvedSessionSpec {
   readonly timeoutSeconds: number | null
   readonly requestTimeoutSeconds: number
   readonly maxBufferBytes: number
-  /** Frozen copy of the caller's selection on `sdk`; null otherwise. */
+  /** Frozen copy of the caller's selection for `omp`; null otherwise. */
   readonly ompSdk: Readonly<OmpSdkOptions> | null
+  /** Frozen copy of the caller's selection for `amp` plus the derived endpoint; null otherwise. */
+  readonly ampSdk: ResolvedAmpSdkOptions | null
   /** Frozen, endpoint-normalized copy of the caller's selection for `opencode`; null otherwise. */
   readonly opencode: Readonly<OpenCodeOptions> | null
   /** Frozen, endpoint-normalized copy of the caller's selection for `openhands`; null otherwise. */
@@ -199,14 +248,14 @@ export type SessionTurnStatus =
   /** `openhands` only: native stuck detection stopped the run. */
   | 'stuck'
 
-/** One native frame, response frames included. Unknown native event types pass through untouched in `raw`; on `sdk`, `raw` is the exact native SDK event, never the bridge wrapper; on `opencode`, `raw` is the decoded SSE `{id, type, properties}` object; on `openhands`, `raw` is the whole session-socket envelope (`seq` retained). */
+/** One native frame, response frames included. Unknown native event types pass through untouched in `raw`; on `sdk`, `raw` is the exact native SDK event, never the bridge/worker wrapper; on `opencode`, `raw` is the decoded SSE `{id, type, properties}` object; on `openhands`, `raw` is the whole session-socket envelope (`seq` retained). */
 export interface SessionEvent {
   backend: SessionBackend
   harness: SessionHarness
   sessionId: string
   /** Null for frames that arrived while no turn was active, and on `opencode` for message frames of the selected session that do not belong to the active turn's lineage. */
   turnId: string | null
-  /** The native `id` correlation field when the frame carries one; on `opencode` the native message or permission request ID; on `openhands` the inner native event `id`. */
+  /** The native `id` correlation field when the frame carries one; on `opencode` the native message or permission request ID; on `openhands` the inner native event `id`; always null on `amp`. */
   requestId: string | null
   /** Native `type` string; on `openhands` the inner event `kind` for durable/transient frames, the envelope `type` otherwise. */
   type: string
@@ -217,13 +266,13 @@ export interface SessionTurnResult {
   sessionId: string
   turnId: string
   status: SessionTurnStatus
-  /** Last `agent_end` payload, the failed `prompt` response, the failing `sdk_settled` bridge frame, on `opencode` the native prompt response (`{info, parts}`) / failing HTTP JSON body, or on `openhands` `{state, terminal_event}` (final native `full_state` and the durable terminal transition) / `{http_status, body}` for a rejected request. */
+  /** Last `agent_end` payload, the failed `prompt` response, the failing `sdk_settled` bridge frame, on `amp` the last native SDK result the worker reported, on `opencode` the native prompt response (`{info, parts}`) / failing HTTP JSON body, or on `openhands` `{state, terminal_event}` (final native `full_state` and the durable terminal transition) / `{http_status, body}` for a rejected request. */
   raw: JsonObject | null
   error: string | null
-  /** Leader exit code once reaped, else null. Signaled exits report `-signum`. Always null on server sessions (no process is observed). */
+  /** Leader exit code once reaped, else null. Signaled exits report `-signum`. On `amp` the native CLI's exit as observed by the worker (the worker's own exit only when it failed before reporting). Always null on server sessions (no process is observed). */
   exitCode: number | null
   signal: string | null
-  /** Bounded prefix of the session's stderr so far; empty with `stderrBytes` 0 on server sessions. */
+  /** Bounded prefix of the session's stderr so far; on `amp` the stderr of this turn's own worker; empty with `stderrBytes` 0 on server sessions. */
   stderr: string
   stderrBytes: number
   stderrTruncated: boolean
@@ -249,7 +298,7 @@ const DEFAULT_MAX_BUFFER_BYTES = 1_048_576
 export const MAX_FRAME_BYTES = 1_048_576
 const PROBE_MS = 20
 /** Characters of stderr quoted in handshake failure messages. */
-const STDERR_EXCERPT = 512
+export const STDERR_EXCERPT = 512
 const LF = 0x0a
 const CR = 0x0d
 /** Native OpenCode session IDs: the server validates the prefix only, so the rest is merely required to be safe alphanumerics. */
@@ -262,6 +311,11 @@ export const OPENHANDS_PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 /** A header-safe credential: printable ASCII without whitespace. */
 const PRINTABLE_TOKEN = /^[\u0021-\u007e]+$/
+/** Full native Amp thread IDs (`T-` plus a lowercase UUID); never a prefix. */
+export const AMP_THREAD_ID = /^T-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const AMP_DEFAULT_ENDPOINT = 'https://ampcode.com'
+const AMP_EFFORTS: readonly string[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+const AMP_VISIBILITIES: readonly string[] = ['private', 'unlisted', 'workspace', 'group']
 
 export function invalid(message: string): HarnessError {
   return new HarnessError(message, 'invalid-options')
@@ -297,7 +351,7 @@ function realpathOrSelf(path: string): string {
 }
 
 /** Raw equality or equality after symlink resolution on both sides (Pi records `/private/tmp` for `/tmp`). */
-function samePath(a: string, b: string): boolean {
+export function samePath(a: string, b: string): boolean {
   return a === b || realpathOrSelf(a) === realpathOrSelf(b)
 }
 
@@ -320,10 +374,10 @@ function ompSdkEnv(options: Readonly<OmpSdkOptions>): Readonly<Record<string, st
 }
 
 /** Which backend each session harness is qualified on; anything else is `unsupported-backend`. */
-const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', openhands: 'rpc' }
+const SESSION_BACKENDS: Readonly<Record<SessionHarness, SessionBackend>> = { pi: 'rpc', omp: 'sdk', opencode: 'rpc', amp: 'sdk', openhands: 'rpc' }
 
 function isSessionHarness(name: string): name is SessionHarness {
-  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'openhands'
+  return name === 'pi' || name === 'omp' || name === 'opencode' || name === 'amp' || name === 'openhands'
 }
 
 /** Resolve the harness first, then validate the backend before rejecting an unsupported pairing. `openhands` is session-only: it never goes through the adapter registry. */
@@ -334,7 +388,7 @@ function requireSessionHarness(name: unknown, backend: unknown): { harness: Sess
     throw invalid(`Unknown backend: ${JSON.stringify(backend)}. Expected one of: cli, rpc, sdk`)
   }
   if (!isSessionHarness(resolved)) {
-    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "openhands" (rpc) and "omp" (sdk) are supported`, 'unsupported-backend')
+    throw new HarnessError(`Harness "${name}" has no live session backend; only "pi" (rpc), "opencode" (rpc), "openhands" (rpc), "omp" (sdk) and "amp" (sdk) are supported`, 'unsupported-backend')
   }
   const qualified = SESSION_BACKENDS[resolved]
   if (backend !== qualified) {
@@ -379,11 +433,49 @@ function resolveOmpSdk(raw: unknown): Readonly<OmpSdkOptions> {
   return Object.freeze({ packageRoot, agentDir, auth })
 }
 
+function isAmpEffort(value: unknown): value is AmpEffort {
+  return typeof value === 'string' && AMP_EFFORTS.includes(value)
+}
+
+function isAmpVisibility(value: unknown): value is AmpVisibility {
+  return typeof value === 'string' && AMP_VISIBILITIES.includes(value)
+}
+
+/** Validate the caller's Amp SDK selection; every field is explicit, nothing is probed on disk. `endpoint` is derived from `AMP_URL` (session env, then inherited env). */
+function resolveAmpSdk(raw: unknown, env: Readonly<Record<string, string>>): ResolvedAmpSdkOptions {
+  if (!isJsonObject(raw)) throw invalid('ampSdk must be an AmpSdkOptions object')
+  const unsupported = Object.keys(raw).find((key) => !['packageRoot', 'cliPath', 'executor', 'mode', 'effort', 'visibility', 'settingsFile'].includes(key))
+  if (unsupported !== undefined) throw invalid(`ampSdk contains an unsupported option ${JSON.stringify(unsupported)}`)
+  const { packageRoot, cliPath, executor, mode, effort, visibility, settingsFile } = raw
+  if (typeof packageRoot !== 'string' || !isAbsolute(packageRoot) || packageRoot.includes('\0')) {
+    throw invalid('ampSdk.packageRoot must be the absolute path of the installed @ampcode/sdk package')
+  }
+  if (typeof cliPath !== 'string' || !isAbsolute(cliPath) || cliPath.includes('\0')) {
+    throw invalid('ampSdk.cliPath must be the absolute path of the native amp CLI')
+  }
+  if (executor !== 'local') throw invalid(`ampSdk.executor must be "local", got ${JSON.stringify(executor)}`)
+  if (typeof mode !== 'string' || mode.trim() === '' || mode.includes('\0')) {
+    throw invalid('ampSdk.mode must be a non-blank string without NUL bytes; the SDK default is never selected implicitly')
+  }
+  if (effort !== undefined && !isAmpEffort(effort)) {
+    throw invalid(`ampSdk.effort must be one of ${AMP_EFFORTS.join(', ')}, got ${JSON.stringify(effort)}`)
+  }
+  if (visibility !== undefined && !isAmpVisibility(visibility)) {
+    throw invalid(`ampSdk.visibility must be one of ${AMP_VISIBILITIES.join(', ')}, got ${JSON.stringify(visibility)}`)
+  }
+  if (settingsFile !== undefined && (typeof settingsFile !== 'string' || !isAbsolute(settingsFile) || settingsFile.includes('\0'))) {
+    throw invalid('ampSdk.settingsFile must be an absolute path')
+  }
+  const url = env.AMP_URL ?? process.env.AMP_URL ?? AMP_DEFAULT_ENDPOINT
+  const endpoint = normalizeEndpoint(url, 'env.AMP_URL')
+  return Object.freeze({ packageRoot, cliPath, executor, mode: mode.trim(), effort, visibility, settingsFile, endpoint })
+}
+
 /**
- * Normalize an OpenCode endpoint to its origin (`scheme://host[:port]`, lower
- * case, default port dropped). Only an absolute http(s) origin with at most a
- * trailing slash is accepted: no credentials, path, query, fragment,
- * whitespace or control characters.
+ * Normalize a native endpoint (an OpenCode or OpenHands server, or `AMP_URL`)
+ * to its origin (`scheme://host[:port]`, lower case, default port dropped).
+ * Only an absolute http(s) origin with at most a trailing slash is accepted:
+ * no credentials, path, query, fragment, whitespace or control characters.
  */
 function normalizeEndpoint(raw: unknown, field: string): string {
   if (typeof raw !== 'string' || raw === '') throw invalid(`${field} must be a non-empty http(s) origin`)
@@ -516,17 +608,45 @@ function resolveServerReference(raw: unknown, workdir: string, endpoint: string,
   return { sessionId, sessionFile: null, workdir, endpoint }
 }
 
+/** Resume target for Amp: the full `T-` thread ID on the same derived endpoint and local workdir, with no session file. Verified through the SDK in `open`. */
+function resolveAmpReference(raw: unknown, workdir: string, endpoint: string): SessionReference {
+  if (!isJsonObject(raw)) throw invalid('resume must be a SessionReference object')
+  const { sessionId, sessionFile, workdir: refWorkdir, endpoint: refEndpoint } = raw
+  if (typeof sessionId !== 'string' || !AMP_THREAD_ID.test(sessionId)) {
+    throw invalid('resume.sessionId must be the full native Amp thread ID (T- followed by a lowercase UUID)')
+  }
+  if (sessionFile !== null) throw invalid('resume.sessionFile must be null for Amp sessions; threads live on the server, not in a local file')
+  if (typeof refWorkdir !== 'string' || !isAbsolute(refWorkdir) || refWorkdir.includes('\0')) {
+    throw invalid('resume.workdir must be an absolute path')
+  }
+  if (!samePath(refWorkdir, workdir)) {
+    throw invalid(`resume.workdir ${JSON.stringify(refWorkdir)} does not match the session workdir ${JSON.stringify(workdir)}`)
+  }
+  if (refEndpoint === undefined) throw invalid('resume.endpoint is required for Amp sessions')
+  const normalized = normalizeEndpoint(refEndpoint, 'resume.endpoint')
+  if (normalized !== endpoint) {
+    throw invalid(`resume.endpoint ${JSON.stringify(normalized)} does not match the AMP_URL endpoint ${JSON.stringify(endpoint)}`)
+  }
+  return { sessionId, sessionFile: null, workdir, endpoint }
+}
+
 /** Apply defaults and validate. Pure: nothing is touched on disk or on the network. */
 function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   if (!isJsonObject(spec)) throw invalid('spec must be a SessionSpec object')
   const { harness, backend } = requireSessionHarness(spec.harness, spec.backend)
   const rawOmpSdk: unknown = spec.ompSdk
   let ompSdk: Readonly<OmpSdkOptions> | null = null
-  if (backend === 'sdk') {
-    if (rawOmpSdk === undefined) throw invalid('ompSdk is required on backend "sdk": packageRoot, agentDir and auth are never guessed')
+  if (harness === 'omp') {
+    if (rawOmpSdk === undefined) throw invalid('ompSdk is required for harness "omp": packageRoot, agentDir and auth are never guessed')
     ompSdk = resolveOmpSdk(rawOmpSdk)
   } else if (rawOmpSdk !== undefined) {
     throw invalid('ompSdk is only accepted for harness "omp" on backend "sdk"')
+  }
+  const rawAmpSdk: unknown = spec.ampSdk
+  if (harness === 'amp') {
+    if (rawAmpSdk === undefined) throw invalid('ampSdk is required for harness "amp": packageRoot, cliPath, executor and mode are never guessed')
+  } else if (rawAmpSdk !== undefined) {
+    throw invalid('ampSdk is only accepted for harness "amp" on backend "sdk"')
   }
   const rawOpenCode: unknown = spec.opencode
   let opencode: Readonly<OpenCodeOptions> | null = null
@@ -555,6 +675,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
   let model: string | null = null
   const rawModel: unknown = spec.model
   if (rawModel !== undefined) {
+    if (harness === 'amp') throw invalid('model is not supported for amp: ampSdk.mode selects the native routing')
     if (typeof rawModel !== 'string' || rawModel.includes('\0')) throw invalid('model must be a string without NUL bytes')
     model = rawModel.trim()
     if (model === '') throw invalid('model must not be empty')
@@ -594,8 +715,17 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
       }
     }
   }
+  // The Amp endpoint derives from the layered env, so the selection resolves after it.
+  let ampSdk: ResolvedAmpSdkOptions | null = null
+  if (harness === 'amp') {
+    const skip = env.AMP_SKIP_UPDATE_CHECK
+    if (skip !== undefined && skip !== '1') {
+      throw invalid(`env.AMP_SKIP_UPDATE_CHECK ${JSON.stringify(skip)} conflicts with the session-owned value "1": the worker never lets the CLI self-update`)
+    }
+    ampSdk = resolveAmpSdk(rawAmpSdk, env)
+  }
 
-  let executable: string | null = backend === 'sdk' ? 'bun' : 'pi'
+  let executable: string | null = harness === 'omp' ? 'bun' : harness === 'amp' ? 'node' : 'pi'
   const rawExecutable: unknown = spec.executable
   if (remote) {
     if (rawExecutable !== undefined) throw invalid(`executable is not supported for ${harness}: no local process is launched`)
@@ -626,11 +756,13 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
 
   let resume: SessionReference | null = null
   if (spec.resume !== undefined) {
-    resume = opencode !== null
-      ? resolveServerReference(spec.resume, workdir, opencode.endpoint, 'opencode')
-      : openhands !== null
-        ? resolveServerReference(spec.resume, workdir, openhands.endpoint, 'openhands')
-        : resolveReference(spec.resume, workdir)
+    if (opencode !== null) resume = resolveServerReference(spec.resume, workdir, opencode.endpoint, 'opencode')
+    else if (openhands !== null) resume = resolveServerReference(spec.resume, workdir, openhands.endpoint, 'openhands')
+    else if (ampSdk !== null) resume = resolveAmpReference(spec.resume, workdir, ampSdk.endpoint)
+    else resume = resolveReference(spec.resume, workdir)
+  }
+  if (ampSdk !== null && resume !== null && ampSdk.visibility !== undefined) {
+    throw invalid('ampSdk.visibility only applies when a thread is created; it cannot be combined with resume')
   }
 
   let timeoutSeconds: number | null = DEFAULT_TIMEOUT_SECONDS
@@ -671,6 +803,7 @@ function resolveSessionSpec(spec: SessionSpec): ResolvedSessionSpec {
     requestTimeoutSeconds,
     maxBufferBytes,
     ompSdk,
+    ampSdk,
     opencode,
     openhands,
   })
@@ -910,7 +1043,7 @@ function lastAssistantMessage(messages: unknown): JsonObject | null {
 /**
  * An open live session. Obtain one through `openSession`; the native
  * resources (process group, workdir lease and projected instructions for
- * `pi`/`omp`; HTTP connections and the event stream or socket for
+ * `pi`/`omp`/`amp`; HTTP connections and the event stream or socket for
  * `opencode`/`openhands`) are owned until `close()` (or an internal failure)
  * tears them down. Turns are sequential: the next `startTurn` after a settled
  * result is a follow-up in the same native session. There is no callback API;
@@ -935,6 +1068,11 @@ export abstract class LiveSession {
       // Lazy by contract: the HTTP/WebSocket transport (and its optional `ws` peer) is only loaded for OpenHands.
       const { OpenHandsSession } = await import('./openhands.js')
       return OpenHandsSession.connect(spec)
+    }
+    if (spec.ampSdk !== null) {
+      // Lazy by contract: the Node SDK worker transport is only loaded when an Amp session is selected.
+      const { AmpSession } = await import('./amp.js')
+      return AmpSession.launch(spec)
     }
     return ProcessSession.launch(spec)
   }
@@ -1612,10 +1750,13 @@ class ProcessSession extends LiveSession {
  * AGENTS.md), spawn the leader (`pi --mode rpc`, or `bun` running the OMP SDK
  * bridge worker) and complete the `get_state` handshake; rejects with the
  * lease released and the process group stopped when any step fails. For
- * `opencode`/`openhands`: qualify the caller-owned server (version, profile,
- * directory, session identity) and subscribe to its event stream or session
- * socket; rejects with every owned connection closed, never touching the
- * server itself.
+ * `amp`: take the lease, run one finite `open` worker that creates the thread
+ * (or verifies the resume target through the SDK) and adopt its identity;
+ * rejects with the worker's process group stopped and the lease released.
+ * For `opencode`/`openhands`: qualify the caller-owned server (version,
+ * profile, directory, session identity) and subscribe to its event stream or
+ * session socket; rejects with every owned connection closed, never touching
+ * the server itself.
  */
 export async function openSession(spec: SessionSpec): Promise<LiveSession> {
   return LiveSession.open(spec)

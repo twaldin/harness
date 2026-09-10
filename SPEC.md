@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC and optional OMP SDK sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp SDK sessions, caller-owned OpenCode HTTP and OpenHands Agent Server sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -565,7 +565,11 @@ default. The adapter's empty-string default-model metadata denotes no selection.
 
 ### pi
 
-Cost and tokens are summed from assistant messages in the `--mode json` event stream.
+Cost and tokens are summed from assistant messages in the `--mode json` event
+stream, once per agent cycle: each terminal `agent_end.messages` snapshot
+replaces that cycle's incremental `message_end` / `turn_end` records without
+discarding earlier cycles, and a cut-off final cycle keeps its completed
+messages.
 
 ```json
 {
@@ -1328,7 +1332,7 @@ explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
 Other pairings reject with `unsupported-backend`, except the separately
-documented OMP SDK and caller-owned OpenCode/OpenHands sessions below. Unknown
+documented OMP/Amp SDK and caller-owned OpenCode/OpenHands sessions below. Unknown
 names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
@@ -1481,7 +1485,7 @@ state and register CLI-oriented signal handlers; process isolation prevents
 these from changing the caller's OMP settings, environment, cwd or listeners.
 The worker owns its own termination handlers and calls native SDK disposal.
 
-`SessionSpec.omp_sdk` / `ompSdk` is required for OMP SDK and rejected for Pi RPC.
+`SessionSpec.omp_sdk` / `ompSdk` is required only for OMP SDK and rejected for other backends.
 The exported `OmpSdkOptions` has three required fields:
 
 | TypeScript / Python | meaning |
@@ -1561,6 +1565,124 @@ Sources refreshed September 8:
 [18.1.14 package metadata](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent/v/18.1.14),
 [native environment](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/utils/src/env.ts),
 [SDK session lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/coding-agent/src/session/agent-session.ts).
+
+## Optional Amp SDK sessions
+
+`open_session` / `openSession` accept `harness: "amp", backend: "sdk"`.
+Both languages use the same isolated **Node >=22** worker and the official
+TypeScript SDK. Python is an explicit bridge, not the native `amp-sdk` Python
+package: the latter filters unknown events and usage fields and can discard a
+nonzero native exit after a result. Bun callers also launch Node for this worker.
+The one-shot API remains CLI-only. No dependency, executable or backend fallback
+occurs; ordinary imports and capability queries do not load the optional SDK.
+
+### Pinned dependencies and native configuration
+
+The supported pair is **`@ampcode/sdk@0.1.0-20260823161614-g3631dc6`** and
+**Amp Neo CLI `0.0.1788883237-g0b98e3`**. Different package names, versions,
+CLI versions or worker runtimes fail explicitly at startup. Install both
+separately in caller-owned locations; Harness never installs or upgrades them.
+The SDK's package metadata says `releaseTag: legacy`, but its CLI dependency
+is the floating `latest` selector rather than a numeric compatibility floor.
+Neither that tag nor the SDK's version check qualifies an arbitrary local CLI.
+
+`SessionSpec.amp_sdk` / `ampSdk` is required only for this pairing.
+The exported `AmpSdkOptions` contains:
+
+| TypeScript / Python | requirement and meaning |
+|---|---|
+| `packageRoot` / `package_root` | required absolute SDK package directory containing `package.json` |
+| `cliPath` / `cli_path` | required absolute path to the pinned CLI |
+| `executor` | required literal `"local"`; remote executors/orbs/projects are unsupported |
+| `mode` | required nonblank native mode, e.g. `"low"`; explicit selection avoids the SDK's silent `"medium"` default |
+| `effort` | optional `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` or `"max"`; native mode support remains upstream |
+| `visibility` | optional `"private"`, `"unlisted"`, `"workspace"` or `"group"` for creation only; rejected on resume |
+| `settingsFile` / `settings_file` | optional absolute caller-selected settings file |
+
+`SessionSpec.executable` selects **Node**, default `node`, not the Amp CLI.
+Common `model`, permission bypass, other backend option bags and unknown Amp
+fields reject before preparation. There is no invented model-to-mode mapping,
+approval-response channel, arbitrary SDK-object injection or raw CLI argument
+channel. Native plugins, tools, permissions, settings and authentication remain
+upstream behavior; this is not a sandbox.
+
+`AMP_URL` uses the explicit environment overlay, then inherited environment,
+then `https://ampcode.com`; it must identify an HTTP(S) origin without
+credentials, path, query or fragment. The normalized origin becomes part of
+the reference. The selected CLI and optional settings file override the
+worker's `AMP_CLI_PATH` and `AMP_SETTINGS_FILE`; other environment/configuration
+is inherited as usual. `AMP_SKIP_UPDATE_CHECK=1` is forced; an explicit
+conflicting value rejects. Native state/tool writes are still possible.
+Use trusted configuration and explicit disposable child HOME/XDG directories
+when ambient settings must not be read.
+
+The SDK prefers a local `@ampcode/cli` dependency over `AMP_CLI_PATH`.
+The worker rejects a conflicting installed CLI instead of silently redirecting
+it. Only inside its isolated process, it guards the SDK's spawn call, verifies
+the selected executable, and adds the pinned SDK's omitted `--executor local`
+flag. The SDK still owns `threads.new`, `threads.markdown` and `execute`; this
+is not a substitute direct-CLI transport. Local selects **tool execution**:
+Neo still uses the selected Amp service for its thread actor and authentication.
+
+### Identity, events and owned lifecycle
+
+Capabilities report events, interrupt, follow-up and resume true; concurrent
+turns and approval false. They do not probe installation or authentication.
+A reference contains the complete native `T-UUID`, `sessionFile: null`,
+workdir and normalized endpoint. Creation retains the native ID returned by
+`threads.new`; resume verifies that exact ID through `threads.markdown`.
+Workdir and endpoint must match. No latest-thread selection, partial ID,
+local-file discovery, silent new thread, fork or remote-history deletion occurs.
+
+Each open/resume or turn is one finite SDK-worker process group, supervised by
+the shared subprocess engine. The public session retains its instruction lease
+across operations. Turns call `execute` with a finite string prompt, explicit
+thread ID, mode and local executor. A native `system/init` must verify the
+thread/workdir within the request deadline. Follow-up uses the same exact
+thread, not a long-lived SDK input iterator or a guessed `end_turn` boundary.
+
+Events carry `backend: "sdk", harness: "amp"` and preserve each complete
+native JSON object in `raw`, including unknown types, permission errors, null
+usage and provider-specific usage fields. Transport envelopes are not events.
+No common token/cost totals are invented. Completion requires a valid native
+terminal `result`, SDK iterator completion, native process exit and owned group
+cleanup. The result remains in `SessionTurnResult.raw`; `is_error` gives
+`agent-error`, while a later nonzero native exit remains `exited` with the
+native exit code. Partial assistant output is not success.
+
+Malformed/invalid-UTF-8 JSONL, partial final frames, duplicate results and
+identity changes fail with `protocol-error`. Each native frame and worker
+envelope is bounded to 1 MiB; pending event streams and retained stderr use
+`maxBufferBytes`. Native stderr is drained concurrently with stdout; only a
+bounded prefix is replayed to the SDK's error parser.
+
+Interrupt cancels and reaps the **current operation**, not the native thread.
+The next turn may continue that exact thread after cleanup. A terminal
+completion already observed before the interrupt wins the race. Close,
+timeout, protocol failure and event overflow invalidate the public handle and
+perform shared bounded TERM/KILL/drain cleanup before releasing its lease.
+Close does not claim the SDK has a reusable in-process abort or erase native
+history. Native failures before init remain failures without a fabricated
+successful handshake.
+
+### Qualification boundary
+
+`tests/amp_sdk_cases.json` drives synthetic SDK/native-child cases in Python,
+Bun and packaged Node. Separate qualification uses the unmodified pinned npm
+SDK with a synthetic CLI: native event/usage preservation, exact continuation,
+nonzero exit after result and strict framing are distinct from provider success.
+The pinned Neo executable recognizes the local executor and reports its native
+thread-actor connection failure and a finite loopback peer's HTTP 401 rejection
+through the real SDK without fallback. Unauthenticated creation can wait until
+the request deadline. No authenticated provider success, native successful model
+turn or offline native-thread creation is claimed: no real `AMP_API_KEY` was
+available. The loopback probe used a synthetic key and disposable HOME/XDG
+directories. No real credentials or transcripts are included in fixtures.
+
+Sources refreshed September 9:
+[SDK overview](https://ampcode.com/docs/sdk),
+[pinned SDK package](https://www.npmjs.com/package/@ampcode/sdk/v/0.1.0-20260823161614-g3631dc6),
+[pinned CLI package](https://www.npmjs.com/package/@ampcode/cli/v/0.0.1788883237-g0b98e3).
 
 ## Caller-owned OpenCode HTTP sessions
 
@@ -1834,6 +1956,12 @@ native echo, then calls `/run`. This deliberately avoids upstream's
 `run: true` behavior, which can queue a rerun instead of surfacing busy.
 HTTP `409` is a non-success outcome with the numeric status retained, not a
 retry or permission to interrupt another caller.
+Every HTTP request, including its response body, has the configured request
+deadline. The prompt's HTTP acknowledgement and matching socket echo share
+one deadline starting at submission; receiving the acknowledgement does not
+grant another full wait for the echo. An unanswered turn request is a
+`protocol-error`, distinct from a transport disconnect. Native execution
+itself uses the longer turn deadline.
 
 The live-only `/sockets/session/{id}` subscription uses the initial `sync`
 frame's sequence baseline. Startup also waits for the initial native
@@ -1888,10 +2016,13 @@ is accepted. An early call waits for submission; a rejected/busy run is never
 interrupted. It waits for acknowledgement plus native paused/terminal evidence,
 bounded by the request deadline. A complete terminal snapshot is latched while
 an interrupt reply is pending, so later pause frames cannot overwrite normal
-completion. Native
-`paused` reports the agent state; it does not prove every remote tool process
-has exited. An HTTP success alone is insufficient: upstream may return after
-its bounded wait while native work still exists.
+completion. A failed ancillary interrupt request does not discard that latched
+`finished`/`error`/`stuck` result; the local handle closes instead, so no
+follow-up turn runs against a handle whose remote interrupt state is unknown.
+While an interrupt mutation is still pending, the turn is not reported as
+settled. Native `paused` reports the agent state; it does not prove every
+remote tool process has exited. An HTTP success alone is insufficient:
+upstream may return after its bounded wait while native work still exists.
 
 `close()` is idempotent, settles an active local turn as `closed`, and releases
 only owned HTTP/WebSocket connections and client tasks. It never sends pause,
@@ -1927,7 +2058,7 @@ Pinned sources:
 
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC, OMP SDK and caller-owned
+These requirements govern the shipped Pi RPC, OMP/Amp SDK and caller-owned
 OpenCode/OpenHands session implementations above and future backends. They keep the common library small; they do not
 enable additional SDKs or native protocols by themselves.
 
@@ -2002,7 +2133,7 @@ historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
 now ships under the execution contract above; controlled Pi RPC and optional
-OMP SDK sessions ship through their explicit API. Additional protocols and
+OMP/Amp SDK and caller-owned OpenCode HTTP sessions ship through their explicit API. Additional protocols and
 SDKs remain implementation-gated.
 No package release is implied.
 
@@ -2039,9 +2170,10 @@ Harness provides CLI command construction, output parsing and headless execution
 
 Optional agent SDK/protocol integrations are now in scope for the library.
 This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
-consumer-owned host/fleet boundary. The optional OMP SDK bridge implements the
-dependency and behavior requirements above. A raw model API,
-fleet manager, Linear engine or application is not an agent backend.
+consumer-owned host/fleet boundary. The optional OMP/Amp SDK bridges and
+caller-owned OpenCode/OpenHands clients implement the dependency and behavior
+requirements above. A raw model API, fleet manager, Linear engine or
+application is not an agent backend.
 
 ---
 

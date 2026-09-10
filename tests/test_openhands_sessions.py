@@ -154,6 +154,8 @@ async def test_shared_protocol_case(tmp_path, case):
             if case.get("unknown_event"):
                 assert next(event.raw for event in events if event.type == "SyntheticFutureEvent")["event"]["nested"] == {"value": 42}
                 assert next(event.raw for event in events if event.type == "item_started")["attempt"] == 1
+            if "error_envelope" in case:
+                assert events[-1].raw == case["error_envelope"]
             if "terminal" in case:
                 assert result.raw["state"]["execution_status"] == case["terminal"]
                 assert result.raw["state"]["id"] == session.reference.session_id
@@ -167,8 +169,8 @@ async def test_shared_protocol_case(tmp_path, case):
             if "http_status" in case:
                 assert result.raw["http_status"] == case["http_status"]
                 assert str(case["http_status"]) in result.error
-            if "error_contains" in case:
-                assert case["error_contains"] in result.error
+            if "error" in case:
+                assert result.error == case["error"]
             if case.get("closes_session"):
                 assert session.closed
             elif "terminal" in case or "http_status" in case:
@@ -178,6 +180,8 @@ async def test_shared_protocol_case(tmp_path, case):
         assert child.returncode is None
         assert_caller_server_preserved(trace)
         assert not paths(trace, "/interrupt")
+        if case.get("no_run"):
+            assert not paths(trace, "/run")
 
 
 async def test_followup_resume_identity_and_local_only_close(tmp_path):
@@ -269,6 +273,32 @@ async def test_normal_finish_racing_interrupt_stays_completed(tmp_path):
             assert result.status == "completed"
             assert result.raw["state"]["execution_status"] == "finished"
         assert len(paths(trace, "/interrupt")) == 1
+
+@pytest.mark.parametrize("prompt", ["interrupt-http-error", "interrupt-http-timeout", "interrupt-http-disconnect"])
+async def test_native_finish_survives_failed_interrupt_request(tmp_path, prompt, caplog):
+    async with peer(tmp_path) as (spec, trace, child):
+        async with await open_session(spec) as session:
+            turn = session.start_turn(prompt)
+            interrupted = None
+            async for event in turn.events:
+                if is_running_event(event):
+                    await nudge(child, b"\x01")
+                    interrupted = asyncio.create_task(session.interrupt())
+                if is_final_state(event, "finished"):
+                    await nudge(child, b"\x03")
+            assert interrupted is not None
+            await interrupted
+            result = await turn.result
+            assert result.status == "completed"
+            assert result.raw["state"]["execution_status"] == "finished"
+            assert session.closed
+            with pytest.raises(HarnessError):
+                session.start_turn("must not follow a failed interrupt mutation")
+        assert len(paths(trace, "/interrupt")) == 1
+        assert len(paths(trace, "/run")) == 1
+        assert child.returncode is None
+    assert not [record for record in caplog.records if record.name == "asyncio" and record.levelno >= 40]
+
 
 
 async def test_late_paused_frames_after_finish_keep_completed(tmp_path):

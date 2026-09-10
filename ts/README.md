@@ -120,8 +120,10 @@ configuration remain trusted, not isolated by the client.
 This is a session-only name, not a CLI adapter or native TypeScript agent.
 Resume preserves the exact UUID and never creates on 404. Busy 409, native
 stuck/error, interruption and disconnect are explicit. Approval and permission
-bypass are unsupported. Close/timeout clean up only local transport; remote
-work can continue and history is never deleted.
+bypass are unsupported. A failed interrupt keeps an already-latched native
+result and closes the handle rather than permitting follow-up. Close/timeout
+clean up only local transport; remote work can continue and history is never
+deleted.
 
 Mock-server conformance is separate from native-server/provider qualification;
 neither native evidence category has run. See the
@@ -289,6 +291,9 @@ Copilot also reports null token/USD totals, retaining its native JSONL events in
 `raw`. It uses `@github/copilot`, not `gh copilot`, and exposes explicit
 `{kind: 'copilot', allowTools: ['shell(git status)'], denyTools: ['write']}`.
 See [setup and coverage](../ADAPTER-MATRIX.md#copilot).
+The optional Copilot SDK backend is **deferred/unsupported** after native
+forced-cleanup qualification; the CLI adapter remains shipped. See the
+[SDK finding and version limits](../ADAPTER-MATRIX.md#copilot-sdk-unsupported-after-qualification).
 
 Amp runs local execute mode, not remote orbs. Omit `model`; use
 `{kind: 'amp', mode: 'low'}` for upstream mode selection and `configFile` for

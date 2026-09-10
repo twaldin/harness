@@ -288,7 +288,7 @@ export class OpenHandsSession extends LiveSession {
         sent: false,
         acked: false,
         timer: deadline(seconds, () => {
-          void this.#invalidate('protocol-error', `interrupt of ${turn.id} did not settle within requestTimeoutSeconds (${seconds})`)
+          this.#interruptFailed(turn, 'protocol-error', `interrupt of ${turn.id} did not settle within requestTimeoutSeconds (${seconds})`)
         }),
       }
       turn.abort = abort
@@ -692,6 +692,14 @@ export class OpenHandsSession extends LiveSession {
     if (!turn.done && turn.abort !== null) void this.#abort(turn, turn.abort)
   }
 
+  #interruptFailed(turn: SocketTurn, status: 'protocol-error' | 'disconnected', error: string): void {
+    if (this.#dead || turn.done) return
+    // Preserve observed native completion, but close in the same loop tick:
+    // a failed mutation must never release a usable follow-up slot.
+    this.#maybeComplete(turn, true)
+    void this.#invalidate(status, error)
+  }
+
   async #abort(turn: SocketTurn, abort: AbortState): Promise<void> {
     if (this.#dead || turn.done || abort.sent) return
     abort.sent = true
@@ -700,25 +708,29 @@ export class OpenHandsSession extends LiveSession {
     try {
       reply = await this.#exchange('POST', interruptPath)
     } catch (err) {
-      this.#turnRequestFailed(turn, 'interrupt', err)
+      const failure = err instanceof HarnessError ? err : new HarnessError(describeTransportError(err), 'launch-failed')
+      this.#interruptFailed(turn, failure.code === 'launch-failed' ? 'disconnected' : 'protocol-error', `interrupt of ${turn.id} failed: ${failure.message}`)
       return
     }
     if (this.#dead || turn.done) return
     if (reply.status !== 200 || !this.#acknowledged(reply)) {
-      void this.#invalidate('protocol-error', `interrupt of ${turn.id} was not acknowledged with {success: true} (HTTP ${reply.status})`)
+      this.#interruptFailed(turn, 'protocol-error', `interrupt of ${turn.id} was not acknowledged with {success: true} (HTTP ${reply.status})`)
       return
     }
     abort.acked = true
     this.#maybeComplete(turn)
   }
 
-  /** The completion barrier: run acknowledged, durable terminal transition after the run began, matching final snapshot, and (when interrupting) the acknowledgement. */
-  #maybeComplete(turn: SocketTurn): void {
+  /** The native completion barrier also waits for a pending interrupt. A failed
+   * interrupt may preserve finished/error/stuck only while closing the handle. */
+  #maybeComplete(turn: SocketTurn, interruptFailed = false): void {
     if (this.#dead || turn.done) return
     const terminal = turn.terminal
     const state = turn.finalState
     if (!turn.echoSeen || !turn.runIssued || !turn.runAcked || terminal === null || state === null) return
-    if (turn.abort?.sent && !turn.abort.acked) return
+    if (turn.abort?.sent && !turn.abort.acked) {
+      if (!interruptFailed || (terminal.status !== 'finished' && terminal.status !== 'error' && terminal.status !== 'stuck')) return
+    }
     const raw = { state, terminal_event: terminal.event }
     switch (terminal.status) {
       case 'finished':
@@ -821,7 +833,12 @@ export class OpenHandsSession extends LiveSession {
       return
     }
     if (type === 'error') {
-      void this.#invalidate('protocol-error', `session socket reported an error frame${typeof frame.code === 'string' ? ` (${frame.code})` : ''}; this handle only ever sends the auth frame`)
+      if (typeof frame.code !== 'string' || typeof frame.detail !== 'string') {
+        void this.#invalidate('protocol-error', 'session socket error frame has no string code / detail')
+        return
+      }
+      this.#route(frame, type, null, bytes.length)
+      void this.#invalidate('protocol-error', `session socket reported an error frame (${frame.code}); this handle only ever sends the auth frame`)
       return
     }
     if (type !== 'durable' && type !== 'transient') {

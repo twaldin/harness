@@ -32,6 +32,10 @@ REVISION = 1
 VERSION = "1.45.0"
 MAX_BODY = 1_048_576
 WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+FINISH_DURING_INTERRUPT = (
+    "interrupt-race", "interrupt-late-paused", "interrupt-http-error",
+    "interrupt-http-timeout", "interrupt-http-disconnect",
+)
 
 
 class Conversation:
@@ -117,6 +121,7 @@ class Peer:
         self.conversations: dict[str, Conversation] = {}
         self.tasks: set[asyncio.Task] = set()
         self.partial_consumed = asyncio.Event()
+        self.terminal_consumed = asyncio.Event()
         self.release = asyncio.Event()
 
     # ---- HTTP -----------------------------------------------------------------
@@ -262,12 +267,16 @@ class Peer:
             if prompt == "unknown":
                 await self.durable(conv, event("SyntheticFutureEvent", "environment", nested={"value": 42}))
                 await self.send_frame(conv.id, {"type": "item_started", "item_id": reply["id"], "attempt": 1, "anchor_seq": len(conv.events) - 1})
-            if prompt in ("disconnect", "malformed", "invalid-utf8", "binary", "oversize", "numeric-overflow", "seq-gap", "seq-duplicate", "seq-backward", "bad-frame", "bad-event", "unknown-execution-status", "hang", "close-active", "interrupt-ack-only", "interrupt-race", "interrupt-late-paused", "waiting-approval"):
+            if prompt in ("disconnect", "socket-error", "malformed", "invalid-utf8", "binary", "oversize", "numeric-overflow", "seq-gap", "seq-duplicate", "seq-backward", "bad-frame", "bad-event", "unknown-execution-status", "hang", "close-active", "interrupt-ack-only", "waiting-approval") or prompt in FINISH_DURING_INTERRUPT:
                 # Independent channels: the socket cannot prove client receipt, so
                 # the test acknowledges the running transition over stdin first.
                 await self.partial_consumed.wait()
             if prompt == "disconnect":
                 await self.close_sockets(conv.id)
+                await self.release.wait()
+                return
+            if prompt == "socket-error":
+                await self.send_frame(conv.id, {"type": "error", "code": "synthetic_error", "detail": "synthetic session socket failure"})
                 await self.release.wait()
                 return
             if prompt == "malformed":
@@ -318,7 +327,7 @@ class Peer:
                 await self.snapshot(conv)
                 await self.release.wait()
                 return
-            if prompt in ("hang", "hang-eager", "close-active", "interrupt-ack-only", "interrupt-race", "interrupt-late-paused"):
+            if prompt in ("hang", "hang-eager", "close-active", "interrupt-ack-only") or prompt in FINISH_DURING_INTERRUPT:
                 interrupt = asyncio.ensure_future(conv.interrupt.wait())
                 release = asyncio.ensure_future(self.release.wait())
                 try:
@@ -326,7 +335,7 @@ class Peer:
                 finally:
                     interrupt.cancel()
                     release.cancel()
-                if conv.interrupt.is_set() and prompt not in ("interrupt-ack-only", "interrupt-race", "interrupt-late-paused"):
+                if conv.interrupt.is_set() and prompt != "interrupt-ack-only" and prompt not in FINISH_DURING_INTERRUPT:
                     await self.status(conv, "paused")
                     await self.snapshot(conv)
                     return
@@ -446,7 +455,7 @@ class Peer:
                     # An acknowledgement therefore never proves the caller's run paused.
                     await self.snapshot(conv)
                     return await self.response(writer, body={"success": True})
-                if conv.pending_prompt in ("interrupt-race", "interrupt-late-paused"):
+                if conv.pending_prompt in FINISH_DURING_INTERRUPT:
                     # Normal completion wins the race with the interrupt request.
                     self.release.set()
                     await conv.running
@@ -454,6 +463,15 @@ class Peer:
                     if conv.pending_prompt == "interrupt-late-paused":
                         await self.status(conv, "paused")
                         await self.snapshot(conv)
+                    if conv.pending_prompt.startswith("interrupt-http-"):
+                        # The client explicitly acknowledges the native snapshot before
+                        # this independent HTTP channel fails, avoiding a scheduling race.
+                        await self.terminal_consumed.wait()
+                        if conv.pending_prompt == "interrupt-http-timeout":
+                            await self.release.wait()
+                        if conv.pending_prompt == "interrupt-http-disconnect":
+                            return
+                        return await self.response(writer, 503, {"detail": "synthetic interrupt failure"})
                     return await self.response(writer, body={"success": True})
                 conv.interrupt.set()
                 await asyncio.sleep(0.01)
@@ -507,8 +525,18 @@ class Peer:
         self.partial_consumed.clear()
         if prompt == "events-http-error":
             return await self.response(writer, 503, {"detail": "synthetic send failure"})
+        if prompt == "events-http-timeout":
+            await self.release.wait()
+            return
         echo = message_event("user", "user", "foreign text" if prompt == "echo-mismatch" else prompt)
         conv.last_user_message_id = echo["id"]
+        if prompt == "slow-ack-late-echo":
+            # Each leg fits the one-second request bound; together they do not.
+            await asyncio.sleep(0.65)
+            await self.response(writer, body={"success": True})
+            await asyncio.sleep(0.65)
+            await self.durable(conv, echo)
+            return
         if prompt == "ack-first":
             await self.response(writer, body={"success": True})
             # Independent channels: the echo may trail the HTTP acknowledgement.
@@ -524,7 +552,7 @@ class Peer:
             return await self.response(writer, 409, {"detail": "Conversation already running. Wait for completion or pause first."})
         if prompt is None:
             return await self.response(writer, 400, {"detail": "no pending message"})
-        conv.pending_prompt = prompt if prompt in ("interrupt-race", "interrupt-late-paused") else None
+        conv.pending_prompt = prompt if prompt in FINISH_DURING_INTERRUPT else None
         if prompt == "ack-only":
             return await self.response(writer, body={"success": True})
         if prompt == "run-no-body":
@@ -568,6 +596,8 @@ async def main():
             peer.partial_consumed.set()
         if b"\x02" in data:
             peer.release.set()
+        if b"\x03" in data:
+            peer.terminal_consumed.set()
 
     loop.add_reader(sys.stdin.fileno(), stdin_ready)
     try:

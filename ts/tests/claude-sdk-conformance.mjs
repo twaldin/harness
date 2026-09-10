@@ -86,6 +86,7 @@ export async function claudeConformance(api) {
     const uppercaseResult = await turn.result
     assert.equal(uppercaseResult.status, 'completed')
     assert.equal(uppercaseResult.sessionId, uppercaseId)
+    assert.equal(session.reference.sessionId, uppercaseId)
     assert.equal(session.reference.sessionFile, uppercaseFile)
     await session.close()
     await assert.rejects(openSession({ ...spec, resume: { ...uppercaseReference, sessionId: uppercaseId.toLowerCase() } }))

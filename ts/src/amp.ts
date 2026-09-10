@@ -252,7 +252,7 @@ export class AmpSession extends LiveSession {
 
   /** The Amp SDK exposes no permission replies; approvals stay inside the CLI. */
   respondApproval(): Promise<void> {
-    return Promise.reject(new HarnessError('amp live sessions cannot answer permission requests; only "opencode" supports respondApproval', 'unsupported-capability'))
+    return Promise.reject(new HarnessError('amp live sessions cannot answer permission requests', 'unsupported-capability'))
   }
 
   /** Idempotent, concurrent-safe: stop any in-flight worker group, settle the active turn as `closed`, release the lease. Cleanup failures are rethrown. */

@@ -1,6 +1,6 @@
 # harness — specification
 
-This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp SDK sessions, caller-owned OpenCode HTTP sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
+This is the shared contract for `harness` (Python) and `@twaldin/harness-ts` (TypeScript). It provides CLI command construction, one-shot execution, output parsing, controlled Pi RPC, optional OMP/Amp SDK bridge sessions, optional native Claude SDK sessions, caller-owned OpenCode HTTP sessions, and externally hosted pane/log helpers. The [backend and session implementation gates](#backend-and-session-implementation-gates) apply to all controlled sessions.
 
 **Repo layout (monorepo):**
 ```
@@ -1328,7 +1328,7 @@ explicitly; Harness does not install, change provider accounts, or fall back to
 another binary/backend. Older Pi protocols and OMP RPC are not interchangeable:
 OMP has different framing, acknowledgement and local-command completion rules.
 Other pairings reject with `unsupported-backend`, except the separately
-documented OMP/Amp SDK and caller-owned OpenCode HTTP sessions below. Unknown
+documented OMP/Amp/Claude SDK and caller-owned OpenCode HTTP sessions below. Unknown
 names still produce `unknown-harness`.
 
 ### Session inputs and capabilities
@@ -1561,6 +1561,147 @@ Sources refreshed September 8:
 [18.1.14 package metadata](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent/v/18.1.14),
 [native environment](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/utils/src/env.ts),
 [SDK session lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.1.14/packages/coding-agent/src/session/agent-session.ts).
+
+## Optional Claude Agent SDK sessions
+
+Select `harness: "claude-code", backend: "sdk"` through `open_session` /
+`openSession`, not a new adapter or one-shot `RunSpec`. The existing serial
+turns, bounded events, deadlines, instruction lease and owned process lifecycle
+apply. No SDK, binary, backend or model fallback is added.
+
+### Pinned native dependencies
+
+| Host | SDK package | Native Claude Code |
+|---|---|---|
+| Python >=3.10 | `claude-agent-sdk==0.2.152` | **2.1.259** |
+| TypeScript, Node or Bun | `@anthropic-ai/claude-agent-sdk@0.3.263` | **2.1.263** |
+
+These exact pairs are required at startup; the two SDK releases bundle different
+CLI versions. Missing packages, wrong versions or an unusable executable fail
+with `launch-failed`, never installation or discovery. Python offers the
+optional `harness-cli[claude-sdk]` extra; TypeScript callers install the SDK
+separately. Ordinary imports, CLI calls and capability queries do not import it.
+
+Each implementation hosts its **own language's SDK in an owned worker**.
+Python retains `ClaudeSDKClient` for native control routing and permissions.
+Its implementation of the exported `Transport` interface reproduces the pinned
+SDK's private `SubprocessCLITransport` argv/environment and depends on the native
+internal JSONL/control protocol. It does not import private SDK modules.
+Strict raw retention runs before the lossy SDK dataclass parser; interrupt
+control receipts are captured before the SDK discards their return value.
+This internal protocol dependency is intentional, not a cross-version guarantee.
+The SDK also labels its exported `Transport` interface internal and changeable
+in any release; the exact pin is required for both interface and wire behavior.
+TypeScript uses `query` with streaming input and its supported
+`spawnClaudeCodeProcess` hook to retain and validate raw native messages before
+SDK iteration. Deprecated/removed V2 session-preview APIs are not used.
+
+### Explicit configuration and permissions
+
+`SessionSpec.claude_sdk` / `claudeSdk` is required for this pairing and rejected
+elsewhere. Both roots export `ClaudeSdkOptions` and `ClaudeSettingSource`:
+
+| TypeScript / Python | meaning |
+|---|---|
+| `packageRoot` / `package_root` | required absolute SDK package directory: Python's `site-packages/claude_agent_sdk`, or TypeScript's `node_modules/@anthropic-ai/claude-agent-sdk` |
+| `cliPath` / `cli_path` | required absolute executable for the pinned native CLI; independent of the worker runtime |
+| `configDir` / `config_dir` | required absolute `CLAUDE_CONFIG_DIR` selection |
+| `settingSources` / `setting_sources` | required sequence of `user`, `project`, `local`; empty is allowed, duplicates are invalid |
+| `settingsFile` / `settings_file` | optional absolute native JSON settings file (`--settings`) |
+
+`executable` selects the worker runtime: default `sys.executable` in Python,
+`process.execPath` in TypeScript. The Python interpreter must contain the SDK's
+dependencies; selecting another package root does not install them. Bun named
+`bun` receives `--no-env-file`; Node does not. `model` is trimmed but otherwise
+passed unchanged; omission delegates to native configuration.
+
+The inherited environment plus explicit `env` overlay is preserved, with
+`CLAUDE_CONFIG_DIR` pinned to `configDir`. A conflicting explicit entry rejects.
+`settingSources: []` disables those filesystem settings sources, **not** managed
+policy, credential/environment resolution, global configuration or auto-memory.
+The settings file and native settings precedence remain upstream behavior.
+Use trusted directories and explicitly select child `HOME` when needed;
+these options are not an authentication sandbox or promise of zero native writes.
+`instructions` uses the owned `CLAUDE.md` projection and requires `project` in
+`settingSources`; otherwise it rejects before preparation rather than being ignored.
+
+Capabilities report events, interruption, follow-up, resume and approval true;
+concurrent turns false. `permissionPolicy: "bypass"` is unsupported. Native
+permission defaults and existing allow/deny rules remain authoritative: the SDK
+callback is not invoked for every tool. An interactive native permission request
+becomes `claude_permission`, retaining tool name, input, tool-use ID and
+serializable native callback context in `raw`. Its `requestId` is explicitly a
+**bridge-local approval ID**, not an invented native control request ID.
+Reply with `respond_approval` / `respondApproval(id, "once" | "reject")`.
+`once` allows only the original input; `reject` denies it. No persistent rules,
+rewritten tool input or `"always"` approval are exposed. Unknown, duplicate and
+cancelled IDs reject; native cancellation emits `claude_permission_cancelled`.
+
+### Native identity, result and disposal
+
+Fresh open selects an explicit UUID through the native session-ID option.
+The returned ID is **selected**, not evidence a native session event has already
+been observed. No bootstrap prompt is sent. `sessionFile` stays null until a
+native identity hook supplies an absolute transcript path. The `Stop` hook
+supplies this in both languages; Python does not support `SessionStart`.
+Hook inputs remain visible as `claude_session_hook`. Reported IDs and hook cwd
+must match the selected reference; identity changes fail, never silently fork.
+
+Resume requires the exact UUID, existing absolute transcript file and matching
+workdir. A bounded scan of native Claude JSONL identity/cwd records validates the
+reference; it is not a Pi session header. The **absolute transcript path** is
+passed to native resume, and subsequent hooks must confirm that same path.
+No newest-file lookup, encoded-directory heuristic or partial-ID resolution is used.
+
+Every ordinary native message, including unknown types, unknown content blocks
+and unknown assistant/result fields, remains intact in `SessionEvent.raw`.
+Valid lines preceding malformed output remain observable. Native control frames
+stay with the SDK; bridge command responses use bridge IDs. Partial native
+messages are enabled. Result settlement requires prompt acknowledgement plus
+exactly one native `result` with the selected session ID. `raw` is that complete
+result, not a projection through SDK message dataclasses.
+`terminal_reason` of `aborted_streaming` / `aborted_tools` means `interrupted`
+even when `is_error` is true. Otherwise `is_error` or a non-`success` subtype
+means `agent-error`; errors and successful native results remain distinguishable.
+Missing/duplicate results and malformed/oversized/partial JSONL fail explicitly.
+
+`interrupt()` requires the native `interrupt_receipt_v1` receipt and settlement.
+`claude_interrupt.raw.receipt` preserves `still_queued`; an absent or refused
+receipt fails explicitly rather than fabricating an acknowledgement. A completed
+result racing an interrupt stays `completed`. Follow-up retains the same session.
+`total_cost_usd` and cumulative `modelUsage` are native **estimates/snapshots**:
+do not sum repeated results or label them billed cost. Harness adds no totals.
+
+Close, timeout and cancellation dispose the SDK and the owned worker/native
+process group within the existing 500 ms TERM / KILL / 1000 ms drain bounds.
+Pending approvals are released and still-owned instructions restored; history
+is retained. Native exit/disconnect diagnostics live in an explicit
+`sdk_failure` bridge frame in result `raw`; common `exitCode` / `signal` describe
+the owned worker, not a fabricated native child exit. Disposal failures raise.
+
+No raw SDK method/options escape hatch, custom tools/MCP objects, arbitrary
+hooks, fork/clear, concurrent or queued turns, steering, session discovery or
+permission-mode widening is exposed. Native features that change session identity
+are unsupported; use the native SDK directly when these operations are required.
+
+### Qualification
+
+`tests/claude_sdk_cases.json` and a finite synthetic CLI exercise the **real
+optional SDKs** in Python, Bun and packaged Node. This checks raw retention,
+identity/follow-up/resume, native errors, partial/framing failures, interruption
+receipts and races, permission allow/reject, deadlines and disposal without a
+provider. Dependency installation is separate; tests never invoke a bundled CLI.
+
+Actual SDK/CLI qualification uses isolated temporary home/config/workdirs and a
+local synthetic Anthropic SSE provider. This is native-runtime evidence, not
+authenticated model generation. Successful authenticated-provider generation is
+not claimed; no credentials or private conversations appear in fixtures.
+
+Sources refreshed September 9:
+[Python reference](https://platform.claude.com/docs/en/agent-sdk/python),
+[TypeScript reference](https://platform.claude.com/docs/en/agent-sdk/typescript),
+[native settings and hook compatibility](https://code.claude.com/docs/en/agent-sdk/claude-code-features),
+[Python SDK source](https://github.com/anthropics/claude-agent-sdk-python).
 
 ## Optional Amp SDK sessions
 
@@ -1859,8 +2000,8 @@ Pinned sources:
 
 ## Backend and session implementation gates
 
-These requirements govern the shipped Pi RPC, OMP/Amp SDK and caller-owned OpenCode
-HTTP session implementations above and future backends. They keep the common library small; they do not
+These requirements govern the shipped Pi RPC, OMP/Amp SDK, Claude SDK and caller-owned
+OpenCode HTTP session implementations above and future backends. They keep the common library small; they do not
 enable additional SDKs or native protocols by themselves.
 
 - Backend selection is explicit and stable for a run/session. SDK dependencies
@@ -1934,7 +2075,7 @@ historical hard-coded cache prices, a mandatory thin Session facade, automatic
 OAuth proxy configuration, consumer/fleet migrations, staged single-language
 API PRs or source-text/member-count tests as parity proof. CLI chunk streaming
 now ships under the execution contract above; controlled Pi RPC and optional
-OMP/Amp SDK and caller-owned OpenCode HTTP sessions ship through their explicit API. Additional protocols and
+OMP/Amp SDK, Claude SDK and caller-owned OpenCode HTTP sessions ship through their explicit API. Additional protocols and
 SDKs remain implementation-gated.
 No package release is implied.
 
@@ -1971,7 +2112,7 @@ Harness provides CLI command construction, output parsing and headless execution
 
 Optional agent SDK/protocol integrations are now in scope for the library.
 This supersedes the historical blanket SDK exclusion in CONTRIBUTING, not the
-consumer-owned host/fleet boundary. The optional OMP/Amp SDK bridges implement the
+consumer-owned host/fleet boundary. The optional OMP/Amp SDK bridges and native Claude SDK sessions implement the
 dependency and behavior requirements above. A raw model API,
 fleet manager, Linear engine or application is not an agent backend.
 

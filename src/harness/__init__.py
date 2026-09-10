@@ -59,6 +59,8 @@ from harness._instructions import (
 )
 from harness._subproc import SubprocOutcome, run_subprocess, run_subprocess_async
 from harness.sessions import (
+    ClaudeSdkOptions,
+    ClaudeSettingSource,
     AmpEffort,
     AmpSdkOptions,
     AmpVisibility,
@@ -92,6 +94,8 @@ __all__ = [
     "BuildCommand",
     "Capabilities",
     "ClaudeCodeOptions",
+    "ClaudeSdkOptions",
+    "ClaudeSettingSource",
     "ClineOptions",
     "CodexOptions",
     "CopilotOptions",
@@ -154,4 +158,4 @@ __all__ = [
     "strip_ansi",
     "write_instructions",
 ]
-__version__ = "0.3.17"
+__version__ = "0.3.19"

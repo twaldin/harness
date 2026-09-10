@@ -51,12 +51,12 @@ The bounded native matrix ran on **macOS arm64 (Darwin 25.6.0)**:
 
 Material qualifications:
 
-- Pi's tool-phase abort acknowledged success but ended with native
-  `stopReason: "error"` / `"This operation was aborted"`; both languages
-  consequently returned `agent-error`, unlike streaming abort's `interrupted`.
-  This follows the current final-stop-reason contract, but limits consumers'
-  cancellation classification. [TWA-110](https://linear.app/twaldin/issue/TWA-110)
-  tracks qualification without masking genuine errors that race an abort.
+- Pi's tool-phase abort returns `agent-error`, unlike streaming abort's
+  `interrupted`, because Pi 0.85.1 reports different native stop reasons.
+  [The qualified RPC status boundary](#pi-rpc-abort-status-boundary) records
+  why an abort acknowledgement cannot safely override a native error or
+  completed turn. This cancellation-cause distinction remains unsupported;
+  the interrupt operation itself remains supported.
 - Cline's 0.5-second disposal grace expired under a five-scenario concurrent
   host load, reporting disposal failure and forced worker teardown. Sequential
   runs closed cleanly. This is not a claim that disposal always succeeds under
@@ -1036,6 +1036,63 @@ pi emits one JSON object per stdout line:
 The adapter prefers each `agent_end.messages` snapshot over that cycle's per-message/per-turn events. Retries and compaction continuations can emit another agent cycle; an earlier cycle's usage must not be discarded. CLI metrics are totals from captured complete records, not a sum of every usage-bearing event. Controlled RPC deliberately forwards native usage without inventing aggregate metrics; see [its usage contract](SPEC.md#controlled-rpc-sessions).
 
 Full event reference: [Pi JSON event contract](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md). `--mode json` is noninteractive; no built-in permission popup/sandbox is implied. Project trust is a separate upstream setting, not Harness bypass.
+
+### Pi RPC: abort status boundary
+
+**Decision — [TWA-110](https://linear.app/twaldin/issue/TWA-110), September 10,
+2026:** preserve final-native-stop-reason classification in both languages.
+Pi **0.85.1** was still npm's `latest`; no newer published runtime was available
+to qualify. RPC interruption works, but reliably distinguishing an abort-induced
+tool-phase `error` from an independent failure racing an abort is **unsupported**.
+No API, capability, runtime pin or package version changes are needed.
+
+An RPC `abort` response with `success: true` means the abort command finished
+and the session became idle, not that cancellation caused the turn's outcome.
+Pi also returns that receipt when already idle. Harness therefore keeps
+`stopReason: "error"` as `agent-error`, `"aborted"` as `interrupted`, and a
+normal final message as `completed`; it does not match error strings or promote
+abort receipts over terminal messages. See the
+[existing result contract](SPEC.md#results-interruption-and-disposal).
+
+**Source qualification:** after a tool batch is aborted, Pi's agent loop can
+attempt another model turn with the already-aborted signal. Auth setup rejects
+before provider dispatch, and `lazyStream`'s setup catch hardcodes
+`stopReason: "error"`. An in-flight provider's catch instead chooses
+`"aborted"` when its signal is aborted. Neither the RPC receipt nor the
+tool-result `isError` flag supplies an independent cancellation cause.
+The provider catch also cannot independently prove that no other failure raced
+the signal; Harness cannot recover causes absent from native output.
+Pinned sources:
+[agent loop](https://github.com/earendil-works/pi/blob/v0.85.1/packages/agent/src/agent-loop.ts),
+[model setup](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/src/core/model-runtime.ts),
+[setup-error handler](https://github.com/earendil-works/pi/blob/v0.85.1/packages/ai/src/api/lazy.ts),
+[provider handler](https://github.com/earendil-works/pi/blob/v0.85.1/packages/ai/src/api/openai-completions.ts),
+[RPC abort](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/src/modes/rpc/rpc-mode.ts).
+
+**Native-runtime evidence:** unmodified Pi 0.85.1 with an isolated synthetic
+loopback provider, installed Python `harness-cli` **0.3.22** on Python **3.13.5**
+and `@twaldin/harness-ts` **0.2.27** on Node **26.6.0**, macOS arm64:
+
+| scenario | native final assistant | result in both languages |
+|---|---|---|
+| Abort while a finite native bash tool is running | `error`, `This operation was aborted` | `agent-error` |
+| Abort during response streaming | `aborted` | `interrupted` |
+| Independent HTTP 400 failure settles natively before abort; local settlement delivery is delayed | `error`, original provider error retained | `agent-error`, despite successful abort receipt |
+| Normal completion settles natively before abort; local settlement delivery is delayed | `stop` | `completed`, despite successful abort receipt |
+| Abort while the provider is preparing a delayed HTTP 400 response | `aborted`, `Request aborted`; provider error absent from native output | `interrupted`; not evidence that the provider succeeded |
+| Close while a finite native bash tool is running | no terminal message required | `closed` |
+
+The two settled-turn races used a transparent JSONL tap delaying only delivery
+of the native `agent_settled` frame by 500 ms, without modifying native payloads.
+They qualify controlled transport ordering, not the frequency of natural races.
+Other cases had no settlement delay. All five non-close cases retained native
+event/result payloads and accepted a successful follow-up in the same native
+session. Interrupt and close stopped the owned tool before its post-sleep
+survival marker; owned CLI/tap/tool processes and process groups were absent
+after disposal, and the synthetic provider was closed. Probes used disposable
+homes and documented settings, with no real provider credentials or
+undocumented runtime switches. No authenticated-provider, Linux or other Pi
+version qualification is implied.
 
 ### Pi SDK: unsupported after qualification
 

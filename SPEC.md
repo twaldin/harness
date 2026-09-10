@@ -2061,6 +2061,25 @@ Primary sources refreshed for this contract:
 Installed help was inspected for Claude Code 2.1.220 and Codex 0.153.4,
 including effort, sandbox and bypass options; this was not a provider smoke.
 
+### Codex app-server qualification outcome
+
+Codex app-server sessions are **deferred/unsupported**, not shipped experimental
+support. Qualification of direct stdio CLI **0.153.4** found ordinary native tools
+surviving app-server-group teardown on macOS under Python, Bun and Node.
+Cooperative interruption and EOF shutdown do not establish forced containment.
+The [qualification record](ADAPTER-MATRIX.md#codex-app-server-unsupported-after-qualification)
+preserves exact versions, SDK execution-model differences and evidence limits.
+
+`get_session_capabilities("codex", "rpc")` / `getSessionCapabilities("codex", "rpc")`
+and Codex `open_session` / `openSession` on `rpc` or `sdk` still raise
+`unsupported-backend`. CLI behavior, imports, dependencies, permissions and the
+documented process-group boundary are unchanged. Completing
+[TWA-103](https://linear.app/twaldin/issue/TWA-103) means unsupported qualification
+documentation, not satisfying the implementation gates above. Future support
+is deferred to [TWA-107](https://linear.app/twaldin/issue/TWA-107); it must first
+establish reliable native-tool containment, then meet the full dual-language
+session acceptance. No backend fallback or weaker cleanup contract is enabled.
+
 ### Reconciliation of the live-session proposals
 
 The three local May 13 `harness-live-{design,dogfood,use-cases-audit}.md`

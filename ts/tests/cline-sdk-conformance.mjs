@@ -137,6 +137,7 @@ export async function clineConformance(api) {
       await assert.rejects(api.openSession({ ...spec, resume: reference }))
       await assert.rejects(api.openSession({ ...spec, clineSdk: { ...spec.clineSdk, features: 'native-hooks' } }), { code: 'unsupported-capability' })
       await assert.rejects(api.openSession({ ...spec, clineSdk: { ...spec.clineSdk, packageRoot: join(spec.workdir, 'missing-sdk') } }), { code: 'launch-failed' })
+      await assert.rejects(api.openSession({ ...spec, factoryDroid: { autonomy: 'low' } }), { code: 'invalid-options' })
       await missing(join(spec.workdir, '.harness-run.lock'))
     } finally { try { await session?.close() } finally { await stop() } }
     completed = true

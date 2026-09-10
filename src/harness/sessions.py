@@ -2,7 +2,7 @@
 OpenCode / OpenHands server driven over HTTP plus a live event stream,
 or Amp threads driven through one-shot workers.
 
-Six (harness, backend) pairs share one public surface:
+Eight (harness, backend) pairs share one public surface:
 
 - `pi` / `rpc`: `pi --mode rpc`, the native JSONL protocol on stdio.
 - `omp` / `sdk`: an owned Bun child running the sibling `_omp_sdk.mjs` bridge,
@@ -26,6 +26,10 @@ Six (harness, backend) pairs share one public surface:
   native session ID, or the resumed transcript's ID) and only *observed* on
   the first native hook / init / result; `reference.session_file` stays None
   for a fresh session until a native hook reports the transcript path.
+- `factory-droid` / `sdk`: the published `droid_sdk.client.DroidClient`
+  (droid-sdk 0.4.0) over a Harness-owned stdio transport to exactly one
+  owned `droid exec --input-format stream-jsonrpc --output-format
+  stream-jsonrpc` child; see `_factory_droid`.
 - `opencode` / `rpc`: direct HTTP requests plus the `GET /event` SSE stream of
   an `opencode serve` instance the caller already runs and owns
   (`OpenCodeOptions.endpoint`). No process is spawned; see `_opencode`.
@@ -50,10 +54,10 @@ the HTTP transport), completes the identity handshake and returns a
 `LiveSession`. Each `start_turn(prompt)` sends one prompt; the native event
 stream is delivered through the turn's bounded async iterator and the turn
 settles on the backend's terminal signal (Pi `agent_settled`, bridge
-`sdk_settled`, OpenCode's synchronous prompt response plus `session.status`
-idle) together with the prompt acknowledgement and any in-flight abort
-acknowledgement. Frames that arrive while no turn is active flow through
-`LiveSession.events`.
+`sdk_settled`, Factory's `agent_turn_completed` notification, OpenCode's
+synchronous prompt response plus `session.status` idle) together with the
+prompt acknowledgement and any in-flight abort acknowledgement. Frames that
+arrive while no turn is active flow through `LiveSession.events`.
 
 Only the Pi RPC protocol shipped with @earendil-works/pi-coding-agent 0.85.1
 (`agent_settled` terminal event) is supported. `agent_end` is retained as the
@@ -92,7 +96,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePath
-from typing import Coroutine, Literal, cast
+from typing import Awaitable, Callable, Coroutine, Literal, Sequence, cast
 from urllib.parse import urlsplit
 
 from harness._instructions import PreparedCommand, cleanup_command, prepare_command
@@ -154,6 +158,14 @@ SUPPORTED_CLINE_SDK_DISTRIBUTION = "@cline/sdk 0.0.82"
 MINIMUM_CLINE_NODE_VERSION = "22.14.0"
 #: Endpoint used when neither `spec.env` nor the process env sets `AMP_URL`.
 DEFAULT_AMP_ENDPOINT = "https://ampcode.com"
+#: Exact `droid_sdk` package version the factory-droid sdk backend drives;
+#: any other installed version is `launch-failed` before a child exists.
+SUPPORTED_DROID_SDK_VERSION = "0.4.0"
+#: Droid CLI the factory-droid sdk backend was qualified against. It is not
+#: probed per open (no `--version` preflight process): the handshake response
+#: envelope and the SDK's own result schema are what is validated, so no
+#: claim is made about other CLI versions.
+QUALIFIED_DROID_CLI_VERSION = "0.213.0"
 #: Exact `GET /global/health` version of the OpenCode server this module is
 #: qualified against (anomalyco/opencode v1.18.29); any other is rejected.
 SUPPORTED_OPENCODE_SERVER_VERSION = "1.18.29"
@@ -168,7 +180,7 @@ _TERM_GRACE = 0.5
 _DRAIN_BUDGET = 1.0
 #: Qualified (harness, backend) pairs; every other combination is rejected.
 #: `openhands` is session-only: it has no CLI adapter and no one-shot run.
-_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc", "openhands": "rpc", "claude-code": "sdk", "amp": "sdk", "cline": "sdk"}
+_SESSION_BACKENDS: dict[str, Backend] = {"pi": "rpc", "omp": "sdk", "opencode": "rpc", "openhands": "rpc", "claude-code": "sdk", "amp": "sdk", "cline": "sdk", "factory-droid": "sdk"}
 _SDK_WORKER = Path(__file__).with_name("_omp_sdk.mjs")
 _CLAUDE_WORKER = Path(__file__).with_name("_claude_sdk.py")
 _CLINE_WORKER = Path(__file__).with_name("_cline_sdk.mjs")
@@ -205,11 +217,22 @@ _CLINE_MAX_ACTIVE_COMMANDS = 32
 #: Budget for the bounded cleanup of cancelled commands during teardown; the
 #: shared runner escalates SIGTERM -> SIGKILL and drains inside it.
 _CLINE_COMMAND_CLEANUP_BUDGET = 2.0
+#: Child environment the Factory SDK stamps on its process (client type and
+#: `language/version` identity); caller entries are rejected, never overlaid.
+_FACTORY_OWNED_ENV = ("FACTORY_UPSTREAM_CLIENT_TYPE", "FACTORY_UPSTREAM_SDK")
+_FACTORY_AUTONOMY = ("off", "low", "medium", "high")
 
 OmpSdkAuth = Literal["local", "environment"]
 OpenCodeAuth = Literal["none", "basic"]
 ClaudeSettingSource = Literal["user", "project", "local"]
 _CLAUDE_SETTING_SOURCES: tuple[ClaudeSettingSource, ...] = ("user", "project", "local")
+FactoryDroidAutonomy = Literal["off", "low", "medium", "high"]
+#: Backend-specific answer to a native `droid.request_permission` /
+#: `droid.ask_user` request: receives the native request `params` object and
+#: returns the native response object (sync or awaitable). Permission:
+#: `{"selectedOption": <offered option value>, "comment"?, "editedSpecContent"?}`;
+#: question: `{"cancelled": bool, "answers"?: [native answer, ...]}`.
+FactoryDroidCallback = Callable[[dict[str, object]], dict[str, object] | Awaitable[dict[str, object]]]
 #: Native reply literals accepted by `LiveSession.respond_approval` (OpenCode
 #: and Claude). OpenCode's third literal `always` mutates the instance-wide
 #: approved rules shared by every client of the caller's server and is
@@ -459,27 +482,63 @@ class AmpSdkOptions:
     settings_file: Path | None = None
 
 
+@dataclass(frozen=True)
+class FactoryDroidOptions:
+    """Native policy for a `factory-droid` / `sdk` session. Every field is
+    optional; None keeps the Droid CLI's own default (nothing is invented).
+
+    `autonomy`      — native autonomy level sent as `autonomyLevel` when the
+                      session is created. Rejected together with `resume`:
+                      a loaded session keeps its restored level.
+    `disabled_tools` — native tool IDs sent as `disabledToolIds` (copied).
+                      Additive / restrictive allowlists are not part of the
+                      matched surface and have no field here.
+    `auto_reject_permission_requests` / `disable_builtin_skills` — native
+                      booleans forwarded verbatim to initialize / load.
+    `on_permission` — answers `droid.request_permission`; without it the SDK
+                      default reply is `cancel`. `selectedOption` must be one
+                      of the offered option values; nothing escalates to an
+                      `always` outcome unless the callback selects it.
+    `on_question`   — answers `droid.ask_user`; without it the SDK default is
+                      `cancelled`. Each answer index must be an offered
+                      question index.
+
+    Callbacks receive the native request params object and are bounded by
+    `SessionSpec.request_timeout_seconds`. A callback that raises, times out
+    or returns an invalid / unoffered reply fails the session closed
+    (`agent-error`, cause retained) followed by the owned teardown. This is
+    distinct from `SessionCapabilities.approval`, which names the generic
+    `respond_approval` method Factory sessions do not offer.
+    """
+
+    autonomy: FactoryDroidAutonomy | None = None
+    disabled_tools: Sequence[str] | None = None
+    auto_reject_permission_requests: bool | None = None
+    disable_builtin_skills: bool | None = None
+    on_permission: FactoryDroidCallback | None = field(default=None, repr=False, compare=False)
+    on_question: FactoryDroidCallback | None = field(default=None, repr=False, compare=False)
+
+
 @dataclass
 class SessionSpec:
     """Everything needed to open a live session.
 
-    `harness`         — "pi" / "opencode" / "openhands" (rpc), or "omp" /
-                        "amp" / "claude-code" / "cline" (sdk). Other
-                        registered harnesses raise `unsupported-backend`;
-                        unknown names `unknown-harness`. "openhands" exists
-                        only here: it has no CLI adapter / one-shot run.
+    `harness`         — Pi/OpenCode/OpenHands (rpc), OMP/Amp/Claude/Cline/
+                        Factory Droid (sdk). Other registered harnesses raise
+                        `unsupported-backend`; unknown names `unknown-harness`.
+                        OpenHands is session-only, with no CLI adapter.
     `workdir`         — cwd for the child (absolute against the process cwd).
-                        OpenCode / OpenHands: the explicit absolute POSIX
-                        directory on the server, retained literally (no local
-                        resolution, existence check or preparation);
-                        noncanonical forms (`.`/`..` segments, empty segments,
-                        trailing slash) are `invalid-options`.
-    `backend`         — "rpc" with "pi" / "opencode" / "openhands" or "sdk"
-                        with "omp" / "amp" / "claude-code" / "cline"; other
-                        pairings and "cli" raise `unsupported-backend`.
+                        OpenCode/OpenHands: explicit absolute POSIX directory
+                        on the server, retained literally without local
+                        resolution, existence checks or preparation.
+                        Noncanonical forms are `invalid-options`.
+    `backend`         — rpc or sdk as qualified above; cli and other pairings
+                        raise `unsupported-backend`.
     `model`           — trimmed native selector for Pi / OMP / Claude; Cline
                         passes the ID through exactly and falls back to the
                         selected provider profile's model when unset.
+                        Factory sends it as the native `modelId` and rejects
+                        it with `resume` (the saved model is restored);
                         OpenCode requires provider/model. None preserves
                         native selection; empty is invalid. Amp rejects model
                         because amp_sdk.mode owns routing.
@@ -498,13 +557,14 @@ class SessionSpec:
                         `TMPDIR` (the parent-owned per-session directory; a
                         caller entry is rejected). The commands the parent
                         runs for the Cline worker get the same overlay.
-                        OpenCode / OpenHands reject a non-empty env.
+                        Factory requires a nonempty FACTORY_API_KEY before
+                        spawn and protects native SDK attribution.
+                        OpenCode/OpenHands reject nonempty env.
     `executable`      — bare binary name or absolute path; default "pi" for
-                        pi, "bun" for omp, "node" for amp and cline, and
-                        sys.executable for claude-code (an interpreter with
-                        the selected SDK dependencies). This selects the
-                        worker runtime, not the native SDK CLI.
-                        OpenCode / OpenHands reject it.
+                        pi, "bun" for omp, "node" for amp and cline, "droid"
+                        for Factory, and sys.executable for the Claude SDK
+                        worker (not its native CLI). OpenCode/OpenHands
+                        reject it.
     `permission_policy` — only "upstream"; "bypass" raises `unsupported-capability`.
     `instructions`    — projected to the adapter's instructions file
                         (`AGENTS.md`; `CLAUDE.md` for claude-code, which
@@ -520,6 +580,12 @@ class SessionSpec:
                         native records name the exact UUID and the same
                         workdir; the worker resumes that file and verifies
                         the ID and transcript against every native hook.
+                        Factory requires the computed native `session_file`
+                        (`<FACTORY_HOME_OVERRIDE or HOME>/.factory/sessions/
+                        <encoded workdir>/<id>.jsonl`), verifies its
+                        `session_start` header before spawn and the native
+                        `load_session` cwd after; `model` and
+                        `factory_droid.autonomy` must be unset.
                         OpenCode requires `session_file=None`, the same
                         `endpoint` / `workdir` and a full `ses_` ID, verified
                         with `GET /session/{id}` before anything else.
@@ -538,6 +604,8 @@ class SessionSpec:
     `claude_sdk`      — required with harness "claude-code", rejected otherwise.
     `amp_sdk`         — required with harness "amp", rejected otherwise.
     `cline_sdk`       — required with harness "cline", rejected otherwise.
+    `factory_droid`   — optional with harness "factory-droid" (None = native
+                        defaults), rejected otherwise.
     `opencode`        — required with harness "opencode", rejected otherwise.
     `openhands`       — required with harness "openhands", rejected otherwise.
     `timeout_seconds` — wall-clock cap per turn (default 1800). None disables
@@ -575,6 +643,7 @@ class SessionSpec:
     amp_sdk: AmpSdkOptions | None = None
     claude_sdk: ClaudeSdkOptions | None = None
     cline_sdk: ClineSdkOptions | None = None
+    factory_droid: FactoryDroidOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -594,15 +663,15 @@ class SessionCapabilities:
 class SessionEvent:
     """One native frame. `raw` is the parsed JSON object, untouched: the Pi
     RPC frame, native SDK event unwrapped from sdk_event (OMP / Claude)
-    or amp_event (Amp), the OpenCode SSE event (`{"id", "type", "properties"}`)
-    or the whole OpenHands session-socket envelope
+    or amp_event (Amp), Factory inner notification / request-response envelope,
+    OpenCode SSE object, or the whole OpenHands session-socket envelope
     (`{"type", "seq"?, "event"?, ...}`). Claude also reports claude_permission /
     claude_permission_cancelled / claude_session_hook / claude_interrupt, and
     Cline cline_permission / cline_permission_cancelled; permission request_id
     is explicitly bridge-local."""
 
     backend: Literal["rpc", "sdk"]
-    harness: Literal["pi", "omp", "opencode", "openhands", "claude-code", "amp", "cline"]
+    harness: Literal["pi", "omp", "opencode", "openhands", "claude-code", "amp", "cline", "factory-droid"]
     session_id: str
     turn_id: str | None
     request_id: str | None
@@ -616,8 +685,11 @@ class SessionTurnResult:
 
     `raw` is the last `agent_end` payload, the rejecting `response` frame,
     the failing sdk_settled bridge frame, the native Claude result (or
-    sdk_failure frame), or the native Amp result carried by amp_done.
-    Native cumulative usage is retained, never aggregated.
+    sdk_failure frame), the native Amp result carried by amp_done, or
+    (factory-droid) the complete native `agent_turn_completed` notification.
+    Native cumulative usage is retained, never aggregated (Factory:
+    `tokenUsage` is this turn, `cumulativeTokenUsage` the session;
+    `factoryCredits` are never money).
     exit_code / signal describe the owned process leader while known;
     Claude native exit diagnostics remain inside sdk_failure raw. Amp instead
     reports the native turn exit and stderr capture carried by amp_done.
@@ -716,6 +788,10 @@ class SessionTurn:
 def get_session_capabilities(name: str, backend: Backend = "rpc") -> SessionCapabilities:
     """Live-session operations `name` supports on `backend`. Pure.
 
+    `approval` names the generic `respond_approval` method (OpenCode only);
+    Factory answers native permission / question requests through the
+    backend-specific `FactoryDroidOptions` callbacks instead.
+
     Raises `unknown-harness` for unregistered names, `unsupported-backend` for
     registered harnesses without a session backend, for cli and for a
     backend the harness is not qualified on, and `invalid-options` for
@@ -762,8 +838,7 @@ def _finite(name: str, value: object, *, minimum: float, exclusive: bool) -> Non
 
 
 def _validate_reference(reference: object) -> SessionReference:
-    """Pi / OMP / Claude resume identity: a persisted session log under a
-    matching workdir."""
+    """Process-backed resume identity: a persisted session log under a matching workdir."""
     if not isinstance(reference, SessionReference):
         raise HarnessError("resume must be a SessionReference", code="invalid-options")
     if not isinstance(reference.session_id, str) or not reference.session_id:
@@ -889,8 +964,10 @@ def _same_dir(a: str, b: Path) -> bool:
         return False
 
 
-def _verify_session_header(reference: SessionReference, backend: Backend) -> None:
-    """Read the exact native header, allowing OMP's single title preamble."""
+def _verify_session_header(reference: SessionReference, *, header_type: str, title_preamble: bool = False, label: str = "resume.session_file") -> None:
+    """Read the exact native header (type `header_type`, matching `id` and
+    `cwd`), allowing OMP's single title preamble when `title_preamble`.
+    Raises `invalid-options`; `label` names the file in messages."""
     assert reference.session_file is not None
     path = reference.session_file
     try:
@@ -900,23 +977,23 @@ def _verify_session_header(reference: SessionReference, backend: Backend) -> Non
                 if len(line) > MAX_FRAME_BYTES:
                     raise ValueError("header exceeds byte bound")
                 header = json.loads(line.decode("utf-8"))
-                if index == 0 and backend == "sdk" and isinstance(header, dict) and header.get("type") == "title":
+                if index == 0 and title_preamble and isinstance(header, dict) and header.get("type") == "title":
                     continue
                 break
     except OSError as exc:
-        raise HarnessError(f"cannot read resume.session_file {path}: {exc.strerror or exc}", code="invalid-options") from None
+        raise HarnessError(f"cannot read {label} {path}: {exc.strerror or exc}", code="invalid-options") from None
     except (UnicodeDecodeError, ValueError):
-        raise HarnessError(f"resume.session_file {path} does not start with a bounded JSON session header", code="invalid-options") from None
-    if not isinstance(header, dict) or header.get("type") != "session":
-        raise HarnessError(f"resume.session_file {path} header is not type 'session'", code="invalid-options")
+        raise HarnessError(f"{label} {path} does not start with a bounded JSON session header", code="invalid-options") from None
+    if not isinstance(header, dict) or header.get("type") != header_type:
+        raise HarnessError(f"{label} {path} header is not type {header_type!r}", code="invalid-options")
     if header.get("id") != reference.session_id:
         raise HarnessError(
-            f"resume.session_file {path} belongs to session {header.get('id')!r}, not {reference.session_id!r}",
+            f"{label} {path} belongs to session {header.get('id')!r}, not {reference.session_id!r}",
             code="invalid-options",
         )
     cwd = header.get("cwd")
     if not isinstance(cwd, str) or not _same_dir(cwd, reference.workdir):
-        raise HarnessError(f"resume.session_file {path} was recorded in {cwd!r}, not {str(reference.workdir)!r}", code="invalid-options")
+        raise HarnessError(f"{label} {path} was recorded in {cwd!r}, not {str(reference.workdir)!r}", code="invalid-options")
 
 
 def _verify_claude_transcript(reference: SessionReference) -> None:
@@ -1016,6 +1093,10 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
         raise HarnessError(f"opencode applies only to opencode rpc sessions, not {spec.harness} {spec.backend}", code="invalid-options")
     if spec.openhands is not None:
         raise HarnessError(f"openhands applies only to openhands rpc sessions, not {spec.harness} {spec.backend}", code="invalid-options")
+    if spec.harness == "factory-droid":
+        return _validate_factory_droid_spec(spec, model)
+    if spec.factory_droid is not None:
+        raise HarnessError(f"factory_droid applies only to factory-droid sdk sessions, not {spec.harness} {spec.backend}", code="invalid-options")
     if spec.harness == "amp":
         return _validate_amp_spec(spec, model)
     if spec.amp_sdk is not None:
@@ -1039,6 +1120,68 @@ def _validate_session_spec(spec: SessionSpec) -> SessionSpec:
     )
 
 
+def _validate_factory_droid_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
+    """Factory owns one `droid exec` child: every unsupported choice is
+    rejected here, before the SDK is imported or anything is prepared."""
+    if spec.omp_sdk is not None:
+        raise HarnessError("omp_sdk applies only to omp sdk sessions, not factory-droid sdk", code="invalid-options")
+    if spec.claude_sdk is not None:
+        raise HarnessError("claude_sdk applies only to claude-code sdk sessions, not factory-droid sdk", code="invalid-options")
+    if spec.amp_sdk is not None:
+        raise HarnessError("amp_sdk applies only to amp sdk sessions, not factory-droid sdk", code="invalid-options")
+    if spec.cline_sdk is not None:
+        raise HarnessError("cline_sdk applies only to cline sdk sessions, not factory-droid sdk", code="invalid-options")
+    options = _validate_factory_droid_options(spec.factory_droid)
+    for key in _FACTORY_OWNED_ENV:
+        if key in spec.env:
+            raise HarnessError(f"env[{key!r}] is SDK attribution owned by the factory-droid sdk backend; omit it", code="invalid-options")
+    workdir = absolute_workdir(spec.workdir)
+    resume = _validate_reference(spec.resume) if spec.resume is not None else None
+    if resume is not None:
+        if not _same_dir(str(resume.workdir), workdir):
+            raise HarnessError(
+                f"resume.workdir {str(resume.workdir)!r} does not match the session workdir {str(workdir)!r}",
+                code="invalid-options",
+            )
+        if model is not None:
+            raise HarnessError("model cannot be changed on resume; droid load_session restores the saved model, leave model unset", code="invalid-options")
+        if options.autonomy is not None:
+            raise HarnessError("factory_droid.autonomy cannot be changed on resume; droid load_session restores the saved level, leave it unset", code="invalid-options")
+    return replace(spec, workdir=workdir, model=model, env=dict(spec.env), resume=resume, factory_droid=options)
+
+
+def _validate_factory_droid_options(options: object) -> FactoryDroidOptions:
+    """Snapshot `spec.factory_droid` (None = all native defaults); sequences
+    are copied, callbacks kept as given."""
+    if options is None:
+        return FactoryDroidOptions()
+    if not isinstance(options, FactoryDroidOptions):
+        raise HarnessError("factory_droid must be a FactoryDroidOptions", code="invalid-options")
+    if options.autonomy is not None and options.autonomy not in _FACTORY_AUTONOMY:
+        raise HarnessError(f"factory_droid.autonomy must be one of {', '.join(_FACTORY_AUTONOMY)} or None, got {options.autonomy!r}", code="invalid-options")
+    tools = options.disabled_tools
+    if tools is not None:
+        if isinstance(tools, (str, bytes)) or not isinstance(tools, Sequence) or any(not isinstance(t, str) or not t or "\0" in t for t in tools):
+            raise HarnessError("factory_droid.disabled_tools must be None or a sequence of non-empty NUL-free tool IDs", code="invalid-options")
+        tools = tuple(tools)
+    for name in ("auto_reject_permission_requests", "disable_builtin_skills"):
+        value = getattr(options, name)
+        if value is not None and not isinstance(value, bool):
+            raise HarnessError(f"factory_droid.{name} must be None or a bool", code="invalid-options")
+    for name in ("on_permission", "on_question"):
+        value = getattr(options, name)
+        if value is not None and not callable(value):
+            raise HarnessError(f"factory_droid.{name} must be None or a callable", code="invalid-options")
+    return FactoryDroidOptions(
+        autonomy=options.autonomy,
+        disabled_tools=tools,
+        auto_reject_permission_requests=options.auto_reject_permission_requests,
+        disable_builtin_skills=options.disable_builtin_skills,
+        on_permission=options.on_permission,
+        on_question=options.on_question,
+    )
+
+
 def _validate_opencode_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
     """OpenCode owns no process: everything process-shaped is rejected before
     any network side effect, and the server directory is kept literally."""
@@ -1058,6 +1201,8 @@ def _validate_opencode_spec(spec: SessionSpec, model: str | None) -> SessionSpec
         raise HarnessError("amp_sdk applies only to amp sdk sessions, not opencode rpc", code="invalid-options")
     if spec.cline_sdk is not None:
         raise HarnessError("cline_sdk applies only to cline sdk sessions, not opencode rpc", code="invalid-options")
+    if spec.factory_droid is not None:
+        raise HarnessError("factory_droid applies only to factory-droid sdk sessions, not opencode rpc", code="invalid-options")
     if model is not None:
         provider, _, model_id = model.partition("/")
         if not provider or not model_id:
@@ -1088,6 +1233,8 @@ def _validate_openhands_spec(spec: SessionSpec, model: str | None) -> SessionSpe
         raise HarnessError("opencode applies only to opencode rpc sessions, not openhands rpc", code="invalid-options")
     if spec.cline_sdk is not None:
         raise HarnessError("cline_sdk applies only to cline sdk sessions, not openhands rpc", code="invalid-options")
+    if spec.factory_droid is not None:
+        raise HarnessError("factory_droid applies only to factory-droid sdk sessions, not openhands rpc", code="invalid-options")
     if model is None:
         raise HarnessError("model is required for openhands sessions: the exact native selector the selected profile's LLM uses", code="invalid-options")
     openhands = _validate_openhands_options(spec.openhands)
@@ -1283,7 +1430,6 @@ def _validate_cline_sdk(spec: SessionSpec) -> ClineSdkOptions | None:
         approval=options.approval,
     )
 
-
 def _amp_endpoint(env: dict[str, str]) -> str:
     """Origin the Amp CLI will talk to: `AMP_URL` from `env`, else the
     inherited process environment, else `DEFAULT_AMP_ENDPOINT`; normalized
@@ -1370,6 +1516,10 @@ def _validate_amp_spec(spec: SessionSpec, model: str | None) -> SessionSpec:
     return replace(spec, workdir=workdir, model=None, env=dict(spec.env), resume=resume, amp_sdk=amp_sdk)
 
 
+#: Exactly the `droid exec` invocation the SDK's own transport spawns.
+_DROID_EXEC_ARGS = ("exec", "--input-format", "stream-jsonrpc", "--output-format", "stream-jsonrpc")
+
+
 def _build(spec: SessionSpec, temp_dir: Path | None = None) -> BuildCommand:
     adapter_cls = _adapter_class(spec.harness)
     env = dict(spec.env)
@@ -1381,7 +1531,13 @@ def _build(spec: SessionSpec, temp_dir: Path | None = None) -> BuildCommand:
             "sessionFile": str(spec.resume.session_file),
             "workdir": str(spec.resume.workdir),
         }
-    if spec.harness == "claude-code":
+    if spec.harness == "factory-droid":
+        # Model, autonomy and tool policy travel in the native initialize /
+        # load request, never as CLI flags; the attribution env is overlaid
+        # by `_factory_droid` once the SDK version is known.
+        cmd = spec.executable or "droid"
+        args = list(_DROID_EXEC_ARGS)
+    elif spec.harness == "claude-code":
         assert spec.claude_sdk is not None
         launch = {
             "packageRoot": str(spec.claude_sdk.package_root),
@@ -1564,6 +1720,8 @@ class LiveSession(abc.ABC):
         self._tasks: list[asyncio.Task[None]] = []
         self._turn_seq = 0
         self._abandoned = False
+        self._prelude: list[tuple[str, dict[str, object], str | None, int]] = []
+        self._prelude_bytes = 0
         #: Observed leader exit / stderr; stay at their zero values for
         #: backends without a child (no exit, no stderr, no fabricated telemetry).
         self._returncode: int | None = None
@@ -1644,9 +1802,9 @@ class LiveSession(abc.ABC):
     async def respond_approval(self, request_id: str, response: OpenCodeApprovalResponse) -> None:
         """Answer an outstanding native permission request (`approval`
         capability): OpenCode `permission.asked` (see `_opencode`) or a Claude
-        `claude_permission` event (see `_ProcessSession`). OpenHands has no
-        approval channel here: a native `waiting_for_confirmation` fails the
-        turn explicitly instead."""
+        `claude_permission` event (see `_ProcessSession`). Factory answers
+        through native FactoryDroidOptions callbacks. OpenHands has no
+        approval channel: waiting_for_confirmation fails the turn."""
         raise HarnessError(f"{self._spec.harness} {self._spec.backend} sessions have no approval channel; permissions stay upstream", code="unsupported-capability")
 
     async def close(self) -> None:
@@ -1728,6 +1886,37 @@ class LiveSession(abc.ABC):
             where = "idle event stream" if turn is None else f"turn {turn.handle.id}"
             self._fail("protocol-error", f"{where} exceeded max_buffer_bytes={self._spec.max_buffer_bytes} of unconsumed events")
 
+    def _emit(self, kind: str, raw: dict[str, object], request_id: str | None, turn: _TurnBase | None, size: int) -> None:
+        """Queue one native frame as a `SessionEvent`. Until the identity
+        handshake has produced `reference`, frames are held (within the same
+        byte budget) and replayed onto the idle stream by `_flush_prelude`."""
+        if self._reference is None:
+            if self._prelude_bytes + size > self._spec.max_buffer_bytes:
+                self._fail("protocol-error", "events before session identity exceeded max_buffer_bytes")
+                return
+            self._prelude_bytes += size
+            self._prelude.append((kind, raw, request_id, size))
+            return
+        event = SessionEvent(
+            backend=self._spec.backend,  # type: ignore[arg-type]  # validated: rpc or sdk
+            harness=self._spec.harness,  # type: ignore[arg-type]  # validated: a qualified harness
+            session_id=self._reference.session_id,
+            turn_id=None if turn is None else turn.handle.id,
+            request_id=request_id,
+            type=kind,
+            raw=raw,
+        )
+        self._enqueue(event, turn, size)
+
+    def _flush_prelude(self, consumed: dict[str, object] | None) -> None:
+        """Replay frames held during the handshake, minus the handshake
+        response itself (`consumed`), which became `reference`."""
+        prelude, self._prelude = self._prelude, []
+        self._prelude_bytes = 0
+        for kind, raw, request_id, size in prelude:
+            if raw is not consumed:
+                self._emit(kind, raw, request_id, None, size)
+
     def _finish(self, turn: _TurnBase, status: SessionTurnStatus, raw: dict[str, object] | None, error: str | None) -> None:
         turn.finished = True
         if turn.timer is not None:
@@ -1749,6 +1938,215 @@ class LiveSession(abc.ABC):
             turn.handle._result.set_result(result)
         turn.handle.events._close()
 
+    async def _raise_startup_failure(self, what: str) -> None:
+        """Await the teardown already started by `_fail` during startup and
+        raise the startup error for an owned child named `what`."""
+        assert self._failure is not None and self._teardown_task is not None
+        failure = self._failure
+        cleanup_error: BaseException | None = None
+        try:
+            await self._teardown_task
+        except Exception as exc:
+            cleanup_error = exc
+        code: ErrorCode
+        if failure.status == "closed":
+            code = "session-closed"
+        elif failure.status in ("exited", "signaled", "disconnected"):
+            code = "launch-failed"
+        else:
+            code = "protocol-error"
+        detail = f"{what} startup failed ({failure.status}" + (f": {failure.error})" if failure.error else ")")
+        if self._returncode is not None:
+            detail += f"; exit code {self._returncode}"
+        stderr = self._stderr.text().strip()
+        if stderr:
+            detail += f"; stderr: {stderr[:2000]}"
+        raise HarnessError(detail, code=code) from cleanup_error
+
+
+@dataclass
+class _Disposal:
+    """Outcome of `_OwnedChild.dispose`."""
+
+    stdin_error: Exception | None
+    group_error: PermissionError | None
+    escalated: bool
+
+
+class _OwnedChild:
+    """One session child in its own POSIX process group.
+
+    Owns the spawn (piped stdio, `start_new_session`), the exit observer, the
+    bounded stderr capture, the LF frame splitter and the shared teardown:
+    stdin EOF, SIGTERM to the group, SIGKILL after `_TERM_GRACE`, then at
+    most `_DRAIN_BUDGET` more to reap the leader and drain the pipes.
+    Backends keep framing, protocol and turn state on top of it.
+    """
+
+    def __init__(self, name: str, loop: asyncio.AbstractEventLoop, stderr: _Stderr, on_exit: Callable[[int], None]) -> None:
+        self.name = name
+        self.proc: asyncio.subprocess.Process | None = None
+        self.returncode: int | None = None
+        self.exited = asyncio.Event()
+        self._loop = loop
+        self._stderr = stderr
+        self._on_exit = on_exit
+        self._tasks: list[asyncio.Task[None]] = []
+
+    async def spawn(
+        self,
+        argv: list[str],
+        cwd: Path,
+        env: dict[str, str],
+        stdout: Callable[[asyncio.StreamReader], Coroutine[object, object, None]],
+    ) -> None:
+        """Start the child (raises `OSError`) and its exit / stderr / stdout
+        observers; `stdout` receives the pipe and runs until EOF."""
+        self.proc = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=str(cwd),
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+        assert self.proc.stdout is not None
+        self._track(self._watch_exit())
+        self._track(self._read_stderr())
+        self._track(stdout(self.proc.stdout))
+
+    def _track(self, coro: Coroutine[object, object, None]) -> None:
+        task = self._loop.create_task(coro)
+        self._tasks.append(task)
+        task.add_done_callback(self._tasks.remove)
+
+    async def _watch_exit(self) -> None:
+        assert self.proc is not None
+        self.returncode = await self.proc.wait()
+        self.exited.set()
+        self._on_exit(self.returncode)
+
+    async def _read_stderr(self) -> None:
+        assert self.proc is not None and self.proc.stderr is not None
+        stream = self.proc.stderr
+        while True:
+            try:
+                chunk = await stream.read(_READ_SIZE)
+            except Exception:
+                return
+            if not chunk:
+                return
+            self._stderr.feed(chunk)
+
+    async def read_frames(self, stream: asyncio.StreamReader, on_line: Callable[[bytes], None], on_error: Callable[[str], None]) -> bool:
+        """Split `stream` into LF-terminated lines (a trailing CR is dropped,
+        empty lines skipped) and hand each to `on_line`. `on_error` reports a
+        read failure (reading stops) or a frame exceeding `MAX_FRAME_BYTES`
+        without a newline (the bytes are dropped, reading continues so the
+        pipe drains). Returns True when EOF fell inside an unterminated frame."""
+        buffer = bytearray()
+        while True:
+            try:
+                chunk = await stream.read(_READ_SIZE)
+            except Exception as exc:
+                on_error(f"stdout read failed: {type(exc).__name__}: {exc}")
+                return False
+            if not chunk:
+                break
+            buffer += chunk
+            start = 0
+            while True:
+                newline = buffer.find(b"\n", start)
+                if newline < 0:
+                    break
+                end = newline - 1 if newline > start and buffer[newline - 1] == 0x0D else newline
+                if end > start:
+                    on_line(bytes(buffer[start:end]))
+                start = newline + 1
+            del buffer[:start]
+            if len(buffer) > MAX_FRAME_BYTES:
+                on_error(f"frame exceeds {MAX_FRAME_BYTES} bytes without a newline")
+                buffer.clear()
+        return bool(buffer.strip(b"\r"))
+
+    async def loss(self, detail: str) -> tuple[SessionTurnStatus, str]:
+        """Classify an unexpected EOF / EPIPE: a natural exit within the grace
+        window is `exited` / `signaled`; a live child that stopped talking is
+        `disconnected`."""
+        if not self.exited.is_set():
+            try:
+                await asyncio.wait_for(self.exited.wait(), _TERM_GRACE)
+            except asyncio.TimeoutError:
+                pass
+        code = self.returncode
+        if code is None:
+            return "disconnected", f"{detail} while {self.name} kept running"
+        if code < 0:
+            return "signaled", f"{self.name} was killed by {_signal_name(code)}"
+        return "exited", f"{self.name} exited with code {code}"
+
+    def _signal_group(self, sig: int) -> tuple[bool, PermissionError | None]:
+        """(group still exists, EPERM seen). macOS can report EPERM for a
+        group whose leader is mid-exit; treat it as alive and retry."""
+        assert self.proc is not None
+        try:
+            os.killpg(self.proc.pid, sig)
+        except ProcessLookupError:
+            return False, None
+        except PermissionError as exc:
+            return True, exc
+        return True, None
+
+    async def dispose(self, owner_tasks: Sequence[asyncio.Task[None]] = ()) -> _Disposal:
+        """Bounded teardown of the whole group; every observer task has
+        finished when this returns. Must complete even under cancellation.
+        `owner_tasks` are already-cancelled tasks the owner still holds
+        (Cline's parent-owned commands): the drain ends early only once they
+        are done too, and this never cancels or awaits them itself."""
+        proc = self.proc
+        assert proc is not None
+        stdin_error: Exception | None = None
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except Exception as exc:
+            stdin_error = exc
+        group_exists, group_error = self._signal_group(signal.SIGTERM)
+        grace_end = self._loop.time() + _TERM_GRACE
+        drain_end = grace_end + _DRAIN_BUDGET
+        escalated = False
+        readers = [t for t in self._tasks if not t.done()]
+        while True:
+            now = self._loop.time()
+            if group_exists and not escalated and now >= grace_end:
+                group_exists, group_error = self._signal_group(signal.SIGKILL)
+                escalated = group_error is None
+            readers = [t for t in readers if not t.done()]
+            if not group_exists and self.exited.is_set() and not readers and all(t.done() for t in owner_tasks):
+                break
+            if now >= drain_end:
+                break
+            await asyncio.sleep(min(_TICK, drain_end - now))
+            group_exists, group_error = self._signal_group(0)
+        for task in readers:
+            # A pipe still open past the drain budget is held by something
+            # outside our group; stop waiting for its EOF.
+            task.cancel()
+        if not self.exited.is_set():
+            try:
+                await asyncio.wait_for(self.exited.wait(), max(0.0, drain_end - self._loop.time()))
+            except asyncio.TimeoutError:
+                pass
+        for task in list(self._tasks):
+            if task.done():
+                continue
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        return _Disposal(stdin_error=stdin_error, group_error=group_error, escalated=escalated)
+
 
 class _ProcessSession(LiveSession):
     """An owned session child: `pi --mode rpc`, the OMP SDK bridge, the
@@ -1762,7 +2160,8 @@ class _ProcessSession(LiveSession):
         self._sdk = spec.backend == "sdk"
         self._claude = spec.harness == "claude-code"
         self._cline = spec.harness == "cline"
-        self._child = "claude sdk worker" if self._claude else "cline sdk worker" if self._cline else "omp sdk bridge" if self._sdk else "pi"
+        name = "claude sdk worker" if self._claude else "cline sdk worker" if self._cline else "omp sdk bridge" if self._sdk else "pi"
+        self._child = _OwnedChild(name, self._loop, self._stderr, self._record_exit)
         #: claude-code / cline: bridge approval IDs announced by a permission
         #: event and not yet answered, cancelled or ended with their turn.
         self._approvals: set[str] = set()
@@ -1773,13 +2172,12 @@ class _ProcessSession(LiveSession):
         #: cline: the commands the parent runs for the worker, by request id.
         self._commands: dict[str, _ShellJob] = {}
         self._command_seq = 0
-        self._proc: asyncio.subprocess.Process | None = None
         self._pending: dict[str, _Pending] = {}
         self._write_lock = asyncio.Lock()
-        self._exited = asyncio.Event()
         self._request_seq = 0
-        self._prelude: list[tuple[dict[str, object], str, int]] = []
-        self._prelude_bytes = 0
+
+    def _record_exit(self, code: int) -> None:
+        self._returncode = code
 
     # ---- public surface ---------------------------------------------------
 
@@ -1867,7 +2265,7 @@ class _ProcessSession(LiveSession):
 
     def _abandon(self) -> None:
         self._abandoned = True
-        if self._proc is not None:
+        if self._child.proc is not None:
             self._fail("closed", None)
 
     # ---- requests ---------------------------------------------------------
@@ -1896,9 +2294,10 @@ class _ProcessSession(LiveSession):
             async with self._write_lock:
                 if self._failure is not None:
                     return
-                assert self._proc is not None and self._proc.stdin is not None
-                self._proc.stdin.write(data)
-                await self._proc.stdin.drain()
+                proc = self._child.proc
+                assert proc is not None and proc.stdin is not None
+                proc.stdin.write(data)
+                await proc.stdin.drain()
         except (BrokenPipeError, ConnectionResetError, OSError, RuntimeError) as exc:
             if self._failure is None:
                 await self._classify_transport_loss(f"stdin write failed: {type(exc).__name__}: {exc}")
@@ -1953,7 +2352,7 @@ class _ProcessSession(LiveSession):
                 self._handle_shell(frame, kind, turn)
                 return
             if kind != "sdk_event":
-                self._fail("protocol-error", f"unexpected {kind!r} frame from the {self._child}")
+                self._fail("protocol-error", f"unexpected {kind!r} frame from the {self._child.name}")
                 return
             event = frame.get("event")
             if not isinstance(event, dict) or not isinstance(event.get("type"), str) or not event["type"]:
@@ -1985,33 +2384,24 @@ class _ProcessSession(LiveSession):
         return pending
 
     def _deliver(self, frame: dict[str, object], kind: str, turn: _Turn | None, size: int) -> None:
-        if self._reference is None:
-            # Handshake in progress: idle frames wait for the native identity.
-            if self._prelude_bytes + size > self._spec.max_buffer_bytes:
-                self._fail("protocol-error", "events before session identity exceeded max_buffer_bytes")
-                return
-            self._prelude_bytes += size
-            self._prelude.append((frame, kind, size))
-            return
-        if self._claude:
-            if kind == "sdk_reference":
-                self._apply_reference(frame)
-                return
-            if not self._admit_claude(frame, kind, turn):
-                return
-        if self._cline and not self._admit_cline(frame, kind, turn):
-            return
+
         request_id = frame.get("id")
-        event = SessionEvent(
-            backend=self._spec.backend,  # type: ignore[arg-type]  # validated: rpc or sdk
-            harness=self._spec.harness,  # type: ignore[arg-type]  # validated: pi, omp, claude-code or cline
-            session_id=self._reference.session_id,
-            turn_id=None if turn is None else turn.handle.id,
-            request_id=request_id if isinstance(request_id, str) else None,
-            type=kind,
-            raw=frame,
-        )
-        self._enqueue(event, turn, size)
+        self._emit(kind, frame, request_id if isinstance(request_id, str) else None, turn, size)
+
+    def _emit(self, kind: str, raw: dict[str, object], request_id: str | None, turn: _TurnBase | None, size: int) -> None:
+        """Claude / Cline frames are screened once the identity handshake is
+        done — also for frames replayed out of the prelude, which arrive here
+        again."""
+        if self._reference is not None:
+            if self._claude:
+                if kind == "sdk_reference":
+                    self._apply_reference(raw)
+                    return
+                if not self._admit_claude(raw, kind, turn):  # type: ignore[arg-type]  # every turn of an owned child is a _Turn
+                    return
+            elif self._cline and not self._admit_cline(raw, kind, turn):  # type: ignore[arg-type]  # every turn of an owned child is a _Turn
+                return
+        super()._emit(kind, raw, request_id, turn, size)
 
     def _admit_claude(self, frame: dict[str, object], kind: str, turn: _Turn | None) -> bool:
         """Claude events must belong to the selected session; native results
@@ -2312,87 +2702,21 @@ class _ProcessSession(LiveSession):
 
     # ---- child I/O --------------------------------------------------------
 
-    async def _read_stdout(self) -> None:
-        assert self._proc is not None and self._proc.stdout is not None
-        stream = self._proc.stdout
-        buffer = bytearray()
-        while True:
-            try:
-                chunk = await stream.read(_READ_SIZE)
-            except Exception as exc:
-                self._fail("protocol-error", f"stdout read failed: {type(exc).__name__}: {exc}")
-                return
-            if not chunk:
-                break
-            buffer += chunk
-            start = 0
-            while True:
-                newline = buffer.find(b"\n", start)
-                if newline < 0:
-                    break
-                end = newline - 1 if newline > start and buffer[newline - 1] == 0x0D else newline
-                if end > start:
-                    self._handle_line(bytes(buffer[start:end]))
-                start = newline + 1
-            del buffer[:start]
-            if len(buffer) > MAX_FRAME_BYTES:
-                self._fail("protocol-error", f"frame exceeds {MAX_FRAME_BYTES} bytes without a newline")
-                buffer.clear()
+    async def _read_stdout(self, stream: asyncio.StreamReader) -> None:
+        incomplete = await self._child.read_frames(stream, self._handle_line, lambda detail: self._fail("protocol-error", detail))
         if self._failure is not None:
             return
-        if buffer.strip(b"\r"):
+        if incomplete:
             self._fail("protocol-error", "stdout ended inside an incomplete JSON frame")
             return
         await self._classify_transport_loss("stdout closed")
 
     async def _classify_transport_loss(self, detail: str) -> None:
-        """Unexpected EOF/EPIPE: a natural exit within the grace window is
-        `exited`/`signaled`; a live child that stopped talking is `disconnected`."""
-        if not self._exited.is_set():
-            try:
-                await asyncio.wait_for(self._exited.wait(), _TERM_GRACE)
-            except asyncio.TimeoutError:
-                pass
-        if self._failure is not None:
-            return
-        code = self._returncode
-        if code is None:
-            self._fail("disconnected", f"{detail} while {self._child} kept running")
-        elif code < 0:
-            self._fail("signaled", f"{self._child} was killed by {_signal_name(code)}")
-        else:
-            self._fail("exited", f"{self._child} exited with code {code}")
-
-    async def _read_stderr(self) -> None:
-        assert self._proc is not None and self._proc.stderr is not None
-        stream = self._proc.stderr
-        while True:
-            try:
-                chunk = await stream.read(_READ_SIZE)
-            except Exception:
-                return
-            if not chunk:
-                return
-            self._stderr.feed(chunk)
-
-    async def _watch_exit(self) -> None:
-        assert self._proc is not None
-        self._returncode = await self._proc.wait()
-        self._exited.set()
+        status, error = await self._child.loss(detail)
+        if self._failure is None:
+            self._fail(status, error)
 
     # ---- teardown ---------------------------------------------------------
-
-    def _signal_group(self, sig: int) -> tuple[bool, PermissionError | None]:
-        """(group still exists, EPERM seen). macOS can report EPERM for a
-        group whose leader is mid-exit; treat it as alive and retry."""
-        assert self._proc is not None
-        try:
-            os.killpg(self._proc.pid, sig)
-        except ProcessLookupError:
-            return False, None
-        except PermissionError as exc:
-            return True, exc
-        return True, None
 
     def _discard_temp_dir(self) -> HarnessError | None:
         """Remove the temporary directory this session owns; only called once
@@ -2410,8 +2734,8 @@ class _ProcessSession(LiveSession):
 
     async def _teardown(self) -> None:
         failure = self._failure
-        assert failure is not None and self._proc is not None
-        proc = self._proc
+        proc = self._child.proc
+        assert failure is not None and proc is not None
         for pending in self._pending.values():
             pending.timer.cancel()
         if self._active is not None and self._active.timer is not None:
@@ -2426,39 +2750,7 @@ class _ProcessSession(LiveSession):
             job.cancel.set()
             job.task.cancel()
             command_tasks.append(job.task)
-        stdin_error: Exception | None = None
-        try:
-            if proc.stdin is not None:
-                proc.stdin.close()
-        except Exception as exc:
-            stdin_error = exc
-        group_exists, group_error = self._signal_group(signal.SIGTERM)
-        grace_end = self._loop.time() + _TERM_GRACE
-        drain_end = grace_end + _DRAIN_BUDGET
-        escalated = False
-        readers = [t for t in self._tasks if not t.done()]
-        while True:
-            now = self._loop.time()
-            if group_exists and not escalated and now >= grace_end:
-                group_exists, group_error = self._signal_group(signal.SIGKILL)
-                escalated = group_error is None
-            readers = [t for t in readers if not t.done()]
-            running = [t for t in command_tasks if not t.done()]
-            if not group_exists and self._exited.is_set() and not readers and not running:
-                break
-            if now >= drain_end:
-                break
-            await asyncio.sleep(min(_TICK, drain_end - now))
-            group_exists, group_error = self._signal_group(0)
-        for task in readers:
-            # A pipe still open past the drain budget is held by something
-            # outside our group; stop waiting for its EOF.
-            task.cancel()
-        if not self._exited.is_set():
-            try:
-                await asyncio.wait_for(self._exited.wait(), max(0.0, drain_end - self._loop.time()))
-            except asyncio.TimeoutError:
-                pass
+        disposal = await self._child.dispose(command_tasks)
         for task in list(self._tasks):
             if task.done():
                 continue
@@ -2479,10 +2771,10 @@ class _ProcessSession(LiveSession):
             self._finish(turn, failure.status, turn.failure_frame if turn.failure_frame is not None else turn.last_end, failure.error)
         self._idle._close()
         # Preserve the lease when live resources could not be released safely.
-        if group_error is not None:
-            raise group_error
-        if not self._exited.is_set():
-            raise HarnessError(f"{self._child} process {proc.pid} could not be reaped within the teardown budget", code="adapter-error")
+        if disposal.group_error is not None:
+            raise disposal.group_error
+        if not self._child.exited.is_set():
+            raise HarnessError(f"{self._child.name} process {proc.pid} could not be reaped within the teardown budget", code="adapter-error")
         if command_error is not None:
             # Command groups may still be live: keep the lease and the
             # temporary directory rather than report a successful disposal.
@@ -2501,17 +2793,17 @@ class _ProcessSession(LiveSession):
             assert code is not None
             if code >= 0:
                 detail = f"exit code {code}"
-            elif escalated:
+            elif disposal.escalated:
                 detail = f"did not dispose within {_TERM_GRACE}s and was killed by {_signal_name(code)}"
             else:
                 detail = f"killed by {_signal_name(code)}"
             stderr = self._stderr.text().strip()
             raise HarnessError(
-                f"{self._child} failed to dispose the session: {detail}" + (f"; stderr: {stderr[:2000]}" if stderr else ""),
+                f"{self._child.name} failed to dispose the session: {detail}" + (f"; stderr: {stderr[:2000]}" if stderr else ""),
                 code="adapter-error",
             )
-        if stdin_error is not None:
-            raise stdin_error
+        if disposal.stdin_error is not None:
+            raise disposal.stdin_error
         if temp_error is not None:
             raise temp_error
 
@@ -2519,22 +2811,11 @@ class _ProcessSession(LiveSession):
 
     async def _startup(self, argv: list[str], env: dict[str, str]) -> None:
         try:
-            self._proc = await asyncio.create_subprocess_exec(
-                *argv,
-                cwd=str(self._spec.workdir),
-                env=env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
-            )
+            await self._child.spawn(argv, self._spec.workdir, env, self._read_stdout)
         except OSError as exc:
             self._discard_temp_dir()
             cleanup_command(self._prepared)
             raise HarnessError(f"failed to launch {argv[0]!r}: {exc.strerror or exc}", code="launch-failed") from None
-        self._spawn(self._watch_exit())
-        self._spawn(self._read_stdout())
-        self._spawn(self._read_stderr())
         if self._abandoned:
             self._fail("closed", None)
         self._request_seq += 1
@@ -2543,43 +2824,16 @@ class _ProcessSession(LiveSession):
         await self._send({"id": request_id, "type": "get_state"})
         response = await asyncio.shield(pending.future)
         if response is None:
-            await self._raise_startup_failure()
+            await self._raise_startup_failure(self._child.name)
         assert response is not None
         try:
             self._reference = self._reference_from_state(response)
         except HarnessError as exc:
             self._fail("protocol-error", str(exc))
-            await self._raise_startup_failure()
+            await self._raise_startup_failure(self._child.name)
         # The handshake response is consumed here (it became `reference`);
         # any other frame that arrived meanwhile is an idle event.
-        prelude, self._prelude = self._prelude, []
-        self._prelude_bytes = 0
-        for frame, kind, size in prelude:
-            if frame is not response:
-                self._deliver(frame, kind, None, size)
-
-    async def _raise_startup_failure(self) -> None:
-        assert self._failure is not None and self._teardown_task is not None
-        failure = self._failure
-        cleanup_error: BaseException | None = None
-        try:
-            await self._teardown_task
-        except Exception as exc:
-            cleanup_error = exc
-        code: ErrorCode
-        if failure.status == "closed":
-            code = "session-closed"
-        elif failure.status in ("exited", "signaled", "disconnected"):
-            code = "launch-failed"
-        else:
-            code = "protocol-error"
-        detail = f"{self._child} startup failed ({failure.status}" + (f": {failure.error})" if failure.error else ")")
-        if self._returncode is not None:
-            detail += f"; exit code {self._returncode}"
-        stderr = self._stderr.text().strip()
-        if stderr:
-            detail += f"; stderr: {stderr[:2000]}"
-        raise HarnessError(detail, code=code) from cleanup_error
+        self._flush_prelude(response)
 
     def _reference_from_state(self, response: dict[str, object]) -> SessionReference:
         if response.get("success") is not True:
@@ -2599,17 +2853,17 @@ class _ProcessSession(LiveSession):
             raise HarnessError("get_state reported isStreaming != false at startup")
         resume = self._spec.resume
         if resume is not None and session_id != resume.session_id:
-            raise HarnessError(f"{self._child} resumed session {session_id!r}, expected {resume.session_id!r}")
+            raise HarnessError(f"{self._child.name} resumed session {session_id!r}, expected {resume.session_id!r}")
         if self._claude and _UUID.fullmatch(session_id) is None:
-            raise HarnessError(f"{self._child} selected a non-UUID session ID {session_id!r}")
+            raise HarnessError(f"{self._child.name} selected a non-UUID session ID {session_id!r}")
         if self._cline:
             if not isinstance(session_file, str) or not session_file:
-                raise HarnessError(f"{self._child} reported no native session manifest path")
+                raise HarnessError(f"{self._child.name} reported no native session manifest path")
             workdir = data.get("workdir")
             if not isinstance(workdir, str) or not _same_dir(workdir, self._spec.workdir):
-                raise HarnessError(f"{self._child} opened the session in {workdir!r}, not the requested {str(self._spec.workdir)!r}")
+                raise HarnessError(f"{self._child.name} opened the session in {workdir!r}, not the requested {str(self._spec.workdir)!r}")
             if resume is not None and resume.session_file is not None and not _same_dir(session_file, resume.session_file):
-                raise HarnessError(f"{self._child} resumed the manifest {session_file!r}, expected {str(resume.session_file)!r}")
+                raise HarnessError(f"{self._child.name} resumed the manifest {session_file!r}, expected {str(resume.session_file)!r}")
         return SessionReference(
             session_id=session_id,
             session_file=Path(session_file) if session_file else None,
@@ -2747,10 +3001,10 @@ def _command_cleanup_error(jobs: list[_ShellJob]) -> str | None:
 
 async def open_session(spec: SessionSpec) -> LiveSession:
     """Open the live session for `spec`: spawn the session child (`pi --mode
-    rpc`, the OMP Bun bridge, or the native Python Claude SDK worker),
-    connect to the caller-owned OpenCode or OpenHands server, or open the
-    Amp/Cline Node worker. Each backend verifies its explicit native identity
-    before accepting turns.
+    rpc`, OMP Bun bridge, Python Claude SDK worker, Cline Node worker, or
+    Factory SDK-driven `droid exec`), connect to caller-owned
+    OpenCode/OpenHands, or open the Amp Node worker. Every backend verifies
+    explicit identity before turns.
 
     Validation (harness, backend, options, resume header) happens before any
     filesystem, process or network side effect. Instructions are projected
@@ -2773,13 +3027,17 @@ async def open_session(spec: SessionSpec) -> LiveSession:
         from harness._amp import open_amp_session
 
         return await open_amp_session(spec)
+    if spec.harness == "factory-droid":
+        from harness._factory_droid import open_factory_droid_session  # optional droid-sdk dependency
+
+        return await open_factory_droid_session(spec)
     if spec.resume is not None:
         if spec.harness == "claude-code":
             _verify_claude_transcript(spec.resume)
         elif spec.harness != "cline":
             # A native Cline manifest carries no Pi / OMP session header: the
             # worker verifies its identity, path and cwd around the start.
-            _verify_session_header(spec.resume, spec.backend)
+            _verify_session_header(spec.resume, header_type="session", title_preamble=spec.backend == "sdk")
     # The cline worker and every command it asks for run inside a temporary
     # directory this session owns and removes once their groups are gone.
     temp_dir = Path(tempfile.mkdtemp(prefix="harness-cline-")) if spec.harness == "cline" else None
@@ -2829,6 +3087,9 @@ __all__ = [
     "ClineApproval",
     "ClineFeatures",
     "ClineSdkOptions",
+    "FactoryDroidAutonomy",
+    "FactoryDroidCallback",
+    "FactoryDroidOptions",
     "LiveSession",
     "OmpSdkOptions",
     "OpenCodeApprovalResponse",

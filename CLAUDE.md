@@ -88,8 +88,8 @@ Patch versions MAY diverge for implementation-only fixes (e.g. a Node prebuild
 bump that doesn't apply to the Python wheel). Anything that touches SPEC.md or
 the fixture set bumps both simultaneously.
 
-Current manifests do not meet that alignment: Python is `0.3.22` and
-TypeScript is `0.2.27`. This is recorded skew, not a new release policy.
+The manifests currently have different major.minor versions. Read their values
+directly; this recorded skew is not a new release policy.
 
 ## How parity is enforced
 

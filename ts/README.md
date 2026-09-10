@@ -70,6 +70,12 @@ See the [paired runnable usage](../README.md#controlled-pi-rpc-sessions) and
 errors, bounded output, deadlines, local-only extension limitations, and the
 separate offline/native/provider qualification evidence.
 
+Pi SDK sessions remain **deferred/unsupported** after native forced-tool-cleanup
+qualification. `harness: 'pi', backend: 'sdk'` rejects with
+`unsupported-backend`, matching Python; no SDK loading or fallback occurs.
+Existing CLI/RPC behavior is unchanged. See the
+[SDK finding and qualification limits](../ADAPTER-MATRIX.md#pi-sdk-unsupported-after-qualification).
+
 ## Optional OMP SDK backend
 
 `openSession({ harness: 'omp', backend: 'sdk', workdir, ompSdk })` uses the same

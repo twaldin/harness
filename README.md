@@ -172,6 +172,12 @@ are not completion. See [the session contract](SPEC.md#controlled-rpc-sessions)
 for terminal statuses, deadlines, local-only extension limitations, ownership,
 and the distinction between offline conformance and native/provider smoke.
 
+Pi SDK sessions remain **deferred/unsupported** after native forced-tool-cleanup
+qualification. The existing CLI and RPC paths are unchanged; selecting
+`harness="pi", backend="sdk"` fails in both languages, without fallback or SDK
+loading. No native Python SDK or supported Python SDK bridge is claimed. See
+the [SDK finding and qualification limits](ADAPTER-MATRIX.md#pi-sdk-unsupported-after-qualification).
+
 ### Optional Oh My Pi SDK sessions
 
 Select `harness="omp", backend="sdk"` explicitly. Both languages host the

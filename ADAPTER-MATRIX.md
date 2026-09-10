@@ -22,6 +22,57 @@ reported `2.1.220` — confirming the installed builds behind the dated
 runtimes observed the same day: Node 26.6.0, Bun 1.3.14, Python 3.11.15, with
 Node 22.23.2 available for packaged-consumer validation.
 
+## Installed-consumer qualification — 2026-09-10
+
+[TWA-89](https://linear.app/twaldin/issue/TWA-89) built exact git exports starting
+at `b92762c34f1e31b7c36ab4535648cffffc67c31c`, inspected the Python sdist/wheel
+and npm tarball, and installed **harness-cli 0.3.22** / **@twaldin/harness-ts
+0.2.27** into disposable consumers. Python imports resolved inside fresh
+site-packages; Node imports resolved inside each consumer's node_modules.
+No editable installs or source links supplied Harness. The wheel lacked the
+PEP 561 marker: this change adds `py.typed` and an installed-consumer mypy
+regression. Strict mypy 2.3.1 and TypeScript 5.9.3 consumer checks pass with
+the repair; no runtime API or package version changes.
+
+Both installed languages agreed on 26 CLI command/capability records, eight
+session capability records and explicit unsupported-backend errors. Packaged
+Node also read a synthetic Crush SQLite database through better-sqlite3
+12.11.1. These checks and the Python/Bun/packaged-Node conformance suites are
+**synthetic**, not proof of live support for every adapter.
+
+The bounded native matrix ran on **macOS arm64 (Darwin 25.6.0)**:
+
+| path | exact native runtime and consumer | actual coverage and limits |
+|---|---|---|
+| Codex CLI | 0.153.4; Python 3.11.15 and Node 26.6.0 | **Authenticated provider success:** explicitly selected `gpt-6-astra` from the current native model catalog, fixed scratch code and ran unchanged tests in both languages; independently rerun tests passed. Explicit `gpt-5.4` returned HTTP 400 (not supported for the selected ChatGPT account). Bounded cancellation returned `cancelled`. USD unavailable; no model fallback. |
+| Claude Code CLI | 2.1.220; Python 3.11.15 and Node 26.6.0 | Existing native login reported present, but `claude-sonnet-4-6` calls failed with expired/unrefreshable OAuth credentials. No edit/test success. Bounded cancellation returned `cancelled`. No reauthentication or credential copying. |
+| Pi RPC | @earendil-works/pi-coding-agent 0.85.1; Python 3.14.3 and Node 26.6.0 | **Unmodified native runtime, synthetic loopback provider:** real edit and bash/test tools, follow-up, streaming interruption, native provider error, close and exact-ID resume passed in both languages. Missing resume rejected. Tool-phase abort status caveat below; no authenticated generation. |
+| Cline SDK | sdk/core/shared/agents/llms all 0.0.82; Node worker 22.22.2, Python 3.14.3 and Node 22.22.2 callers | **Unmodified native runtime, synthetic loopback provider:** real editor and run_commands/test tools, follow-up, approval denial, interruption of an owned command, provider failure, exact-ID resume and prerequisite rejection passed. Bun 1.3.14 additionally exercised edit/test with the Node worker. No authenticated generation. |
+
+Material qualifications:
+
+- Pi's tool-phase abort acknowledged success but ended with native
+  `stopReason: "error"` / `"This operation was aborted"`; both languages
+  consequently returned `agent-error`, unlike streaming abort's `interrupted`.
+  This follows the current final-stop-reason contract, but limits consumers'
+  cancellation classification. [TWA-110](https://linear.app/twaldin/issue/TWA-110)
+  tracks qualification without masking genuine errors that race an abort.
+- Cline's 0.5-second disposal grace expired under a five-scenario concurrent
+  host load, reporting disposal failure and forced worker teardown. Sequential
+  runs closed cleanly. This is not a claim that disposal always succeeds under
+  load.
+- Python's historical `harness.__version__` remains `0.3.19`; use distribution
+  metadata. [TWA-109](https://linear.app/twaldin/issue/TWA-109) tracks that
+  duplicate-version-source repair, not a release-policy change.
+- Other CLI and session-native/provider combinations were not repeated by this
+  bounded matrix; their earlier evidence and limitations remain below.
+  OpenCode/OpenHands retain mock-server-only qualification. No Linux native
+  provider or Windows lifecycle qualification was performed here.
+- **Prime, Pi SDK, Codex app-server and Copilot SDK remain unsupported/deferred.**
+  Prime is not a registered adapter; [TWA-106](https://linear.app/twaldin/issue/TWA-106)
+  stays Backlog. No global shutdown, undocumented switch, publication or release
+  was used.
+
 ## Shipped versus planned
 
 The twenty-six adapters below are registered in **both** implementations and have
@@ -74,7 +125,7 @@ versions below are dated observations, not a supported version range.
 | auggie | [`@augmentcode/auggie`; CLI reference](https://docs.augmentcode.com/cli/reference) | isolated npm 0.36.0 (commit 7c61e5bb), macOS arm64, 2026-09-08 | Version/help and packaged JSON/entitlement paths checked. Native account probe returned not logged in; no authenticated provider coverage. See [limits](#auggie). |
 | aider | [`aider-chat`; CLI options](https://aider.chat/docs/config/options.html) (0.86.2; Python >=3.10,<3.13) | not on PATH | Source-checked; cached and multiple-message usage reports repaired against upstream emission. Rounded token scraper only; no session helper/provider qualification. |
 | claude-code | [`@anthropic-ai/claude-code`; CLI reference](https://code.claude.com/docs/en/cli-reference) (registry 2.1.263) | 2.1.220 | Embedded installed-binary storage code checked; actual isolated synthetic-provider session captured. Config-root/encoding/cutoff repairs below; other releases and update/approval panes unqualified. |
-| codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | Help-checked; provider smoke **failed**: configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. |
+| codex | [`@openai/codex`; upstream](https://github.com/openai/codex) | 0.153.4 | **2026-09-08 (TWA-68):** help-checked; provider smoke failed because the configured ChatGPT account rejected default `gpt-5.3-codex` and explicit `gpt-5.4` with HTTP 400. Both language runs cleaned up; no silent model fallback. **2026-09-10 (TWA-89):** explicit `gpt-6-astra` passed authenticated edit/test runs in both installed consumers; `gpt-5.4` remained rejected. See the [dated consumer matrix](#installed-consumer-qualification--2026-09-10) for scope and limits. |
 | continue-cli | [`@continuedev/cli`; headless mode](https://docs.continue.dev/cli/headless-mode) (1.5.47) | not on PATH | Source-checked after command/rule/model repair. Headless JSON is model output, not usage telemetry. Default ask-tier tools are excluded; explicit bypass adds `--auto`. |
 | copilot | [`@github/copilot`; programmatic reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference) | 1.0.83, isolated npm install | Help-checked; bounded no-tool provider success and cancellation on macOS arm64. JSONL records retained; token/USD totals unavailable. See [coverage limits](#copilot). |
 | mistral-vibe | [`mistral-vibe`; official source](https://github.com/mistralai/mistral-vibe/tree/v2.25.0) | 2.25.0, isolated Python 3.12 install | Version/help and programmatic source checked; see [native smoke and provider limits](#mistral-vibe). |

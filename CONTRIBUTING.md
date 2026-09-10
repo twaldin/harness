@@ -467,6 +467,10 @@ Check specifically that:
   caller-installed package selected by absolute `packageRoot` — never a hard
   requirement, so a default install still imports and answers capability queries
   without it;
+- the Python wheel retains `harness/py.typed`, so consumers can use its inline
+  annotations. The `installed-python-types` CI job installs the wheel and
+  mypy in a fresh environment, then checks `tests/typing/consumer.py` outside
+  the source tree; the same probe must reject incorrectly typed options;
 - the built TypeScript declarations expose the new types
   (`cd ts && bun run build` runs `tsc -p tsconfig.build.json`);
 - packaged Node runs pass: `cd ts && bun run build && node tests/node-<name>.mjs`.

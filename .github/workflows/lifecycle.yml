@@ -72,3 +72,24 @@ jobs:
       - name: Built-package caller-owned OpenHands conformance (Node)
         run: node tests/node-openhands.mjs
         working-directory: ts
+
+  installed-python-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: astral-sh/setup-uv@v6
+      - name: Check types from an isolated wheel consumer
+        run: |
+          uv build --wheel
+          consumer="$(mktemp -d)"
+          uv venv "$consumer/.venv"
+          uv pip install --python "$consumer/.venv/bin/python" dist/*.whl mypy==2.3.1
+          cp tests/typing/consumer.py "$consumer/consumer.py"
+          cd "$consumer"
+          .venv/bin/python -I -c 'import harness, pathlib, sys; assert pathlib.Path(harness.__file__).is_relative_to(pathlib.Path(sys.prefix)); print(harness.__file__)'
+          .venv/bin/mypy --strict consumer.py
